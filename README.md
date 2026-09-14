@@ -1,18 +1,112 @@
-# Bot War Room V1
+# Bot War Room V2
 
-A repo-ready V1 for an 8-agent crypto trading war room. The UI shows specialized agents debating a token, a deterministic safety layer with veto power, a CIO decision, and a paper-only executor.
+A GitHub-ready V2 foundation for an 8-agent, multi-chain crypto trading research and paper-execution system.
 
-## What ships in V1
+## What changed from V1
 
-- 8 visible agents: Launch Scout, Social Scout, Wallet Tracker, Quant Bot, Contract Bot, Bear Bot, CIO, Executor
-- Live conference-room dashboard with rotating bot discussion
-- Server-side consensus engine
-- Deterministic hard risk checks that AI cannot override
-- BUY / WATCH / SKIP decision flow
-- Paper-mode executor only; no wallet signing
-- Mock Solana market cycles so the repo runs without API keys
-- Provider-ready environment variables for Anthropic, Helius, Jupiter, and Birdeye
-- Responsive desktop/mobile layout
+V2 moves the project from a Solana-oriented dashboard demo into a chain-agnostic trading architecture inspired by strong patterns from open-source multi-agent and systematic trading projects.
+
+### Supported chain abstractions
+
+- Solana
+- Ethereum
+- Base
+- BNB Chain
+- Monad
+- Robinhood Chain
+
+All six chains enter the same War Room, CIO, deterministic risk gate, and execution request schema. Solana routes through a Solana-family adapter boundary; the other five use the EVM-family boundary.
+
+## Eight-agent team
+
+1. **Launch Scout** — discovery, age, volume acceleration and launch quality.
+2. **Social Scout** — narrative/social velocity.
+3. **Wallet Tracker** — tracked wallet and smart-money flow.
+4. **Quant Bot** — price/volume/liquidity/volatility structure.
+5. **Contract Bot** — chain-aware contract and token security checks.
+6. **Bear Bot** — red-team critique; looks for the strongest reason not to trade.
+7. **CIO** — combines research scores into a constrained decision.
+8. **Executor** — the only role allowed to create an execution request.
+
+The AI/agent layer never gets veto power over deterministic risk controls.
+
+## V2 decision pipeline
+
+```text
+chain opportunity
+      |
+      v
+6 research agents
+      |
+      v
+Bear / red-team pass
+      |
+      v
+CIO decision + conviction
+      |
+      v
+deterministic risk gate  <--- cannot be overridden by AI
+      |
+      v
+shared ExecutionRequest
+      |
+      +--> paper adapter now
+      |
+      +--> live adapter later, only after strategy + global approval
+```
+
+## Experiment Lab
+
+Every strategy is meant to move through a promotion pipeline instead of being sent directly to a wallet:
+
+```text
+RESEARCH -> BACKTEST -> OOS -> PAPER -> LIVE
+```
+
+V2 includes an experiment object, metrics, and automatic promotion gates based on:
+
+- evaluated trades
+- expectancy
+- maximum drawdown
+- profit factor
+- observed slippage
+
+The default experiment is intentionally kept in **PAPER** even when its promotion metrics pass. Live promotion should require a deliberate governance action and live trading remains disabled by default.
+
+## Paper/live parity
+
+The important V2 design rule is that strategy logic does not know whether an order is paper or live. It produces the same `ExecutionRequest` either way.
+
+Paper mode sends that request to `executePaper()`.
+
+A future live mode will send the same request to a chain adapter after these checks:
+
+- strategy is approved for LIVE
+- global live trading switch is enabled
+- deterministic risk gate passes
+- chain adapter is healthy
+- quote/slippage checks pass immediately before signing
+
+This minimizes differences between what is tested and what eventually trades.
+
+## Deterministic risk checks
+
+Current V2 hard blocks include:
+
+- sellability failure
+- honeypot behavior
+- top-10 concentration above 80%
+- bundled supply above 25%
+- executable liquidity below minimum
+- sell tax above hard cap
+- daily loss kill-switch
+- maximum open positions
+- portfolio exposure limit
+- per-chain exposure limit
+- Solana mint authority still enabled
+- Solana freeze authority still enabled
+
+Warnings reduce maximum position size even if a trade is not vetoed.
 
 ## Run locally
 
@@ -23,85 +117,76 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-For a production check:
+The dashboard uses simulated market feeds and cannot submit a real transaction.
+
+## Smoke tests
+
+The core engine does not need Next.js or React to run its smoke tests:
 
 ```bash
-npm run typecheck
-npm run build
-npm start
+npm run smoke
 ```
 
-## Architecture
+The test currently checks all six chains and verifies that a forced honeypot is vetoed before execution.
 
-```text
-Market data / future providers
-          |
-          v
-  Launch / Social / Wallet / Quant / Contract / Bear
-          |                    |
-          +--------+-----------+
-                   v
-          deterministic risk layer
-                   |
-             hard veto first
-                   v
-                  CIO
-                   |
-             BUY/WATCH/SKIP
-                   v
-               Executor
-             (paper only V1)
+## API routes
+
+### `POST /api/cycle`
+Runs a new multi-agent paper-analysis cycle.
+
+Example request:
+
+```json
+{
+  "chain": "Base",
+  "mode": "paper"
+}
 ```
 
-The hard safety layer is implemented in `lib/risk.ts`. The multi-agent scoring engine is in `lib/engine.ts`. The demo feed is in `lib/mock-market.ts`.
+### `POST /api/paper`
+Consumes an approved paper `ExecutionRequest` and simulates chain-aware slippage and fees.
 
-## Hard V1 safety rules
+The endpoint rejects live requests.
 
-A setup is blocked if any of these are true:
+### `GET /api/experiments`
+Returns the current core experiment and promotion state.
 
-- sellability check fails
-- mint authority remains enabled
-- freeze authority remains enabled
-- top 10 holders exceed 80%
-- bundled supply exceeds 25%
-- executable liquidity is below the V1 floor
+## Railway
 
-Position sizing is capped separately by the deterministic risk layer.
+V2 still runs as one Next.js service for the demo. The next infrastructure milestone should split into:
 
-## Turning this into the real trading version
+1. Web/API service
+2. Bot/market worker
+3. Isolated execution worker
+4. Postgres
+5. Redis/queue
 
-Keep the UI and engine contracts, then replace `lib/mock-market.ts` with server-only adapters:
+Only the isolated execution worker should ever receive live wallet-signing credentials.
 
-1. **Helius** — on-chain token, wallet, holder and transaction intelligence.
-2. **Birdeye / DEX data** — price, liquidity, volume, token discovery and market structure.
-3. **Anthropic** — optional language/reasoning layer for agent summaries and debate. Do not let the model bypass deterministic rules.
-4. **Jupiter** — quote and swap execution. Keep private keys server-side and only expose signing to the Executor.
-5. **Database** — persist opportunities, agent opinions, paper/live trades, fills, outcomes and learning metrics.
+## Environment variables
 
-## Suggested production folders for V2
+Copy `.env.example` to `.env.local` when real integrations are added.
 
-```text
-lib/providers/helius.ts
-lib/providers/birdeye.ts
-lib/providers/anthropic.ts
-lib/providers/jupiter.ts
-lib/execution/paper.ts
-lib/execution/live.ts
-lib/db/
-```
+No API key is required for the included demo/paper feed.
+
+## Real-data adapters planned
+
+- Solana RPC / Helius-style on-chain data
+- Jupiter-style Solana quote/execution adapter
+- EVM RPC providers
+- EVM DEX/aggregator quote adapter
+- market/DEX feeds for liquidity and price
+- social/news provider
+- persistent Postgres trade/experiment journal
+
+V2 intentionally defines the boundaries before tying the project to any one vendor.
+
+## Open-source design notes
+
+See `docs/OPEN_SOURCE_DESIGN.md`.
+
+V2 reimplements architecture ideas rather than copying GPL/AGPL source. If source code from a third-party project is incorporated later, its license and attribution must be reviewed before merge.
 
 ## Important
 
-V1 is intentionally paper/demo only. It is designed to validate the interface, agent responsibilities, consensus behavior, and safety architecture before real funds are connected.
-
-## Deploy
-
-### Railway
-
-This repo includes `Dockerfile` and `railway.toml`. Connect the GitHub repo to Railway and deploy; V1 does not require environment variables.
-
-### Vercel
-
-Import the GitHub repository into Vercel as a Next.js project. No V1 secrets are required.
-
-Before enabling any future live execution, add provider credentials only as server-side deployment secrets—never commit them to GitHub.
+This repository is an experimental trading system. Backtests, paper results, public project claims and AI confidence scores do not guarantee live profitability. Transaction costs, liquidity, failed transactions, MEV, latency and market regime changes can materially change results.
