@@ -1,0 +1,42 @@
+{
+  "version": "2.10.0",
+  "name": "Launch Velocity \u2014 Native Newborn Meme Speed Metrics",
+  "features": {
+    "v29_eight_bot_meme_council_retained": true,
+    "launch_velocity_engine": true,
+    "holders_per_minute": true,
+    "transactions_per_minute": true,
+    "unique_buyers_per_minute": true,
+    "volume_usd_per_minute": true,
+    "liquidity_formation_per_minute": true,
+    "holder_acceleration": true,
+    "transaction_acceleration": true,
+    "volume_acceleration": true,
+    "newborn_totals_to_rate_fallback": true,
+    "wallet_tracker_launch_velocity": true,
+    "launch_scout_launch_velocity": true,
+    "quant_launch_velocity": true,
+    "alpha_launch_velocity": true,
+    "meme_regime_launch_velocity": true,
+    "hard_risk_vetoes_unchanged": true,
+    "v28_winner_engine_retained": true,
+    "no_average_down": true,
+    "controlled_reentry": true,
+    "live_trading_gates_unchanged": true
+  },
+  "new_files": [
+    "launch-velocity.ts"
+  ],
+  "major_changed_files": [
+    "types.ts",
+    "alpha-engine.ts",
+    "meme-regime.ts",
+    "engine.ts",
+    "discovery.ts",
+    "WarRoomDashboard.tsx",
+    "prepare-structure.mjs",
+    "package.json",
+    "UPDATE_NOTES.md",
+    "V2.10_TEST_REPORT.md"
+  ]
+}

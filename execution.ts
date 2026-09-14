@@ -10,16 +10,19 @@ export function buildExecutionPlan(args: {
   portfolio: PortfolioRiskContext;
   experiment: StrategyExperiment;
   decisionId: string;
+  allocationMultiplier?: number;
 }): ExecutionPlan {
   const { mode, snapshot, decision, conviction, risk, portfolio, experiment, decisionId } = args;
-  if (decision !== "BUY") return { allowed: false, mode, reason: `No entry order: CIO decision is ${decision}.` };
-  if (!risk.passed) return { allowed: false, mode, reason: "No entry order: deterministic risk gate vetoed the trade." };
-  if (mode === "live" && !portfolio.liveTradingEnabled) return { allowed: false, mode, reason: "Live trading is globally disabled." };
-  if (experiment.stage !== "paper" && mode === "paper") return { allowed: false, mode, reason: `Experiment stage ${experiment.stage} is not approved for paper execution.` };
-  if (experiment.stage !== "live" && mode === "live") return { allowed: false, mode, reason: "Strategy has not graduated to live stage." };
+  const allocationMultiplier = Math.max(0, Math.min(1, args.allocationMultiplier ?? 1));
+  if (decision !== "BUY") return { allowed: false, mode, allocationMultiplier, reason: `No entry order: CIO decision is ${decision}.` };
+  if (!risk.passed) return { allowed: false, mode, allocationMultiplier, reason: "No entry order: deterministic risk gate vetoed the trade." };
+  if (allocationMultiplier <= 0) return { allowed: false, mode, allocationMultiplier, reason: "No entry order: regime/alpha sizing multiplier is zero." };
+  if (mode === "live" && !portfolio.liveTradingEnabled) return { allowed: false, mode, allocationMultiplier, reason: "Live trading is globally disabled." };
+  if (experiment.stage !== "paper" && mode === "paper") return { allowed: false, mode, allocationMultiplier, reason: `Experiment stage ${experiment.stage} is not approved for paper execution.` };
+  if (experiment.stage !== "live" && mode === "live") return { allowed: false, mode, allocationMultiplier, reason: "Strategy has not graduated to live stage." };
 
-  const notionalUsd = Number((portfolio.equityUsd * (risk.maxPositionPct / 100)).toFixed(2));
-  if (notionalUsd <= 0) return { allowed: false, mode, reason: "Risk engine allocated zero notional." };
+  const notionalUsd = Number((portfolio.equityUsd * (risk.maxPositionPct / 100) * allocationMultiplier).toFixed(2));
+  if (notionalUsd <= 0) return { allowed: false, mode, allocationMultiplier, reason: "Risk engine allocated zero notional." };
 
   const request: ExecutionRequest = {
     mode,
@@ -32,12 +35,12 @@ export function buildExecutionPlan(args: {
     strategyId: experiment.id,
     decisionId,
   };
-  return { allowed: true, mode, request, reason: `${mode.toUpperCase()} execution approved by CIO + deterministic risk gate.` };
+  return { allowed: true, mode, request, allocationMultiplier, reason: `${mode.toUpperCase()} execution approved by alpha + CIO + deterministic risk gate.` };
 }
 
 export async function executePaper(request: ExecutionRequest, snapshot: MarketSnapshot): Promise<PaperFill> {
   if (request.mode !== "paper") throw new Error("Paper executor only accepts paper requests");
-  getChainConfig(request.chain); // verifies supported chain and preserves a shared routing boundary with live mode.
+  getChainConfig(request.chain);
   const simulatedSlippageBps = Math.min(request.maxSlippageBps, Math.max(8, Math.round((request.notionalUsd / Math.max(snapshot.liquidity, 1)) * 10_000 * 0.65 + snapshot.volatility * 18)));
   const priceImpact = request.side === "BUY" ? 1 + simulatedSlippageBps / 10_000 : 1 - simulatedSlippageBps / 10_000;
   const feeRate = snapshot.chainFamily === "solana" ? 0.0015 : 0.0025;
