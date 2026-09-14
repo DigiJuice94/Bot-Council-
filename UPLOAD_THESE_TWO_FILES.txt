@@ -1,0 +1,2 @@
+Upload BOTH files to the ROOT of DigiJuice94/Bot-Council- and replace package.json when GitHub asks.
+Railway will then rebuild. The prebuild script restores app/, components/, lib/, and API route folders from the flattened files already in your repo before Next.js runs.
