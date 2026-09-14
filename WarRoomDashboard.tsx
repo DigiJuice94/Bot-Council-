@@ -91,6 +91,9 @@ function DecisionCard({ result, replaying }: { result: WarRoomResult | null; rep
 }
 
 function CouncilBot({ bot, index, active, speech, context }: { bot: AgentOpinion; index: number; active: boolean; speech?: string; context?: string }) {
+  // The bot/table artwork now comes directly from the supplied reference image.
+  // These lightweight anchors preserve live speech replay and identify the active council seat
+  // without redrawing the characters in CSS.
   return (
     <div className={`council-bot bot-pos-${index} ${active ? "speaking" : ""}`}>
       {active && (
@@ -100,16 +103,7 @@ function CouncilBot({ bot, index, active, speech, context }: { bot: AgentOpinion
           <span>{speech ?? bot.summary}</span>
         </div>
       )}
-      <div className="chair-shape" />
-      <div className={`bot-character expression-${index}`}>
-        <div className="orb-head">
-          <span className="eye eye-left" /><span className="eye eye-right" /><span className="mouth" />
-        </div>
-        <div className="bot-torso" />
-        <span className="arm arm-left" /><span className="arm arm-right" />
-        <span className="hand hand-left" /><span className="hand hand-right" />
-      </div>
-      <div className="bot-laptop"><span>⌁</span></div>
+      {active && <span className="active-seat-pulse" aria-hidden="true" />}
       <div className="bot-name-tag">{bot.shortName}</div>
     </div>
   );
@@ -283,7 +277,7 @@ export default function WarRoomDashboard() {
       <section id="live" className="council-stage">
         <div key={displayedDecisionKey} className="decision-card-slot"><DecisionCard result={roomResult} replaying={Boolean(talking && replayResult?.decisionId === roomResult?.decisionId)} /></div>
         <div className="table-scene" aria-label="Bot council meeting room">
-          <div className="conference-table-light"><div className="table-surface-glow" /></div>
+          <img className="council-reference-art" src="/bot-council-reference.png" alt="" draggable={false} />
           {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={talking && bot.id === currentTurn?.agentId} speech={bot.id === currentTurn?.agentId ? currentTurn?.message : undefined} context={bot.id === currentTurn?.agentId && replayResult ? `$${replayResult.snapshot.symbol} · ${currentTurn?.round}` : undefined} />)}
         </div>
         <div className="live-caption"><span className={talking ? "status-dot talking" : "status-dot"} />{talking ? `${currentSpeaker?.name ?? "Council"} replaying $${replayResult?.snapshot.symbol ?? ""} · ${currentTurn?.round ?? "discussion"}` : running ? "Scout analyzing next candidate" : "Scout scanning · Position Guardian watching open trades"}</div>

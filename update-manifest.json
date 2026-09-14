@@ -1,6 +1,6 @@
 {
-  "version": "2.10.0",
-  "name": "Launch Velocity \u2014 Native Newborn Meme Speed Metrics",
+  "version": "2.10.1",
+  "name": "Launch Velocity \u2014 Council Reference Artwork Fix",
   "features": {
     "v29_eight_bot_meme_council_retained": true,
     "launch_velocity_engine": true,
@@ -22,10 +22,14 @@
     "v28_winner_engine_retained": true,
     "no_average_down": true,
     "controlled_reentry": true,
-    "live_trading_gates_unchanged": true
+    "live_trading_gates_unchanged": true,
+    "exact_supplied_council_reference_art": true,
+    "dynamic_speech_replay_over_reference_art": true,
+    "css_drawn_bot_standins_removed": true
   },
   "new_files": [
-    "launch-velocity.ts"
+    "launch-velocity.ts",
+    "bot-council-reference.png"
   ],
   "major_changed_files": [
     "types.ts",
@@ -37,6 +41,7 @@
     "prepare-structure.mjs",
     "package.json",
     "UPDATE_NOTES.md",
-    "V2.10_TEST_REPORT.md"
+    "V2.10_TEST_REPORT.md",
+    "globals.css"
   ]
 }

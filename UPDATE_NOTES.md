@@ -51,3 +51,12 @@ That is enough for Wallet Tracker/Quant/Alpha to understand the launch without i
 The exact V2.10 replay changes the direct-fields FONE result from **WATCH in V2.9** to **BUY in V2.10**, while the 13-hour distribution snapshot remains **SKIP / Meme Exhaustion**.
 
 This is a heuristic/data-architecture improvement, not proof of future profitability. It still needs broad timestamped out-of-sample testing.
+
+## V2.10.1 UI patch — supplied council artwork
+- Replaced the CSS-drawn bot/chair/laptop stand-ins with the exact bot/table artwork from the supplied V2.4 reference image.
+- The reference was cropped only to isolate the council/table scene; the characters were not regenerated or redrawn.
+- The live decision card remains dynamic and independent from the artwork.
+- Eight invisible seat anchors remain mapped to the eight council roles so the real debate replay can still show speech bubbles over the correct bot.
+- Active speaker pulse/name tag remains code-driven.
+- `prepare-structure.mjs` now copies `bot-council-reference.png` into `/public` during Railway/Next build reconstruction.
+- Trading logic, V2.10 Launch Velocity, risk gates, Winner Engine, and eight-bot decision process are unchanged.

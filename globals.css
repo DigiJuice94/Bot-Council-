@@ -25,3 +25,110 @@
 @media (max-width: 720px) {
   .decision-context-mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* V2.10 council artwork correction
+   Use the exact supplied V2.4 bot/table reference art instead of CSS-drawn stand-ins.
+   Dynamic speech replay remains code-driven via seat anchors layered over the image. */
+.council-stage {
+  height: 1010px;
+  max-height: 1120px;
+}
+.table-scene {
+  top: 314px;
+  bottom: auto;
+  height: 690px;
+  overflow: visible;
+}
+.council-reference-art {
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  top: 0;
+  width: min(1440px, 95vw);
+  height: auto;
+  transform: translateX(-50%);
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+.conference-table-light,
+.table-surface-glow,
+.council-bot .chair-shape,
+.council-bot .bot-character,
+.council-bot .bot-laptop {
+  display: none !important;
+}
+.council-bot {
+  z-index: 30;
+  width: 1px;
+  height: 1px;
+  transform: none !important;
+  transform-origin: center;
+  filter: none !important;
+}
+.council-bot.speaking {
+  transform: none !important;
+}
+.bot-pos-0 { left: 10.2%; top: 39.5%; right: auto; }
+.bot-pos-1 { left: 28.5%; top: 23.5%; right: auto; }
+.bot-pos-2 { left: 49.1%; top: 19.3%; right: auto; }
+.bot-pos-3 { left: 69.1%; top: 23.8%; right: auto; }
+.bot-pos-4 { left: 86.0%; top: 39.8%; right: auto; }
+.bot-pos-5 { left: 20.2%; top: 64.0%; right: auto; }
+.bot-pos-6 { left: 62.0%; top: 75.0%; right: auto; }
+.bot-pos-7 { left: 78.6%; top: 64.5%; right: auto; }
+.council-bot .speech-pop {
+  bottom: 36px;
+  width: 220px;
+}
+.council-bot .bot-name-tag {
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.92);
+  border: 1px solid #e4e7eb;
+  box-shadow: 0 5px 12px #11182710;
+  opacity: 0;
+  white-space: nowrap;
+}
+.council-bot.speaking .bot-name-tag { opacity: 1; }
+.active-seat-pulse {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid #16c987;
+  box-shadow: 0 0 0 7px rgba(22,201,135,.10);
+  animation: councilSeatPulse 1s ease-in-out infinite;
+}
+@keyframes councilSeatPulse {
+  50% { box-shadow: 0 0 0 13px rgba(22,201,135,.03); }
+}
+@media (max-width: 1100px) {
+  .council-stage { height: 900px; }
+  .table-scene { top: 300px; height: 590px; }
+  .council-reference-art { width: min(1260px, 112vw); }
+}
+@media (max-width: 760px) {
+  .council-stage { height: 820px; min-height: 820px; }
+  .table-scene {
+    top: 310px;
+    left: -19%;
+    width: 138%;
+    height: 500px;
+    transform: none;
+  }
+  .council-reference-art { width: 100%; }
+  .council-bot { transform: none !important; }
+  .council-bot.speaking { transform: none !important; }
+  .council-bot .speech-pop { width: 175px; bottom: 28px; }
+}
+@media (max-width: 480px) {
+  .council-stage { height: 760px; min-height: 760px; }
+  .table-scene { top: 330px; left: -31%; width: 162%; height: 420px; }
+}

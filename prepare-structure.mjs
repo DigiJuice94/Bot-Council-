@@ -7,6 +7,7 @@ const mappings = [
   ['layout.tsx', 'app/layout.tsx'],
   ['globals.css', 'app/globals.css'],
   ['WarRoomDashboard.tsx', 'components/WarRoomDashboard.tsx'],
+  ['bot-council-reference.png', 'public/bot-council-reference.png'],
   ['chains.ts', 'lib/chains.ts'],
   ['debate.ts', 'lib/debate.ts'],
   ['alpha-engine.ts', 'lib/alpha-engine.ts'],
