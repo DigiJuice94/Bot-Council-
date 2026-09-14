@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const root = process.cwd();
@@ -17,6 +17,7 @@ const mappings = [
   ['route.ts', 'app/api/cycle/route.ts'],
   ['route (1).ts', 'app/api/paper/route.ts'],
   ['route (2).ts', 'app/api/experiments/route.ts'],
+  ['smoke.ts', 'tests/smoke.ts'],
 ];
 
 let restored = 0;
@@ -29,6 +30,15 @@ for (const [sourceRel, destRel] of mappings) {
     restored += 1;
     console.log(`[structure] restored ${destRel}`);
   }
+}
+
+// A flattened GitHub upload can leave smoke.ts at the repo root. Its ../lib imports
+// are only correct from tests/smoke.ts, so remove the root duplicate after restoring it.
+const flatSmoke = resolve(root, 'smoke.ts');
+const structuredSmoke = resolve(root, 'tests/smoke.ts');
+if (existsSync(flatSmoke) && existsSync(structuredSmoke)) {
+  unlinkSync(flatSmoke);
+  console.log('[structure] removed flattened smoke.ts duplicate');
 }
 
 if (!existsSync(resolve(root, 'app/page.tsx')) || !existsSync(resolve(root, 'app/layout.tsx'))) {
