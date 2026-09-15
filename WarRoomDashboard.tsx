@@ -12,6 +12,7 @@ type AutopilotPayload = {
   dataMode: "adapter" | "birdeye" | "dexscreener";
   intervalMs: number;
   scanningChains: string[];
+  chainStats?: Record<string, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>;
   currentChain: string;
   lastScanAt?: string;
   nextScanAt?: string;
@@ -115,6 +116,7 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: {
     ? "0,7 18,14 34,10 50,23 65,18 83,31 99,27 120,39"
     : "0,36 18,27 34,31 50,20 65,29 83,14 99,19 120,2";
   const source = result.snapshot.dataProvenance?.marketSource === "birdeye" ? "Birdeye + DEX live"
+    : result.snapshot.dataProvenance?.marketSource === "geckoterminal" ? "GeckoTerminal new pool + DEX live"
     : result.snapshot.dataProvenance?.marketSource === "dexscreener" ? "DEX Screener live" : "Live adapter";
 
   return (
@@ -285,6 +287,7 @@ export default function WarRoomDashboard() {
           <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
         </div>
         <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 6}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
+        <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
         <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
       </section>

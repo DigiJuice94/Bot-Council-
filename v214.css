@@ -112,3 +112,51 @@
   .decision-card-slot{top:12px!important;width:min(94vw,620px)!important}
   .table-scene:before{height:82px}
 }
+
+
+/* V2.15 — seven-chain scanner telemetry */
+.chain-scan-grid{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:8px;
+  margin:14px 0 12px;
+}
+.chain-scan{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  min-width:0;
+  padding:9px 10px;
+  border:1px solid #e8eaee;
+  border-radius:12px;
+  background:#fff;
+}
+.chain-scan>i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#c8ccd2;
+  box-shadow:0 0 0 4px #c8ccd218;
+}
+.chain-scan.active>i{
+  background:#16c987;
+  box-shadow:0 0 0 5px #16c98716;
+}
+.chain-scan b{
+  font-size:10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.chain-scan small{
+  color:#8a909a;
+  font-size:8px;
+  line-height:1.25;
+  white-space:nowrap;
+}
+@media(max-width:1050px){
+  .chain-scan-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:620px){
+  .chain-scan-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { applyFreshChainPatch } from './fresh-chain-patch.mjs';
 
 const root = process.cwd();
 
@@ -87,5 +88,7 @@ if (!existsSync(resolve(root, 'app/page.tsx')) || !existsSync(resolve(root, 'app
   console.error('[structure] Next.js app directory could not be restored. Upload the full repo structure.');
   process.exit(1);
 }
+
+applyFreshChainPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);

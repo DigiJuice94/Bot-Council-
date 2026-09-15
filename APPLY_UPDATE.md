@@ -1,9 +1,10 @@
-# Apply V2.14.4
+# Apply Bot War Room V2.15
 
-Use this instead of V2.14.3.
+Upload the contents of this folder/ZIP into the repository root, replacing same-named files.
 
-Replace/upload the files from this ZIP into the repo root. The build script will map:
-- `WarRoomDashboard.tsx` -> `components/WarRoomDashboard.tsx`
-- `v214.css` -> `app/v214.css`
+The normal Railway build command remains:
+`node prepare-structure.mjs && next build`
 
-This restores the original council artwork and keeps the V2.14 research engine intact.
+During `prepare-structure.mjs`, V2.15 applies the fresh-chain patch to the generated `lib/` files before Next.js compiles them.
+
+No new API key is required for the GeckoTerminal public new-pool discovery layer.
