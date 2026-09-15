@@ -13,3 +13,48 @@
 @media(max-width:720px){.v214-research{padding:18px;border-radius:22px}.v214-hero-row{display:block}.v214-live-lock{margin-top:16px;text-align:left;width:100%}.v214-code-head{display:block}.v214-code-head p{text-align:left;margin-top:8px}.v214-progress-labels{grid-template-columns:1fr 1fr}.v214-progress-labels span:nth-child(2),.v214-progress-labels span:nth-child(3),.v214-progress-labels span:last-child{text-align:left}.v214-stat-grid{grid-template-columns:repeat(2,1fr)}.v214-metric-strip{grid-template-columns:repeat(2,1fr)}.v214-two-col{grid-template-columns:1fr}.v214-autopsy{grid-template-columns:1fr}.v214-case-head,.v214-case-row{grid-template-columns:1.3fr .8fr .8fr}.v214-case-head span:nth-child(4),.v214-case-row em{display:none}.v214-lessons>div{grid-template-columns:58px 1fr}.v214-lessons time{display:none}}
 /* Release label upgrade without replacing the large V2.13 dashboard component. */
 .stage-brand strong{font-size:0}.stage-brand strong::after{content:"Bot War Room V2.14";font-size:14px;letter-spacing:-.02em}
+
+/* V2.14.1 — tighter decision card / pure-white council stage */
+.council-stage{
+  background:#fff!important;
+}
+.decision-card-slot{
+  top:24px!important;
+  width:min(640px,calc(100vw - 32px))!important;
+}
+.decision-card{
+  border:0!important;
+  border-radius:14px!important;
+  box-shadow:0 18px 48px rgba(17,24,39,.13),0 3px 10px rgba(17,24,39,.05)!important;
+  padding:14px 18px 15px!important;
+}
+.decision-card-top{
+  padding-bottom:10px!important;
+}
+.decision-stats{
+  margin-top:9px!important;
+}
+.decision-stats>div{
+  min-height:50px!important;
+  padding-top:2px!important;
+  padding-bottom:2px!important;
+}
+.decision-thesis{
+  margin:8px 0 9px!important;
+}
+.decision-options{
+  gap:10px!important;
+}
+.decision-options span{
+  height:42px!important;
+  border-radius:8px!important;
+}
+.decision-context-mini{
+  margin-top:7px!important;
+  margin-bottom:8px!important;
+}
+@media(max-width:720px){
+  .decision-card-slot{top:16px!important;width:min(94vw,620px)!important}
+  .decision-card{border-radius:12px!important;padding:12px 14px 13px!important}
+  .decision-options span{height:40px!important}
+}
