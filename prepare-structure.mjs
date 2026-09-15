@@ -3,8 +3,6 @@ import { dirname, resolve } from 'node:path';
 
 const root = process.cwd();
 
-// Production runtime uses REAL market data only. Legacy demo/test files must never
-// participate in the Railway build, even if an older upload left them behind.
 for (const staleFile of ['smoke.ts', 'mock-market.ts']) {
   const target = resolve(root, staleFile);
   if (existsSync(target)) {
@@ -13,9 +11,6 @@ for (const staleFile of ['smoke.ts', 'mock-market.ts']) {
   }
 }
 
-// Compact releases are often uploaded over an older Railway working tree.
-// Remove generated folders first so stale files from prior versions cannot
-// participate in Next.js/TypeScript builds (for example old tests/smoke.ts).
 for (const generatedDir of ['app', 'lib', 'components', 'tests']) {
   const target = resolve(root, generatedDir);
   if (existsSync(target)) {
@@ -28,7 +23,11 @@ const mappings = [
   ['page.tsx', 'app/page.tsx'],
   ['layout.tsx', 'app/layout.tsx'],
   ['globals.css', 'app/globals.css'],
+  ['v213.css', 'app/v213.css'],
+  ['v214.css', 'app/v214.css'],
   ['WarRoomDashboard.tsx', 'components/WarRoomDashboard.tsx'],
+  ['DiagnosticsPanel.tsx', 'components/DiagnosticsPanel.tsx'],
+  ['RunnerResearchPanel.tsx', 'components/RunnerResearchPanel.tsx'],
   ['bot-council-reference.png', 'public/bot-council-reference.png'],
   ['council-art.ts', 'lib/council-art.ts'],
   ['autopilot.ts', 'lib/autopilot.ts'],
@@ -42,6 +41,9 @@ const mappings = [
   ['profitability-store.ts', 'lib/profitability-store.ts'],
   ['reflection.ts', 'lib/reflection.ts'],
   ['discovery.ts', 'lib/discovery.ts'],
+  ['provider-waterfall.ts', 'lib/provider-waterfall.ts'],
+  ['runner-research.ts', 'lib/runner-research.ts'],
+  ['live-gate.ts', 'lib/live-gate.ts'],
   ['backtest.ts', 'lib/backtest.ts'],
   ['exit-strategy.ts', 'lib/exit-strategy.ts'],
   ['learning.ts', 'lib/learning.ts'],

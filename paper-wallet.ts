@@ -4,12 +4,21 @@ import { markProviderFailure, markProviderSuccess } from "./provider-health";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
 const REDIS_KEY = "bot-war-room:paper-wallet:v2-real-market";
+const RESET_META_KEY = "bot-war-room:paper-wallet:v214:reset-meta";
 const DEFAULT_STARTING_CASH_USD = 1_000;
 const MAX_FILL_HISTORY = 250;
 
 let redisPromise: Promise<any | null> | null = null;
 let memoryState: PaperWalletState | null = null;
+let memoryResetMeta: PaperWalletResetMeta | null = null;
 let mutationLock: Promise<void> = Promise.resolve();
+
+export type PaperWalletResetMeta = {
+  resets: number;
+  totalInjectedUsd: number;
+  lastResetAt?: string;
+  lastReason?: string;
+};
 
 function configuredStartingCash() {
   const raw = Number(process.env.PAPER_STARTING_CASH_USD ?? DEFAULT_STARTING_CASH_USD);
@@ -85,6 +94,20 @@ async function writeState(state: PaperWalletState): Promise<void> {
   if (redis) await redis.set(REDIS_KEY, JSON.stringify(state));
 }
 
+async function readResetMeta(): Promise<PaperWalletResetMeta> {
+  const redis = await getRedis();
+  if (!redis) return memoryResetMeta ??= { resets: 0, totalInjectedUsd: 0 };
+  const raw = await redis.get(RESET_META_KEY);
+  if (!raw) return { resets: 0, totalInjectedUsd: 0 };
+  try { return JSON.parse(raw) as PaperWalletResetMeta; } catch { return { resets: 0, totalInjectedUsd: 0 }; }
+}
+
+async function writeResetMeta(meta: PaperWalletResetMeta) {
+  memoryResetMeta = meta;
+  const redis = await getRedis();
+  if (redis) await redis.set(RESET_META_KEY, JSON.stringify(meta));
+}
+
 async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" | "memory"): Promise<PaperWalletSnapshot> {
   let state = stateInput;
   const positions = await listManagedPositions();
@@ -123,6 +146,61 @@ export async function getPaperWallet(): Promise<PaperWalletSnapshot> {
   return calculateSnapshot(state, storage);
 }
 
+export async function getPaperWalletResetMeta(): Promise<PaperWalletResetMeta> {
+  return readResetMeta();
+}
+
+/**
+ * Research must not stop just because an experimental paper bankroll went bust.
+ * Refill only when no position is still open, so an empty cash balance caused by
+ * deployed capital is never mistaken for bankruptcy. Fill history is preserved.
+ */
+export async function ensurePaperWalletResearchFunds(): Promise<{
+  wallet: PaperWalletSnapshot;
+  resetPerformed: boolean;
+  resetMeta: PaperWalletResetMeta;
+}> {
+  let wallet = await getPaperWallet();
+  let resetMeta = await readResetMeta();
+  const threshold = Math.max(0, Number(process.env.PAPER_AUTO_REFILL_THRESHOLD_USD ?? 1));
+  if (process.env.PAPER_AUTO_REFILL_ON_ZERO === "false" || wallet.openPositions > 0 || wallet.equityUsd > threshold) {
+    return { wallet, resetPerformed: false, resetMeta };
+  }
+
+  let resetPerformed = false;
+  const task = mutationLock.then(async () => {
+    const { state: current, storage } = await readState();
+    const snapshot = await calculateSnapshot(current, storage);
+    if (snapshot.openPositions > 0 || snapshot.equityUsd > threshold) {
+      wallet = snapshot;
+      return;
+    }
+    const startingCashUsd = configuredStartingCash();
+    const now = new Date().toISOString();
+    const next: PaperWalletState = {
+      ...current,
+      startingCashUsd,
+      cashUsd: startingCashUsd,
+      dayKey: dayKey(),
+      dayStartEquityUsd: startingCashUsd,
+      updatedAt: now,
+    };
+    resetMeta = {
+      resets: resetMeta.resets + 1,
+      totalInjectedUsd: Number((resetMeta.totalInjectedUsd + startingCashUsd).toFixed(2)),
+      lastResetAt: now,
+      lastReason: `Research bankroll reached $${snapshot.equityUsd.toFixed(2)} with no open positions; automatically restarted at $${startingCashUsd.toFixed(2)}.`,
+    };
+    await writeState(next);
+    await writeResetMeta(resetMeta);
+    wallet = await calculateSnapshot(next, storage);
+    resetPerformed = true;
+  });
+  mutationLock = task.catch(() => undefined);
+  await task;
+  return { wallet, resetPerformed, resetMeta };
+}
+
 export async function getPaperPortfolioContext(chain: Chain): Promise<PortfolioRiskContext> {
   const wallet = await getPaperWallet();
   const positions = (await listManagedPositions()).filter((position) => position.status !== "closed");
@@ -159,7 +237,6 @@ export async function applyPaperFillToWallet(args: { fill: PaperFill; decisionId
   const task = mutationLock.then(async () => {
     const { state: current, storage } = await readState();
     const fill = args.fill;
-    // Idempotency protects the simulated ledger if a server route retries after a successful fill.
     if (current.recentFills.some((row) => row.id === fill.id)) {
       out = await calculateSnapshot(current, storage);
       return;

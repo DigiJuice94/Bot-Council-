@@ -22,12 +22,14 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const check = (ok: boolean, pass: string, fail: string) => ok ? passedChecks.push(pass) : hardBlocks.push(fail);
   const q = m.dataProvenance?.quality;
   const directLive = Boolean(m.dataProvenance?.live && m.dataProvenance.marketSource !== "adapter");
+  const paperCanExploreUnknowns = !p.liveTradingEnabled && process.env.PAPER_FAIL_CLOSED_UNKNOWN !== "true";
+  const unknown = (message: string) => paperCanExploreUnknowns ? warnings.push(`${message}; PAPER mode reduced to exploration sizing`) : hardBlocks.push(message);
 
   if (directLive && q) {
-    if (!q.sellability) hardBlocks.push("Sellability verification unavailable from live security provider");
+    if (!q.sellability) unknown("Sellability verification unavailable from live security provider");
     else check(m.sellable, "Sellability verified", "Sellability check failed");
 
-    if (!q.honeypot) hardBlocks.push("Honeypot verification unavailable from live security provider");
+    if (!q.honeypot) unknown("Honeypot verification unavailable from live security provider");
     else check(!m.honeypot, "Honeypot/security simulation passed", "Honeypot behavior detected");
 
     if (q.top10) check(m.top10Pct <= 80, "Top-10 concentration under hard cap", "Top 10 holders exceed 80% of supply");
@@ -40,7 +42,7 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
     else warnings.push("Token tax data is not verified");
 
     if (m.chainFamily === "solana") {
-      if (!q.authorities) hardBlocks.push("Solana mint/freeze authority verification unavailable");
+      if (!q.authorities) unknown("Solana mint/freeze authority verification unavailable");
       else {
         check(!m.mintAuthority, "Mint authority disabled", "Mint authority is still enabled");
         check(!m.freezeAuthority, "Freeze authority disabled", "Freeze authority is still enabled");
@@ -53,7 +55,7 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
 
     if (!q.liquidityLock) warnings.push("Liquidity lock/burn status is not verified");
     else if (!m.liquidityLocked) warnings.push("Liquidity is not verified as locked/burned");
-    if (!q.smartMoney) warnings.push("Smart-money flow provider is not connected; Wallet Tracker will not invent wallet flow");
+    if (!q.smartMoney) warnings.push("Smart-money provider is not connected; Wallet Tracker will not invent wallet labels");
     if (!q.socialVelocity) warnings.push("Social-velocity provider is not connected; Social Scout will not invent social momentum");
   } else {
     check(m.sellable, "Sellability verified", "Sellability check failed");
@@ -89,6 +91,7 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   if (warnings.length >= 2) maxPositionPct = 0.75;
   if (warnings.length >= 3) maxPositionPct = 0.5;
   if (directLive && q && (!q.top10 || !q.bundled || !q.socialVelocity || !q.smartMoney)) maxPositionPct = Math.min(maxPositionPct, 0.5);
+  if (directLive && q && (!q.sellability || !q.honeypot || (m.chainFamily === "solana" && !q.authorities))) maxPositionPct = Math.min(maxPositionPct, 0.25);
   if (m.liquidity < 50_000) maxPositionPct = Math.min(maxPositionPct, 0.5);
   maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxTotalExposurePct - p.totalExposurePct));
   maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxChainExposurePct - p.chainExposurePct));
