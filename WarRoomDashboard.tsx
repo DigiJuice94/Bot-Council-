@@ -78,6 +78,28 @@ function ago(value?: string) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function chatTone(bot: string, kind: ChatRow["kind"]) {
+  const name = bot.toLowerCase();
+  if (kind === "system" || name.includes("system")) return "system";
+  if (name.includes("cio")) return "cio";
+  if (name.includes("launch")) return "launch";
+  if (name.includes("social")) return "social";
+  if (name.includes("wallet")) return "wallet";
+  if (name.includes("quant")) return "quant";
+  if (name.includes("contract")) return "contract";
+  if (name.includes("bear")) return "bear";
+  if (name.includes("executor")) return "executor";
+  if (name.includes("guardian")) return "guardian";
+  return "neutral";
+}
+
+function chatInitials(bot: string) {
+  const words = bot.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "AI";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase();
+}
+
 function DecisionCard({ result, replaying, dataMode, currentChain }: {
   result: WarRoomResult | null;
   replaying: boolean;
@@ -183,6 +205,7 @@ export default function WarRoomDashboard() {
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
+  const chatFeedRef = useRef<HTMLDivElement | null>(null);
   const result = status?.latestResult ?? null;
 
   useEffect(() => {
@@ -259,14 +282,25 @@ export default function WarRoomDashboard() {
   const roomBots = replayResult?.agents ?? result?.agents ?? fallbackBots;
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   const chat = status?.chat ?? [];
+  const chronologicalChat = useMemo(() => [...chat.slice(0, 80)].reverse(), [chat]);
   const positions = status?.positions ?? [];
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
+  const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
+
+  useEffect(() => {
+    const feed = chatFeedRef.current;
+    if (!feed) return;
+    const id = window.requestAnimationFrame(() => {
+      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [chat.length, displayedTurn?.message]);
 
   return (
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.14</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.16</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -292,11 +326,35 @@ export default function WarRoomDashboard() {
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
       </section>
 
-      <section id="chat" className="log-panel page-panel">
-        <div className="wide-panel-head"><div><h2>◯ Chat Log</h2><p>Live conversations from the War Room</p></div><span className="live-chip"><i /> LIVE</span></div>
-        <div className="chat-table">
-          {chat.length ? chat.slice(0, 14).map((row) => <div className="chat-row" key={row.id}><time>{timeOnly(row.at)}</time><span className={`mini-agent mini-${row.kind}`}>{row.bot.slice(0, 2).toUpperCase()}</span><b>{row.bot}</b><p>{row.message}</p></div>) : <div className="empty-row">The autonomous council is booting. New bot messages will appear here without a click.</div>}
+      <section id="chat" className="log-panel page-panel group-chat-panel">
+        <div className="wide-panel-head group-chat-head">
+          <div><h2>◯ Council Group Chat</h2><p>Live messages in the exact order the War Room said them</p></div>
+          <div className="group-chat-head-actions"><span className="group-chat-order">OLDEST ↑ NEWEST</span><span className="live-chip"><i /> LIVE</span></div>
         </div>
+        <div className="group-chat-feed" ref={chatFeedRef} aria-live="polite">
+          {chronologicalChat.length ? chronologicalChat.map((row, index) => {
+            const tone = chatTone(row.bot, row.kind);
+            const previous = chronologicalChat[index - 1];
+            const grouped = Boolean(previous && previous.bot === row.bot && previous.kind === row.kind);
+            return (
+              <div className={`group-message tone-${tone} ${grouped ? "grouped" : ""}`} key={row.id}>
+                {!grouped ? <div className="group-avatar" aria-hidden="true">{chatInitials(row.bot)}</div> : <div className="group-avatar-spacer" />}
+                <div className="group-message-body">
+                  {!grouped && <div className="group-message-meta"><b>{row.bot}</b><time dateTime={row.at} title={new Date(row.at).toLocaleString()}>{timeOnly(row.at)}</time></div>}
+                  <div className="group-bubble"><p>{row.message}</p>{grouped && <time dateTime={row.at} title={new Date(row.at).toLocaleString()}>{timeOnly(row.at)}</time>}</div>
+                </div>
+              </div>
+            );
+          }) : <div className="group-chat-empty"><span>•••</span><p>The Council is booting. Messages will appear here in speaking order.</p></div>}
+          {displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
+            <div className="group-avatar" aria-hidden="true">{chatInitials(liveSpeaker?.name ?? "Council")}</div>
+            <div className="group-message-body">
+              <div className="group-message-meta"><b>{liveSpeaker?.name ?? "Council"}</b><span>speaking now</span></div>
+              <div className="group-bubble typing-bubble"><i /><i /><i /></div>
+            </div>
+          </div>}
+        </div>
+        <div className="group-chat-footer"><span><i /> Live auto-scroll</span><small>Every bubble keeps the exact message timestamp down to the second.</small></div>
       </section>
 
       <section id="trades" className="log-panel page-panel">

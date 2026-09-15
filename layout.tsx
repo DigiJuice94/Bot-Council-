@@ -4,8 +4,8 @@ import "./v213.css";
 import "./v214.css";
 
 export const metadata: Metadata = {
-  title: "Bot War Room V2.14 — Runner Genome",
-  description: "Autonomous meme-launch research council that studies runner-vs-dumper patterns, paper trades fresh launches, files lessons and tracks Code Deciphered graduation toward live eligibility.",
+  title: "Bot War Room V2.16 — Council Group Chat",
+  description: "Autonomous multi-chain Runner Genome research council with chronological live group chat, fresh-coin paper trading, Filing Cabinet learning and Code Deciphered graduation.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

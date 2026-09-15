@@ -1,10 +1,11 @@
-# Apply Bot War Room V2.15
+# Apply Bot War Room V2.16
 
-Upload the contents of this folder/ZIP into the repository root, replacing same-named files.
+This is cumulative on top of V2.15.
 
-The normal Railway build command remains:
-`node prepare-structure.mjs && next build`
+Upload/replace the included root files in the Bot War Room repository. Railway's existing build process will continue mapping:
+- `WarRoomDashboard.tsx` -> `components/WarRoomDashboard.tsx`
+- `v214.css` -> `app/v214.css`
 
-During `prepare-structure.mjs`, V2.15 applies the fresh-chain patch to the generated `lib/` files before Next.js compiles them.
+The seven-chain V2.15 patch remains included.
 
-No new API key is required for the GeckoTerminal public new-pool discovery layer.
+No new environment variables are required for V2.16.

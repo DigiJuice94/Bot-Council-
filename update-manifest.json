@@ -1,6 +1,6 @@
 {
-  "version": "2.15",
-  "name": "Seven-Chain Fresh Pool Scanner",
+  "version": "2.16",
+  "name": "Council Group Chat",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -41,7 +41,14 @@
     "geckoterminal_new_pool_discovery": true,
     "per_chain_scan_telemetry": true,
     "evm_fresh_pool_priority": true,
-    "runner_genome_cross_chain_cases": true
+    "runner_genome_cross_chain_cases": true,
+    "group_chat_redesign": true,
+    "chronological_message_order": true,
+    "exact_message_timestamps": true,
+    "bot_specific_chat_colors": true,
+    "live_typing_indicator": true,
+    "chat_auto_scroll": true,
+    "cio_message_emphasis": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -69,6 +76,8 @@
     "V2.14.4_TEST_REPORT.md",
     "fresh-chain-patch.mjs",
     "V2.15_UPDATE_NOTES.md",
-    "V2.15_TEST_REPORT.md"
+    "V2.15_TEST_REPORT.md",
+    "V2.16_UPDATE_NOTES.md",
+    "V2.16_TEST_REPORT.md"
   ]
 }
