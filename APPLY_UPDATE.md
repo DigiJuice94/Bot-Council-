@@ -1,11 +1,12 @@
-# Apply Bot War Room V2.16
+# Apply Bot War Room V2.17
 
-This is cumulative on top of V2.15.
+This is cumulative on top of V2.16.
 
-Upload/replace the included root files in the Bot War Room repository. Railway's existing build process will continue mapping:
-- `WarRoomDashboard.tsx` -> `components/WarRoomDashboard.tsx`
-- `v214.css` -> `app/v214.css`
+Upload/replace the included files in the repository root. Railway keeps the same build command:
+`node prepare-structure.mjs && next build`
 
-The seven-chain V2.15 patch remains included.
+`prepare-structure.mjs` now applies:
+1. V2.15 seven-chain fresh-pool patch
+2. V2.17 dynamic paper-position sizing patch
 
-No new environment variables are required for V2.16.
+No new environment variables are required.

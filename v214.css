@@ -404,3 +404,43 @@
   .group-chat-footer{display:block}
   .group-chat-footer small{display:block;margin-top:5px}
 }
+
+
+/* V2.17 — visible paper sizing policy */
+.sizing-policy-strip{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  margin:12px 0 2px;
+  padding:10px 12px;
+  border:1px solid #e7eaee;
+  border-radius:12px;
+  background:#fafbfb;
+}
+.sizing-policy-strip span:first-child{
+  display:flex;
+  align-items:baseline;
+  gap:9px;
+  min-width:0;
+}
+.sizing-policy-strip b{
+  font-size:10px;
+  white-space:nowrap;
+}
+.sizing-policy-strip small{
+  color:#7e8590;
+  font-size:9px;
+}
+.sizing-live-note{
+  flex:0 0 auto;
+  color:#8d939d;
+  font-size:9px;
+  font-weight:700;
+}
+@media(max-width:720px){
+  .sizing-policy-strip{display:block}
+  .sizing-policy-strip span:first-child{display:block}
+  .sizing-policy-strip small{display:block;margin-top:4px;line-height:1.35}
+  .sizing-live-note{display:block;margin-top:7px}
+}
