@@ -228,3 +228,66 @@
   .table-scene{top:495px;height:420px}
   .council-bot .speech-pop{bottom:18px}
 }
+
+
+/* V2.12.4 — keep the council higher and make the decision card more compact.
+   Shrink the card instead of pushing the bot artwork downward. */
+.council-stage{height:1000px;min-height:1000px;overflow:hidden}
+.decision-card-slot{top:74px;width:min(446px,calc(100vw - 32px));z-index:60}
+.decision-card{padding:14px 18px 16px;border-radius:18px}
+.decision-card-top{padding-bottom:10px}
+.asset-heading{gap:12px}
+.asset-logo{width:48px;height:48px;font-size:18px}
+.asset-heading h2{font-size:20px;margin:0 0 5px}
+.asset-heading p{font-size:13px}
+.decision-badge{min-width:126px;padding:7px 12px 4px;font-size:15px}
+.decision-badge small{font-size:11px;margin-top:6px}
+.decision-stats{margin-top:10px}
+.decision-stats>div{min-height:54px;padding:4px 10px}
+.decision-stats>div:first-child{padding-left:0}
+.decision-stats>div:last-child{padding-right:0}
+.decision-stats strong{font-size:17px}
+.spark-wrap svg{height:40px}
+.decision-thesis{font-size:12px;margin:10px 0 12px}
+.decision-context-mini{gap:8px}
+.decision-context-mini span{padding:9px 10px;min-height:auto}
+.decision-context-mini b{font-size:12px}
+.decision-context-mini small{font-size:8px}
+.decision-options{gap:10px}
+.decision-options span{height:44px;font-size:13px}
+.table-scene{top:380px;height:590px;left:0;width:100%;overflow:visible}
+.council-reference-art{width:min(1368px,96vw);max-width:96vw}
+.live-caption{bottom:16px}
+@media(max-width:1000px){
+  .council-stage{height:940px;min-height:940px}
+  .decision-card-slot{top:70px;width:min(430px,calc(100vw - 28px))}
+  .table-scene{top:365px;height:545px}
+}
+@media(max-width:720px){
+  .council-stage{height:850px;min-height:850px}
+  .decision-card-slot{top:60px;width:calc(100vw - 22px)}
+  .decision-card{padding:12px 14px 14px}
+  .asset-logo{width:44px;height:44px}
+  .asset-heading h2{font-size:18px}
+  .decision-badge{min-width:112px;font-size:14px}
+  .decision-stats>div{min-height:50px;padding:3px 8px}
+  .decision-stats strong{font-size:15px}
+  .spark-wrap svg{height:34px}
+  .decision-options span{height:42px;font-size:12px}
+  .table-scene{top:350px;height:460px}
+}
+@media(max-width:480px){
+  .council-stage{height:790px;min-height:790px}
+  .decision-card-slot{top:56px;width:calc(100vw - 20px)}
+  .decision-card{padding:11px 12px 13px}
+  .asset-heading{gap:10px}
+  .asset-logo{width:40px;height:40px;font-size:16px}
+  .asset-heading h2{font-size:16px}
+  .decision-badge{min-width:102px;font-size:13px;padding:6px 10px 3px}
+  .decision-badge small{font-size:10px;margin-top:5px}
+  .decision-stats strong{font-size:14px}
+  .decision-thesis{font-size:11px}
+  .decision-options{gap:8px}
+  .decision-options span{height:39px;font-size:11px}
+  .table-scene{top:335px;height:420px}
+}
