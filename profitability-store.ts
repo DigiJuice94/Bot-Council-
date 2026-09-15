@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 import type { ProfitabilityMetrics } from "./types";
 
-const KEY = "bot-war-room:profitability:v26";
+const KEY = "bot-war-room:profitability:v212-real-paper";
 let memoryLatest: ProfitabilityMetrics | null = null;
 let redisPromise: Promise<any | null> | null = null;
 

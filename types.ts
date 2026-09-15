@@ -25,12 +25,13 @@ export type DataQuality = {
   bundled: boolean;
   smartMoney: boolean;
   socialVelocity: boolean;
+  routeFeasibility?: boolean;
 };
 
 export type DataProvenance = {
   live: boolean;
-  marketSource: "adapter" | "dexscreener";
-  securitySource: "goplus" | "adapter" | "unavailable";
+  marketSource: "adapter" | "birdeye" | "dexscreener";
+  securitySource: "birdeye" | "goplus" | "helius" | "multi" | "adapter" | "unavailable";
   fetchedAt: string;
   pairAddress?: string;
   quality: DataQuality;
@@ -327,6 +328,9 @@ export type PaperFill = {
   fillPrice: number;
   slippageBps: number;
   feeUsd: number;
+  routeVerified?: boolean;
+  routeProvider?: "jupiter" | "liquidity-model";
+  routeNote?: string;
   createdAt: string;
 };
 
@@ -430,6 +434,57 @@ export type PositionGuardianReport = {
   positions: ManagedPosition[];
   generatedAt: string;
   warning?: string;
+};
+
+export type PaperWalletFillRecord = {
+  id: string;
+  positionId?: string;
+  decisionId: string;
+  chain: Chain;
+  tokenAddress: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  requestedUsd: number;
+  filledUsd: number;
+  fillPrice: number;
+  feeUsd: number;
+  slippageBps: number;
+  createdAt: string;
+};
+
+export type PaperWalletState = {
+  version: 1;
+  startingCashUsd: number;
+  cashUsd: number;
+  totalFeesUsd: number;
+  buyFills: number;
+  sellFills: number;
+  startedAt: string;
+  updatedAt: string;
+  dayKey: string;
+  dayStartEquityUsd: number;
+  recentFills: PaperWalletFillRecord[];
+};
+
+export type PaperWalletSnapshot = PaperWalletState & {
+  equityUsd: number;
+  openExposureUsd: number;
+  unrealizedPnlUsd: number;
+  realizedPnlUsd: number;
+  totalPnlUsd: number;
+  totalReturnPct: number;
+  dailyPnlPct: number;
+  openPositions: number;
+  storage: "redis" | "memory";
+};
+
+export type ProviderHealth = {
+  name: "birdeye" | "dexscreener" | "goplus" | "helius" | "jupiter" | "redis";
+  configured: boolean;
+  ok: boolean;
+  lastSuccessAt?: string;
+  lastErrorAt?: string;
+  lastError?: string;
 };
 
 export type AgentPerformance = {

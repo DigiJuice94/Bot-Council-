@@ -3,8 +3,8 @@ import { DEFAULT_AGENT_WEIGHTS, normalizeResearchWeights, weightsFromPerformance
 import { applyRegimeWeightBias } from "./regime";
 import type { AgentMemoryRecord, AgentPerformance, Chain, LearningSnapshot, MarketRegime, MarketRegimeId, MarketSnapshot, ResearchAgentId, ResearchAgentWeights } from "./types";
 
-const PERFORMANCE_KEY = "bot-war-room:agent-performance:v26";
-const MEMORY_KEY = "bot-war-room:agent-memory:v26";
+const PERFORMANCE_KEY = "bot-war-room:agent-performance:v212-real-paper";
+const MEMORY_KEY = "bot-war-room:agent-memory:v212-real-paper";
 const memoryPerformance = new Map<string, AgentPerformance>();
 const memoryRecords = new Map<string, AgentMemoryRecord>();
 let redisPromise: Promise<any | null> | null = null;

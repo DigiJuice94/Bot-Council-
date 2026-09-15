@@ -1,5 +1,5 @@
 import WarRoomDashboard from "@/components/WarRoomDashboard";
 
-export default function Home() {
+export default function Page() {
   return <WarRoomDashboard />;
 }

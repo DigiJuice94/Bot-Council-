@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { AgentOpinion, ManagedPosition, WarRoomResult } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentOpinion, ManagedPosition, PaperWalletSnapshot, ProviderHealth, WarRoomResult } from "@/lib/types";
 import { buildCouncilDiscussion, type CouncilTurn } from "@/lib/debate";
 import { COUNCIL_ART_DATA_URI } from "@/lib/council-art";
 
@@ -9,14 +9,17 @@ type ChatRow = { id: string; at: string; bot: string; message: string; kind: "co
 type AutopilotPayload = {
   running: boolean;
   mode: "paper";
-  dataMode: "adapter" | "dexscreener";
+  dataMode: "adapter" | "birdeye" | "dexscreener";
   intervalMs: number;
   scanningChains: string[];
   currentChain: string;
   lastScanAt?: string;
   nextScanAt?: string;
   scanCount: number;
+  candidateCount: number;
   buyCount: number;
+  paperWallet: PaperWalletSnapshot;
+  providers: ProviderHealth[];
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   chat: ChatRow[];
@@ -26,14 +29,14 @@ type AutopilotPayload = {
 };
 
 const fallbackBots: AgentOpinion[] = [
-  { id: "launch", name: "Launch Scout", shortName: "LS", score: 74, stance: "bullish", summary: "Scanning launches across every enabled chain.", detail: "Autonomous discovery is active.", evidence: [], color: "#111111" },
-  { id: "social", name: "Social Scout", shortName: "SS", score: 71, stance: "bullish", summary: "Monitoring attention, narrative and social velocity.", detail: "Independent first-pass read.", evidence: [], color: "#111111" },
-  { id: "wallet", name: "Wallet Tracker", shortName: "WT", score: 69, stance: "neutral", summary: "Following holders, buyers and smart-wallet flow.", detail: "Independent first-pass read.", evidence: [], color: "#111111" },
-  { id: "quant", name: "Quant Bot", shortName: "QB", score: 76, stance: "bullish", summary: "Measuring momentum, liquidity and flow.", detail: "Independent first-pass read.", evidence: [], color: "#111111" },
-  { id: "contract", name: "Contract Bot", shortName: "CB", score: 82, stance: "ready", summary: "Auditing deterministic contract safety.", detail: "Hard safety never yields to hype.", evidence: [], color: "#111111" },
-  { id: "bear", name: "Bear Bot", shortName: "BB", score: 46, stance: "bearish", summary: "Trying to break the bullish thesis.", detail: "Red-team role.", evidence: [], color: "#111111" },
-  { id: "cio", name: "CIO", shortName: "CIO", score: 78, stance: "neutral", summary: "Synthesizing the council vote.", detail: "Seventh active decision role.", evidence: [], color: "#111111" },
-  { id: "executor", name: "Executor", shortName: "EX", score: 100, stance: "ready", summary: "Automatically routes approved paper trades.", detail: "No human button is required.", evidence: [], color: "#111111" },
+  { id: "launch", name: "Launch Scout", shortName: "LS", score: 0, stance: "neutral", summary: "Waiting for a real listing.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "social", name: "Social Scout", shortName: "SS", score: 0, stance: "neutral", summary: "Waiting for real evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "wallet", name: "Wallet Tracker", shortName: "WT", score: 0, stance: "neutral", summary: "Waiting for real holder data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "quant", name: "Quant Bot", shortName: "QB", score: 0, stance: "neutral", summary: "Waiting for real market data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "contract", name: "Contract Bot", shortName: "CB", score: 0, stance: "neutral", summary: "Waiting for security evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "bear", name: "Bear Bot", shortName: "BB", score: 0, stance: "neutral", summary: "Waiting to red-team a real candidate.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "cio", name: "CIO", shortName: "CIO", score: 0, stance: "neutral", summary: "Waiting for the six research reads.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "executor", name: "Executor", shortName: "EX", score: 0, stance: "neutral", summary: "Waiting for a Council-approved paper order.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
 ];
 
 const botDescriptions: Record<string, { label: string; text: string; tag: string; icon: string }> = {
@@ -77,7 +80,7 @@ function ago(value?: string) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-function DecisionCard({ result, replaying, dataMode, currentChain }: { result: WarRoomResult | null; replaying: boolean; dataMode?: "adapter" | "dexscreener"; currentChain?: string }) {
+function DecisionCard({ result, replaying, dataMode, currentChain }: { result: WarRoomResult | null; replaying: boolean; dataMode?: "adapter" | "birdeye" | "dexscreener"; currentChain?: string }) {
   if (!result) {
     return (
       <section className="decision-card decision-card-empty" aria-live="polite">
@@ -91,7 +94,7 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: { result: W
           <div><strong>—</strong><span>Risk Level</span></div>
           <div className="spark-wrap waiting-spark" aria-hidden="true"><svg viewBox="0 0 120 42" preserveAspectRatio="none"><polyline points="0,30 18,30 34,30 50,30 65,30 83,30 99,30 120,30" /></svg></div>
         </div>
-        <p className="decision-thesis">Waiting for the first qualifying live candidate from {dataMode === "adapter" ? "your configured market-data adapter" : "DEX Screener"}. Demo tokens and placeholder prices are disabled.</p>
+        <p className="decision-thesis">Waiting for the first qualifying live candidate from {dataMode === "adapter" ? "your configured market-data adapter" : dataMode === "birdeye" ? "Birdeye New Listings + DEX enrichment" : "DEX Screener live discovery"}. Demo tokens and placeholder prices are disabled.</p>
         <div className="decision-options" aria-label="Council decision states"><span className="buy">BUY</span><span className="watch">WATCH</span><span className="skip">SKIP</span></div>
       </section>
     );
@@ -110,7 +113,7 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: { result: W
   const spark = result.snapshot.priceChange24h < 0
     ? "0,7 18,14 34,10 50,23 65,18 83,31 99,27 120,39"
     : "0,36 18,27 34,31 50,20 65,29 83,14 99,19 120,2";
-  const source = result.snapshot.dataProvenance?.marketSource === "dexscreener" ? "DEX Screener live" : "Live adapter";
+  const source = result.snapshot.dataProvenance?.marketSource === "birdeye" ? "Birdeye + DEX live" : result.snapshot.dataProvenance?.marketSource === "dexscreener" ? "DEX Screener live" : "Live adapter";
 
   return (
     <section className="decision-card" aria-live="polite">
@@ -135,11 +138,35 @@ function CouncilBot({ bot, index, active, speech, context }: { bot: AgentOpinion
   return <div className={`council-bot bot-pos-${index} ${active ? "speaking" : ""}`}>{active && <><div className="speech-pop" role="status"><b>{bot.name}</b>{context && <small className="speech-context">{context}</small>}<span>{speech ?? bot.summary}</span></div><span className="active-seat-pulse" aria-hidden="true" /></>}<div className="bot-name-tag">{bot.shortName}</div></div>;
 }
 
+function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
+  const full = buildCouncilDiscussion(result);
+  const order: Array<{ agentId: AgentOpinion["id"]; round?: CouncilTurn["round"] }> = [
+    { agentId: "launch", round: "opening" },
+    { agentId: "social", round: "opening" },
+    { agentId: "wallet", round: "opening" },
+    { agentId: "quant", round: "rebuttal" },
+    { agentId: "contract", round: "rebuttal" },
+    { agentId: "bear", round: "rebuttal" },
+    { agentId: "cio", round: "decision" },
+    { agentId: "executor", round: "execution" },
+  ];
+
+  return order.flatMap(({ agentId, round }) => {
+    const exact = full.find((turn) => turn.agentId === agentId && (!round || turn.round === round));
+    const fallback = full.find((turn) => turn.agentId === agentId);
+    return exact ? [exact] : fallback ? [fallback] : [];
+  });
+}
+
 export default function WarRoomDashboard() {
   const [status, setStatus] = useState<AutopilotPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replayResult, setReplayResult] = useState<WarRoomResult | null>(null);
   const [activeTurn, setActiveTurn] = useState(-1);
+  const [scanBubble, setScanBubble] = useState<{ agentId: AgentOpinion["id"]; message: string; round: CouncilTurn["round"] } | null>(null);
+  const pendingReplayRef = useRef<WarRoomResult | null>(null);
+  const lastObservedDecisionRef = useRef<string | null>(null);
+  const lastScanCountRef = useRef(0);
   const result = status?.latestResult ?? null;
 
   useEffect(() => {
@@ -163,24 +190,57 @@ export default function WarRoomDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!result || replayResult?.decisionId === result.decisionId) return;
+    if (!result || lastObservedDecisionRef.current === result.decisionId) return;
+    lastObservedDecisionRef.current = result.decisionId;
+    if (replayResult && activeTurn >= 0) {
+      // Do not interrupt a bot mid-sentence. Keep only the newest pending council result.
+      pendingReplayRef.current = result;
+      return;
+    }
     setReplayResult(result);
     setActiveTurn(0);
-  }, [result, replayResult?.decisionId]);
+    setScanBubble(null);
+  }, [result, replayResult, activeTurn]);
 
-  const discussion: CouncilTurn[] = replayResult ? buildCouncilDiscussion(replayResult) : [];
+  const discussion: CouncilTurn[] = useMemo(() => replayResult ? buildVisualCouncilReplay(replayResult) : [], [replayResult]);
   useEffect(() => {
-    if (!replayResult || activeTurn < 0) return;
+    if (!replayResult || activeTurn < 0 || discussion.length === 0) return;
     const finalTurn = activeTurn >= discussion.length - 1;
     const timer = window.setTimeout(() => {
-      if (finalTurn) { setActiveTurn(-1); return; }
-      setActiveTurn((turn) => turn + 1);
-    }, finalTurn ? 950 : 760);
+      if (!finalTurn) {
+        setActiveTurn((turn) => turn + 1);
+        return;
+      }
+      const pending = pendingReplayRef.current;
+      pendingReplayRef.current = null;
+      if (pending && pending.decisionId !== replayResult.decisionId) {
+        setReplayResult(pending);
+        setActiveTurn(0);
+        return;
+      }
+      setActiveTurn(-1);
+      setReplayResult(null);
+    }, finalTurn ? 2400 : 2100);
     return () => window.clearTimeout(timer);
-  }, [activeTurn, discussion.length, replayResult]);
+  }, [activeTurn, discussion, replayResult]);
+
+  useEffect(() => {
+    const scanCount = status?.scanCount ?? 0;
+    if (!scanCount || scanCount === lastScanCountRef.current) return;
+    lastScanCountRef.current = scanCount;
+    if (replayResult && activeTurn >= 0) return;
+    setScanBubble({
+      agentId: "launch",
+      round: "opening",
+      message: `Scanning ${status?.currentChain ?? "the next chain"} for a real new listing. No placeholder token or simulated market feed is being used.`,
+    });
+    const timer = window.setTimeout(() => setScanBubble(null), 1800);
+    return () => window.clearTimeout(timer);
+  }, [status?.scanCount, status?.currentChain, replayResult, activeTurn]);
 
   const talking = Boolean(replayResult && activeTurn >= 0 && discussion[activeTurn]);
   const currentTurn = talking ? discussion[activeTurn] : undefined;
+  const displayedTurn = currentTurn ?? scanBubble ?? undefined;
   const roomBots = replayResult?.agents ?? result?.agents ?? fallbackBots;
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   const chat = status?.chat ?? [];
@@ -189,24 +249,30 @@ export default function WarRoomDashboard() {
 
   return (
     <main className="light-app">
-      <header className="site-header">
-        <a className="site-brand" href="#live"><span className="brand-orbit" /><strong>Bot War Room V2.11.2</strong></a>
-        <nav className="site-nav"><a className="active" href="#live">Live</a><a href="#chat">Council</a><a href="#trades">Performance</a><a href="#roster">Bots</a><a href="#system">System</a></nav>
-        <div className="header-actions"><button className="moon-button" aria-label="Appearance">◐</button><button className="sign-button">Sign In</button><span className="autonomous-pill"><i /> AUTONOMOUS</span></div>
-      </header>
-
       <section id="live" className="council-stage">
+        <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.12</strong></div>
+          <span className="autonomous-pill"><i /> AUTONOMOUS</span>
+        </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
         <div className="table-scene" aria-label="Eight-bot council meeting room">
           <img className="council-reference-art" src={COUNCIL_ART_DATA_URI} alt="Eight Bot War Room agents seated around the council table" draggable={false} />
-          {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={talking && bot.id === currentTurn?.agentId} speech={bot.id === currentTurn?.agentId ? currentTurn?.message : undefined} context={bot.id === currentTurn?.agentId && replayResult ? `$${replayResult.snapshot.symbol} · ${currentTurn?.round}` : undefined} />)}
+          {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={Boolean(displayedTurn && bot.id === displayedTurn.agentId)} speech={bot.id === displayedTurn?.agentId ? displayedTurn.message : undefined} context={bot.id === displayedTurn?.agentId ? (replayResult && currentTurn ? `$${replayResult.snapshot.symbol} · ${currentTurn.round}` : `${status?.currentChain ?? "Live"} · real scan`) : undefined} />)}
         </div>
-        <div className="live-caption"><span className={`status-dot ${talking ? "talking" : ""}`} /><b>{talking ? `${roomBots.find((b) => b.id === currentTurn?.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{talking ? currentTurn?.message : status ? `REAL DATA · ${status.dataMode === "adapter" ? "adapter" : "DEX Screener"} · scanning ${status.currentChain} · ${status.scanCount} cycles · ${status.buyCount} automatic paper entries` : "Starting real-data paper scanner"}</span></div>
+        <div className="live-caption"><span className={`status-dot ${displayedTurn ? "talking" : ""}`} /><b>{displayedTurn ? `${roomBots.find((b) => b.id === displayedTurn.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{displayedTurn ? displayedTurn.message : status ? `REAL DATA · ${status.dataMode === "birdeye" ? "Birdeye New Listings" : status.dataMode === "adapter" ? "adapter" : "DEX Screener"} · scanning ${status.currentChain} · ${status.candidateCount} real candidates · ${status.buyCount} paper buys` : "Starting real-data paper scanner"}</span></div>
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>No human controls</strong><p>Launch Scout rotates across all six chains using real market observations. The eight-bot Council debates every candidate, CIO decides, Executor automatically paper-routes approved BUYs, and Position Guardian manages the trade afterward.</p></div>
-        <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 6}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "5s"}</b><small>scan cadence</small></span><span><b>{status?.scanCount ?? 0}</b><small>cycles</small></span><span><b>{status?.buyCount ?? 0}</b><small>auto entries</small></span></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into the eight-bot Council automatically. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market, scales confirmed winners, trims, exits and returns simulated proceeds to cash.</p></div>
+        <div className="paper-wallet-strip">
+          <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
+          <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>
+          <span><small>Cash</small><b>${(status?.paperWallet?.cashUsd ?? 1000).toFixed(2)}</b></span>
+          <span><small>Total P/L</small><b className={(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "+" : ""}${(status?.paperWallet?.totalPnlUsd ?? 0).toFixed(2)} ({(status?.paperWallet?.totalReturnPct ?? 0).toFixed(2)}%)</b></span>
+          <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
+        </div>
+        <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 6}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
+        <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
       </section>
 
@@ -231,7 +297,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="system" className="system-strip page-panel">
-        <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled.</span></div>
+        <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled. Decisions and fills are journaled for later analysis.</span></div>
         <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
         <div><b>Safety still deterministic</b><span>The eight bots cannot vote around honeypot, sellability, concentration, authority or portfolio kill-switch vetoes.</span></div>
       </section>

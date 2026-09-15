@@ -24,6 +24,10 @@ const mappings = [
   ['exit-strategy.ts', 'lib/exit-strategy.ts'],
   ['learning.ts', 'lib/learning.ts'],
   ['market-data.ts', 'lib/market-data.ts'],
+  ['paper-wallet.ts', 'lib/paper-wallet.ts'],
+  ['provider-health.ts', 'lib/provider-health.ts'],
+  ['route-feasibility.ts', 'lib/route-feasibility.ts'],
+  ['trade-journal.ts', 'lib/trade-journal.ts'],
   ['position-manager.ts', 'lib/position-manager.ts'],
   ['position-policy.ts', 'lib/position-policy.ts'],
   ['position-store.ts', 'lib/position-store.ts'],
@@ -40,6 +44,7 @@ const mappings = [
   ['route (4).ts', 'app/api/benchmark/route.ts'],
   ['route (5).ts', 'app/api/learning/route.ts'],
   ['route (6).ts', 'app/api/autopilot/route.ts'],
+  ['route (7).ts', 'app/api/journal/route.ts'],
   ['smoke.ts', 'tests/smoke.ts'],
 ];
 

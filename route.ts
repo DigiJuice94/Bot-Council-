@@ -5,6 +5,7 @@ import { ensurePositionGuardianLoop } from "@/lib/position-manager";
 import { classifyMarketRegime } from "@/lib/regime";
 import { relevantMemoryHints, resolveAdaptiveWeights } from "@/lib/learning-store";
 import { loadLatestProfitability } from "@/lib/profitability-store";
+import { getPaperPortfolioContext } from "@/lib/paper-wallet";
 import type { Chain, MarketSnapshot, TradingMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +39,11 @@ export async function POST(request: NextRequest) {
   }
 
   const regime = classifyMarketRegime(snapshot);
-  const [learning, memoryHints, profitability] = await Promise.all([
+  const [learning, memoryHints, profitability, portfolio] = await Promise.all([
     resolveAdaptiveWeights(regime, snapshot),
     relevantMemoryHints(snapshot, regime.id),
     loadLatestProfitability(),
+    getPaperPortfolioContext(snapshot.chain),
   ]);
 
   const result = runWarRoom(snapshot, {
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest) {
     learningSource: learning.source,
     memoryHints,
     profitability,
+    portfolio,
   });
   return NextResponse.json(result, {
     headers: {

@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 import type { ManagedPosition } from "./types";
 
-const REDIS_KEY = "bot-war-room:positions:v2";
+const REDIS_KEY = "bot-war-room:positions:v3-live-paper";
 const memory = new Map<string, ManagedPosition>();
 let redisPromise: Promise<any | null> | null = null;
 

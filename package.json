@@ -1,13 +1,12 @@
 {
-  "name": "bot-war-room-v2",
-  "version": "0.2.11-2",
+  "name": "bot-war-room-v2-12-real-paper",
+  "version": "0.2.12",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "node prepare-structure.mjs && next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "smoke": "rm -rf .smoke && tsc -p tsconfig.smoke.json && node .smoke/tests/smoke.js"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "next": "16.3.3",

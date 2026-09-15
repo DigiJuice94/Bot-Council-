@@ -1,10 +1,12 @@
 import { runWarRoom } from "./engine";
 import { executePaper } from "./execution";
 import { fetchLivePositionSnapshot } from "./market-data";
+import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
+import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
-import { listManagedPositions, positionStorageMode, saveManagedPosition } from "./position-store";
+import { listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
-import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PositionAction, PositionEntryContext, PositionGuardianReport, WarRoomResult } from "./types";
+import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
@@ -60,6 +62,8 @@ export async function assessPaperEntryEligibility(args: {
   entryContext?: PositionEntryContext;
 }): Promise<{ allowed: boolean; isReentry: boolean; reentryCount: number; reason: string }> {
   const { request, snapshot, entryContext } = args;
+  const affordability = await canAffordPaperBuy(request.notionalUsd);
+  if (!affordability.allowed) return { allowed: false, isReentry: false, reentryCount: 0, reason: affordability.reason ?? "Paper wallet cannot fund this entry." };
   const positions = (await listManagedPositions()).map(normalizedPosition);
   const sameToken = positions.filter((position) => position.chain === request.chain && position.tokenAddress === request.tokenAddress);
   const open = sameToken.find((position) => position.status !== "closed");
@@ -164,6 +168,13 @@ export async function registerPaperPosition(args: {
     entryContext,
   };
   await saveManagedPosition(position);
+  try {
+    await applyPaperFillToWallet({ fill, decisionId: request.decisionId, tokenAddress: request.tokenAddress, positionId: position.id });
+    await appendFillJournal(fill, request.tokenAddress, position.id);
+  } catch (error) {
+    await removeManagedPosition(position.id).catch(() => undefined);
+    throw error;
+  }
   return position;
 }
 
@@ -171,15 +182,16 @@ function nextTakeProfit(position: ManagedPosition, pnlPct: number): ExitLevel | 
   return position.exitStrategy.takeProfits.find((level) => !position.takenProfitLabels.includes(level.label) && pnlPct >= level.gainPct);
 }
 
-function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot): WarRoomResult {
+function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext): WarRoomResult {
   return runWarRoom(snapshot, {
     mode: "paper",
     agentWeights: position.entryContext?.agentWeights,
     learningSource: position.entryContext ? "learned" : "defaults",
+    portfolio,
   });
 }
 
-export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot): ManagedPosition {
+export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext): ManagedPosition {
   const position = normalizedPosition(positionInput);
   const now = new Date().toISOString();
   const mark = snapshot.price;
@@ -189,7 +201,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const currentPnl = markToMarketPnlPct(position, mark);
   const drawdownFromHigh = highWater > 0 ? ((highWater - mark) / highWater) * 100 : 0;
   const heldMinutes = Math.max(0, (Date.now() - new Date(position.openedAt).getTime()) / 60_000);
-  const fresh = freshCouncil(position, snapshot);
+  const fresh = freshCouncil(position, snapshot, portfolio);
   const confirmation = confirmationScore(position, snapshot, fresh);
   const winnerState = determineWinnerState(position, rawMovePct, confirmation);
   const controls = effectiveGuardianControls(position, winnerState);
@@ -270,9 +282,9 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   };
 }
 
-async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSnapshot): Promise<ManagedPosition> {
+async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio: PortfolioRiskContext): Promise<ManagedPosition> {
   const position = normalizedPosition(positionInput);
-  const fresh = freshCouncil(position, snapshot);
+  const fresh = freshCouncil(position, snapshot, portfolio);
   const confirmation = confirmationScore(position, snapshot, fresh);
   const step = nextScaleStep(position, snapshot, fresh, confirmation);
   if (!step || (position.pendingScaleLabel && step.label !== position.pendingScaleLabel)) return { ...position, pendingScaleLabel: undefined, lastAction: "HOLD", lastReason: "Scale-in cancelled because confirmation weakened before execution." };
@@ -284,13 +296,14 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
 
   const initialNotional = Math.max(0.01, position.initialNotionalUsd ?? position.entryNotionalUsd);
   const capPct = maxGrossExposurePct(position);
-  const equity = position.entryContext?.portfolioEquityUsd;
-  const capUsd = typeof equity === "number" && equity > 0 ? equity * capPct / 100 : initialNotional * 2.8;
-  const availableUsd = Math.max(0, capUsd - position.entryNotionalUsd);
-  const requestedUsd = Math.min(initialNotional * step.addMultipleOfInitial, availableUsd);
-  if (requestedUsd < 0.01) return { ...position, pendingScaleLabel: undefined, lastAction: "HOLD", lastReason: `Scale-in skipped: ${capPct.toFixed(2)}% gross exposure cap is already reached.` };
+  const capUsd = Math.max(0, portfolio.equityUsd * capPct / 100);
+  const exposureRoomUsd = Math.max(0, capUsd - position.entryNotionalUsd);
+  const requestedUsd = Math.min(initialNotional * step.addMultipleOfInitial, exposureRoomUsd, Math.max(0, portfolio.cashUsd));
+  if (requestedUsd < 0.01) return { ...position, pendingScaleLabel: undefined, lastAction: "HOLD", lastReason: `Scale-in skipped: ${capPct.toFixed(2)}% gross exposure cap or available paper cash is already reached.` };
 
   const fill = await executePaper(paperRequest(position, "BUY", requestedUsd, step.label), snapshot);
+  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-${step.label}`, tokenAddress: position.tokenAddress, positionId: position.id });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
   const addedQty = fill.filledUsd / Math.max(fill.fillPrice, 1e-12);
   const oldQty = position.quantity;
   const newQty = oldQty + addedQty;
@@ -327,6 +340,8 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
   const sellQty = Math.min(position.remainingQuantity, originalQtyTarget);
   if (sellQty <= 0) return position;
   const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot);
+  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-TP-${level.label}`, tokenAddress: position.tokenAddress, positionId: position.id });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
   const cost = sellQty * position.entryPrice;
   const remainingQuantity = Math.max(0, position.remainingQuantity - sellQty);
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
@@ -361,6 +376,8 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
   if (position.remainingQuantity <= 0) return { ...position, status: "closed" };
   const sellQty = position.remainingQuantity;
   const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, "EXIT"), snapshot);
+  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-EXIT`, tokenAddress: position.tokenAddress, positionId: position.id });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
   const cost = sellQty * position.entryPrice;
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
   const realizedCostUsd = position.realizedCostUsd + cost;
@@ -405,10 +422,11 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
     try {
       snapshot = await fetchLivePositionSnapshot(position);
       if (snapshot) {
-        next = evaluatePosition(position, snapshot);
+        const portfolio = await getPaperPortfolioContext(position.chain);
+        next = evaluatePosition(position, snapshot, portfolio);
         if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
           if (next.lastAction === "SCALE_IN") {
-            next = await executeScaleIn(next, snapshot);
+            next = await executeScaleIn(next, snapshot, portfolio);
           } else if (next.lastAction === "TRIM") {
             const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
             if (level) next = await executeTrim(next, snapshot, level);

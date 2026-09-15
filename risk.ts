@@ -1,8 +1,8 @@
 import type { MarketSnapshot, PortfolioRiskContext, RiskCheck } from "./types";
 
 export const DEFAULT_RISK_CONTEXT: PortfolioRiskContext = {
-  equityUsd: 10_000,
-  cashUsd: 10_000,
+  equityUsd: 1_000,
+  cashUsd: 1_000,
   dailyPnlPct: 0,
   openPositions: 0,
   totalExposurePct: 0,
@@ -21,7 +21,7 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const passedChecks: string[] = [];
   const check = (ok: boolean, pass: string, fail: string) => ok ? passedChecks.push(pass) : hardBlocks.push(fail);
   const q = m.dataProvenance?.quality;
-  const directLive = m.dataProvenance?.marketSource === "dexscreener";
+  const directLive = Boolean(m.dataProvenance?.live && m.dataProvenance.marketSource !== "adapter");
 
   if (directLive && q) {
     if (!q.sellability) hardBlocks.push("Sellability verification unavailable from live security provider");
