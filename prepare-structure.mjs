@@ -1,7 +1,19 @@
-import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const root = process.cwd();
+
+// Compact releases are often uploaded over an older Railway working tree.
+// Remove generated folders first so stale files from prior versions cannot
+// participate in Next.js/TypeScript builds (for example old tests/smoke.ts).
+for (const generatedDir of ['app', 'lib', 'components', 'tests']) {
+  const target = resolve(root, generatedDir);
+  if (existsSync(target)) {
+    rmSync(target, { recursive: true, force: true });
+    console.log(`[structure] removed stale ${generatedDir}/ tree`);
+  }
+}
+
 const mappings = [
   ['page.tsx', 'app/page.tsx'],
   ['layout.tsx', 'app/layout.tsx'],
@@ -45,7 +57,6 @@ const mappings = [
   ['route (5).ts', 'app/api/learning/route.ts'],
   ['route (6).ts', 'app/api/autopilot/route.ts'],
   ['route (7).ts', 'app/api/journal/route.ts'],
-  ['smoke.ts', 'tests/smoke.ts'],
 ];
 
 let restored = 0;
@@ -58,13 +69,6 @@ for (const [sourceRel, destRel] of mappings) {
     restored += 1;
     console.log(`[structure] synced ${destRel}`);
   }
-}
-
-const flatSmoke = resolve(root, 'smoke.ts');
-const structuredSmoke = resolve(root, 'tests/smoke.ts');
-if (existsSync(flatSmoke) && existsSync(structuredSmoke)) {
-  unlinkSync(flatSmoke);
-  console.log('[structure] removed flattened smoke.ts duplicate');
 }
 
 if (!existsSync(resolve(root, 'app/page.tsx')) || !existsSync(resolve(root, 'app/layout.tsx'))) {
