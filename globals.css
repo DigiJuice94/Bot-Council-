@@ -199,3 +199,32 @@
 
 /* V2.12 real paper wallet + provider telemetry */
 .paper-wallet-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin-top:17px;border:1px solid #e9edef;border-radius:13px;background:#fbfcfc;overflow:hidden}.paper-wallet-strip span{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-right:1px solid #e9edef}.paper-wallet-strip span:last-child{border-right:0}.paper-wallet-strip small{font-size:8px;text-transform:uppercase;letter-spacing:.08em;color:#8d949e}.paper-wallet-strip b{font-size:15px;font-variant-numeric:tabular-nums}.paper-wallet-strip .positive{color:#0ba976}.paper-wallet-strip .negative{color:#d34d4d}.provider-health-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.provider-health-row>span{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #e6eaed;border-radius:999px;font-size:8px;font-weight:750;letter-spacing:.05em}.provider-health-row i{width:6px;height:6px;border-radius:50%;background:#b9c0c7}.provider-health-row small{font-size:7px;color:#8a9199}.provider-ok i{background:#12c985;box-shadow:0 0 0 3px #12c98515}.provider-ok small{color:#0b9e6c}.provider-warn i{background:#e4a928}.provider-off{opacity:.55}@media(max-width:720px){.paper-wallet-strip{grid-template-columns:repeat(2,1fr)}.paper-wallet-strip span{border-bottom:1px solid #e9edef}.paper-wallet-strip span:nth-child(even){border-right:0}.paper-wallet-strip span:last-child{grid-column:1/-1;border-bottom:0}}
+
+
+/* V2.12.3 — reserve a clean conversation zone between decision card and Council.
+   The decision card stays centered, but the council artwork/seats begin lower so
+   speech bubbles never sit underneath the card. This is layout-only; no trading
+   logic or live-data behavior changes. */
+.council-stage{height:1135px;min-height:1135px;overflow:hidden}
+.decision-card-slot{top:92px}
+.table-scene{top:520px;height:590px}
+.council-bot .speech-pop{bottom:30px}
+.live-caption{bottom:16px}
+
+@media(max-width:1000px){
+  .council-stage{height:1060px;min-height:1060px}
+  .decision-card-slot{top:88px}
+  .table-scene{top:500px;height:535px}
+}
+@media(max-width:720px){
+  .council-stage{height:990px;min-height:990px}
+  .decision-card-slot{top:68px}
+  .table-scene{top:505px;height:455px}
+  .council-bot .speech-pop{bottom:20px}
+}
+@media(max-width:480px){
+  .council-stage{height:935px;min-height:935px}
+  .decision-card-slot{top:62px}
+  .table-scene{top:495px;height:420px}
+  .council-bot .speech-pop{bottom:18px}
+}
