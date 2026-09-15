@@ -1,47 +1,41 @@
 {
-  "version": "2.10.1",
-  "name": "Launch Velocity \u2014 Council Reference Artwork Fix",
+  "version": "2.11",
+  "name": "Autonomous Council \u2014 Guaranteed Council Artwork",
   "features": {
-    "v29_eight_bot_meme_council_retained": true,
-    "launch_velocity_engine": true,
-    "holders_per_minute": true,
-    "transactions_per_minute": true,
-    "unique_buyers_per_minute": true,
-    "volume_usd_per_minute": true,
-    "liquidity_formation_per_minute": true,
-    "holder_acceleration": true,
-    "transaction_acceleration": true,
-    "volume_acceleration": true,
-    "newborn_totals_to_rate_fallback": true,
-    "wallet_tracker_launch_velocity": true,
-    "launch_scout_launch_velocity": true,
-    "quant_launch_velocity": true,
-    "alpha_launch_velocity": true,
-    "meme_regime_launch_velocity": true,
+    "server_boot_autopilot": true,
+    "no_scan_button": true,
+    "no_manual_paper_execute_button": true,
+    "automatic_paper_entries_after_council_approval": true,
+    "six_chain_round_robin_scanning": true,
+    "position_guardian_server_loop_retained": true,
+    "eight_bot_decision_process_retained": true,
+    "launch_velocity_retained": true,
+    "winner_engine_retained": true,
+    "embedded_exact_council_art_data_uri": true,
+    "public_asset_fallback_retained": true,
+    "chat_log_ui": true,
+    "trades_log_ui": true,
+    "bot_roster_ui": true,
     "hard_risk_vetoes_unchanged": true,
-    "v28_winner_engine_retained": true,
-    "no_average_down": true,
-    "controlled_reentry": true,
-    "live_trading_gates_unchanged": true,
-    "exact_supplied_council_reference_art": true,
-    "dynamic_speech_replay_over_reference_art": true,
-    "css_drawn_bot_standins_removed": true
+    "demo_candidates_never_auto_executed": true
   },
   "new_files": [
-    "launch-velocity.ts",
-    "bot-council-reference.png"
+    "autopilot.ts",
+    "council-art.ts",
+    "instrumentation.ts",
+    "route (6).ts"
   ],
   "major_changed_files": [
-    "types.ts",
-    "alpha-engine.ts",
-    "meme-regime.ts",
-    "engine.ts",
-    "discovery.ts",
     "WarRoomDashboard.tsx",
+    "globals.css",
     "prepare-structure.mjs",
     "package.json",
-    "UPDATE_NOTES.md",
-    "V2.10_TEST_REPORT.md",
-    "globals.css"
-  ]
+    "UPDATE_NOTES.md"
+  ],
+  "validation": {
+    "core_typescript": "passed",
+    "prepare_structure_syntax": "passed",
+    "embedded_art_exact_match": true,
+    "manual_trade_controls_removed": true
+  }
 }

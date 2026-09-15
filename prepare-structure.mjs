@@ -8,6 +8,8 @@ const mappings = [
   ['globals.css', 'app/globals.css'],
   ['WarRoomDashboard.tsx', 'components/WarRoomDashboard.tsx'],
   ['bot-council-reference.png', 'public/bot-council-reference.png'],
+  ['council-art.ts', 'lib/council-art.ts'],
+  ['autopilot.ts', 'lib/autopilot.ts'],
   ['chains.ts', 'lib/chains.ts'],
   ['debate.ts', 'lib/debate.ts'],
   ['alpha-engine.ts', 'lib/alpha-engine.ts'],
@@ -38,6 +40,7 @@ const mappings = [
   ['route (3).ts', 'app/api/positions/route.ts'],
   ['route (4).ts', 'app/api/benchmark/route.ts'],
   ['route (5).ts', 'app/api/learning/route.ts'],
+  ['route (6).ts', 'app/api/autopilot/route.ts'],
   ['smoke.ts', 'tests/smoke.ts'],
 ];
 
