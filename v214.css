@@ -58,3 +58,71 @@
   .decision-card{border-radius:12px!important;padding:12px 14px 13px!important}
   .decision-options span{height:40px!important}
 }
+
+
+/* V2.14.2 — council scene spacing cleanup */
+.council-stage,
+.council-stage::before,
+.council-stage::after{
+  background:#fff !important;
+  border-top:0 !important;
+  box-shadow:none !important;
+}
+.council-stage{
+  position:relative;
+  overflow:visible !important;
+  padding-top:112px !important;
+  padding-bottom:210px !important;
+  min-height:960px !important;
+  margin-bottom:12px !important;
+}
+.council-stage hr,
+.council-stage .divider,
+.council-stage .line,
+.council-stage .scene-divider,
+.council-stage .section-divider,
+.council-stage .hero-divider{
+  display:none !important;
+  border:0 !important;
+  height:0 !important;
+  box-shadow:none !important;
+  background:transparent !important;
+}
+.decision-card-slot{
+  top:10px !important;
+}
+.decision-card{
+  margin-bottom:8px !important;
+}
+/* push the first data panel below the last chair / chat area */
+.council-stage + .page-panel,
+.council-stage + section,
+.council-stage + .v214-research,
+.council-stage + .v213-diagnostics,
+.council-stage + .diagnostics-panel,
+.council-stage + .paper-trader-panel,
+.council-stage + .autonomous-paper-panel{
+  margin-top:42px !important;
+  position:relative !important;
+  z-index:1 !important;
+}
+/* if the paper-trader card lives inside the main dashboard wrapper, force it lower */
+.paper-trader-panel,
+.autonomous-paper-panel,
+.real-data-paper-trader,
+.dashboard-summary-panel,
+.trading-status-panel{
+  margin-top:36px !important;
+}
+@media(max-width:720px){
+  .council-stage{
+    padding-top:104px !important;
+    padding-bottom:180px !important;
+    min-height:860px !important;
+  }
+  .decision-card-slot{top:8px !important;}
+  .council-stage + .page-panel,
+  .council-stage + section,
+  .council-stage + .v214-research,
+  .council-stage + .v213-diagnostics{margin-top:28px !important;}
+}
