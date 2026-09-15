@@ -9,7 +9,7 @@ type ChatRow = { id: string; at: string; bot: string; message: string; kind: "co
 type AutopilotPayload = {
   running: boolean;
   mode: "paper";
-  dataMode: "adapter" | "waiting";
+  dataMode: "adapter" | "dexscreener";
   intervalMs: number;
   scanningChains: string[];
   currentChain: string;
@@ -77,25 +77,45 @@ function ago(value?: string) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-function DecisionCard({ result, replaying }: { result: WarRoomResult | null; replaying: boolean }) {
-  const decision = result?.decision ?? "WATCH";
-  const symbol = result?.snapshot.symbol ?? "WAVE";
-  const chain = result?.snapshot.chain ?? "Solana";
-  const currentPrice = result?.snapshot.price ?? 0.0124;
-  const conviction = result?.conviction ?? 78;
-  const riskScore = result?.risk.riskScore ?? 52;
+function DecisionCard({ result, replaying, dataMode, currentChain }: { result: WarRoomResult | null; replaying: boolean; dataMode?: "adapter" | "dexscreener"; currentChain?: string }) {
+  if (!result) {
+    return (
+      <section className="decision-card decision-card-empty" aria-live="polite">
+        <div className="decision-card-top">
+          <div className="asset-heading"><span className="asset-logo live-logo">●</span><div><h2>LIVE FEED</h2><p>{currentChain ?? "Solana"}</p></div></div>
+          <div className="decision-badge badge-watch">SCANNING<small>Real market data only</small></div>
+        </div>
+        <div className="decision-stats">
+          <div><strong>—</strong><span>Current Price</span></div>
+          <div><strong>—</strong><span>Conviction</span></div>
+          <div><strong>—</strong><span>Risk Level</span></div>
+          <div className="spark-wrap waiting-spark" aria-hidden="true"><svg viewBox="0 0 120 42" preserveAspectRatio="none"><polyline points="0,30 18,30 34,30 50,30 65,30 83,30 99,30 120,30" /></svg></div>
+        </div>
+        <p className="decision-thesis">Waiting for the first qualifying live candidate from {dataMode === "adapter" ? "your configured market-data adapter" : "DEX Screener"}. Demo tokens and placeholder prices are disabled.</p>
+        <div className="decision-options" aria-label="Council decision states"><span className="buy">BUY</span><span className="watch">WATCH</span><span className="skip">SKIP</span></div>
+      </section>
+    );
+  }
+
+  const decision = result.decision;
+  const symbol = result.snapshot.symbol;
+  const chain = result.snapshot.chain;
+  const currentPrice = result.snapshot.price;
+  const conviction = result.conviction;
+  const riskScore = result.risk.riskScore;
   const risk = riskLabel(riskScore);
-  const cio = result?.agents.find((agent) => agent.id === "cio");
-  const thesis = cio?.summary ?? "Council is autonomously scanning for the next asymmetric setup.";
+  const cio = result.agents.find((agent) => agent.id === "cio");
+  const thesis = cio?.summary ?? "Council evaluating live market evidence.";
   const activeSkip = decision === "SKIP" || decision === "EXIT";
-  const spark = result && result.snapshot.priceChange24h < 0
+  const spark = result.snapshot.priceChange24h < 0
     ? "0,7 18,14 34,10 50,23 65,18 83,31 99,27 120,39"
     : "0,36 18,27 34,31 50,20 65,29 83,14 99,19 120,2";
+  const source = result.snapshot.dataProvenance?.marketSource === "dexscreener" ? "DEX Screener live" : "Live adapter";
 
   return (
     <section className="decision-card" aria-live="polite">
       <div className="decision-card-top">
-        <div className="asset-heading"><span className="asset-logo">{symbol.slice(0, 1)}</span><div><h2>${symbol}</h2><p>{chain}</p></div></div>
+        <div className="asset-heading"><span className="asset-logo">{symbol.slice(0, 1)}</span><div><h2>${symbol}</h2><p>{chain} · {source}</p></div></div>
         <div className={`decision-badge badge-${decision.toLowerCase()}`}>{decision}<small>{replaying ? "Council reasoning replay" : "Current Decision"}</small></div>
       </div>
       <div className="decision-stats">
@@ -105,7 +125,7 @@ function DecisionCard({ result, replaying }: { result: WarRoomResult | null; rep
         <div className="spark-wrap" aria-hidden="true"><svg viewBox="0 0 120 42" preserveAspectRatio="none"><polyline points={spark} /></svg></div>
       </div>
       <p className="decision-thesis">{thesis}</p>
-      {result && <div className="decision-context-mini"><span><b>{result.councilProcess.lane === "meme" ? result.memeRegime.label : result.regime.label}</b><small>{result.councilProcess.lane === "meme" ? "Meme lane" : "Regime"}</small></span><span><b>{result.councilProcess.alignedBots}/8</b><small>Bot alignment</small></span><span><b>{result.memeRegime.isMeme ? `${result.memeRegime.launchVelocityScore.toFixed(0)}/100` : `${result.alpha.score}/100`}</b><small>{result.memeRegime.isMeme ? "Launch velocity" : "Alpha"}</small></span><span><b>{result.councilProcess.executorVote}</b><small>Executor</small></span></div>}
+      <div className="decision-context-mini"><span><b>{result.councilProcess.lane === "meme" ? result.memeRegime.label : result.regime.label}</b><small>{result.councilProcess.lane === "meme" ? "Meme lane" : "Regime"}</small></span><span><b>{result.councilProcess.alignedBots}/8</b><small>Bot alignment</small></span><span><b>{result.memeRegime.isMeme ? `${result.memeRegime.launchVelocityScore.toFixed(0)}/100` : `${result.alpha.score}/100`}</b><small>{result.memeRegime.isMeme ? "Launch velocity" : "Alpha"}</small></span><span><b>{result.councilProcess.executorVote}</b><small>Executor</small></span></div>
       <div className="decision-options" aria-label="Council decision states"><span className={decision === "BUY" ? "active buy" : "buy"}>BUY</span><span className={decision === "WATCH" ? "active watch" : "watch"}>WATCH</span><span className={activeSkip ? "active skip" : "skip"}>{decision === "EXIT" ? "EXIT" : "SKIP"}</span></div>
     </section>
   );
@@ -170,22 +190,22 @@ export default function WarRoomDashboard() {
   return (
     <main className="light-app">
       <header className="site-header">
-        <a className="site-brand" href="#live"><span className="brand-orbit" /><strong>Bot War Room V2.11</strong></a>
+        <a className="site-brand" href="#live"><span className="brand-orbit" /><strong>Bot War Room V2.11.2</strong></a>
         <nav className="site-nav"><a className="active" href="#live">Live</a><a href="#chat">Council</a><a href="#trades">Performance</a><a href="#roster">Bots</a><a href="#system">System</a></nav>
         <div className="header-actions"><button className="moon-button" aria-label="Appearance">◐</button><button className="sign-button">Sign In</button><span className="autonomous-pill"><i /> AUTONOMOUS</span></div>
       </header>
 
       <section id="live" className="council-stage">
-        <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} /></div>
+        <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
         <div className="table-scene" aria-label="Eight-bot council meeting room">
           <img className="council-reference-art" src={COUNCIL_ART_DATA_URI} alt="Eight Bot War Room agents seated around the council table" draggable={false} />
           {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={talking && bot.id === currentTurn?.agentId} speech={bot.id === currentTurn?.agentId ? currentTurn?.message : undefined} context={bot.id === currentTurn?.agentId && replayResult ? `$${replayResult.snapshot.symbol} · ${currentTurn?.round}` : undefined} />)}
         </div>
-        <div className="live-caption"><span className={`status-dot ${talking ? "talking" : ""}`} /><b>{talking ? `${roomBots.find((b) => b.id === currentTurn?.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{talking ? currentTurn?.message : status?.dataMode === "adapter" ? `Scanning ${status.currentChain} · ${status.scanCount} cycles · ${status.buyCount} automatic paper entries` : "Waiting for live market-data adapter — no demo trade will auto-execute"}</span></div>
+        <div className="live-caption"><span className={`status-dot ${talking ? "talking" : ""}`} /><b>{talking ? `${roomBots.find((b) => b.id === currentTurn?.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{talking ? currentTurn?.message : status ? `REAL DATA · ${status.dataMode === "adapter" ? "adapter" : "DEX Screener"} · scanning ${status.currentChain} · ${status.scanCount} cycles · ${status.buyCount} automatic paper entries` : "Starting real-data paper scanner"}</span></div>
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>No human controls</strong><p>Launch Scout rotates across all six chains. The eight-bot Council debates every candidate, CIO decides, Executor automatically paper-routes approved BUYs, and Position Guardian manages the trade afterward.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>No human controls</strong><p>Launch Scout rotates across all six chains using real market observations. The eight-bot Council debates every candidate, CIO decides, Executor automatically paper-routes approved BUYs, and Position Guardian manages the trade afterward.</p></div>
         <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 6}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "5s"}</b><small>scan cadence</small></span><span><b>{status?.scanCount ?? 0}</b><small>cycles</small></span><span><b>{status?.buyCount ?? 0}</b><small>auto entries</small></span></div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
       </section>
@@ -211,7 +231,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="system" className="system-strip page-panel">
-        <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side.</span></div>
+        <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled.</span></div>
         <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
         <div><b>Safety still deterministic</b><span>The eight bots cannot vote around honeypot, sellability, concentration, authority or portfolio kill-switch vetoes.</span></div>
       </section>

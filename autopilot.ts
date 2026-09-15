@@ -2,7 +2,7 @@ import { buildCouncilDiscussion } from "./debate";
 import { executePaper } from "./execution";
 import { runWarRoom } from "./engine";
 import { resolveAdaptiveWeights, relevantMemoryHints } from "./learning-store";
-import { fetchLiveCandidate } from "./market-data";
+import { fetchLiveCandidate, liveMarketDataMode } from "./market-data";
 import { assessPaperEntryEligibility, ensurePositionGuardianLoop, registerPaperPosition } from "./position-manager";
 import { listManagedPositions } from "./position-store";
 import { loadLatestProfitability } from "./profitability-store";
@@ -25,7 +25,7 @@ export type AutopilotChatRow = {
 export type AutopilotStatus = {
   running: boolean;
   mode: "paper";
-  dataMode: "adapter" | "waiting";
+  dataMode: "adapter" | "dexscreener";
   intervalMs: number;
   scanningChains: Chain[];
   currentChain: Chain;
@@ -57,7 +57,7 @@ function initialState(): AutopilotStatus {
   return {
     running: false,
     mode: "paper",
-    dataMode: process.env.MARKET_DATA_BASE_URL ? "adapter" : "waiting",
+    dataMode: liveMarketDataMode(),
     intervalMs: intervalMs(),
     scanningChains: CHAINS,
     currentChain: CHAINS[0],
@@ -127,17 +127,12 @@ async function scanOneChain(chain: Chain) {
   current.currentChain = chain;
   current.lastScanAt = new Date().toISOString();
   current.nextScanAt = new Date(Date.now() + current.intervalMs).toISOString();
-  current.dataMode = process.env.MARKET_DATA_BASE_URL ? "adapter" : "waiting";
-
-  if (!process.env.MARKET_DATA_BASE_URL) {
-    current.lastError = "Autonomous scanner is waiting for MARKET_DATA_BASE_URL. Demo candidates are never auto-executed.";
-    return;
-  }
+  current.dataMode = liveMarketDataMode();
 
   const snapshot = await fetchLiveCandidate(chain);
   current.scanCount += 1;
   if (!snapshot) {
-    addChat("Launch Scout", `${chain}: no fresh candidate returned by the live market-data adapter.`, "system");
+    addChat("Launch Scout", `${chain}: no qualifying real candidate returned by ${current.dataMode === "adapter" ? "the configured market-data adapter" : "DEX Screener live discovery"}.`, "system");
     return;
   }
 
@@ -194,13 +189,13 @@ export function ensureAutonomousWarRoom() {
   const current = state();
   current.running = true;
   current.intervalMs = intervalMs();
-  current.dataMode = process.env.MARKET_DATA_BASE_URL ? "adapter" : "waiting";
+  current.dataMode = liveMarketDataMode();
   if (globalState.__botWarRoomAutopilotTimer) return;
 
   // Start without waiting for a browser click. Railway's long-lived Node process owns this loop.
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimer = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `Autonomous War Room started. Paper scanning rotates across ${CHAINS.length} chains every ${Math.round(current.intervalMs / 1000)} seconds; approved BUYs execute automatically.`, "system");
+  addChat("System", `Autonomous War Room started on REAL market data (${current.dataMode}). Paper scanning rotates across ${CHAINS.length} chains every ${Math.round(current.intervalMs / 1000)} seconds; Council-approved BUYs execute automatically.`, "system");
 }
 
 export async function getAutopilotStatus() {

@@ -12,6 +12,31 @@ export type Chain =
 
 export type ChainFamily = "solana" | "evm";
 
+
+export type DataQuality = {
+  sellability: boolean;
+  honeypot: boolean;
+  taxes: boolean;
+  holders: boolean;
+  top10: boolean;
+  liquidityLock: boolean;
+  authorities: boolean;
+  ownership: boolean;
+  bundled: boolean;
+  smartMoney: boolean;
+  socialVelocity: boolean;
+};
+
+export type DataProvenance = {
+  live: boolean;
+  marketSource: "adapter" | "dexscreener";
+  securitySource: "goplus" | "adapter" | "unavailable";
+  fetchedAt: string;
+  pairAddress?: string;
+  quality: DataQuality;
+  notes?: string[];
+};
+
 export type MarketContext = {
   benchmark24hPct?: number;
   benchmark7dPct?: number;
@@ -73,6 +98,7 @@ export type MarketSnapshot = {
   context?: MarketContext;
   assetClass?: "meme" | "standard" | "unknown";
   launchMetrics?: LaunchMetrics;
+  dataProvenance?: DataProvenance;
 };
 
 export type MarketRegimeId =

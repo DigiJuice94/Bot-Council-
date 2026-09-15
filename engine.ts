@@ -59,7 +59,14 @@ export function runWarRoom(snapshot: MarketSnapshot, options?: {
   const socialScore = 44 + Math.min(44, snapshot.socialVelocityPct / 6) + (regime.id === "meme_expansion" ? 6 : 0);
   const walletScore = 49 + snapshot.smartMoneyBuys * 6 - snapshot.smartMoneySells * 7 + (snapshot.buySellRatio - 1) * 7 + (memeLane ? Math.min(18, Math.max(0, holderGrowth) * 1.1) + Math.max(0, launchVelocity.holderScore - 50) * 0.35 : 0);
   const quantScore = 42 + (snapshot.buySellRatio - 1) * 23 + Math.min(18, snapshot.priceChange24h * 0.4) - snapshot.volatility * (memeLane ? 4.5 : 9) + (alpha.score - 50) * 0.18 + (memeLane ? Math.min(18, volumeToMc * 12) + (memeRegime.breakoutScore - 50) * 0.10 + Math.max(0, launchVelocity.volumeScore - 50) * 0.16 : 0);
+  const dataQuality = snapshot.dataProvenance?.quality;
   let contractScore = 94 - Math.max(0, snapshot.top10Pct - 20) * 0.55 - snapshot.bundledPct * 0.7 - snapshot.sellTaxPct * 1.5;
+  if (snapshot.dataProvenance?.marketSource === "dexscreener" && dataQuality) {
+    if (!dataQuality.top10) contractScore -= 12;
+    if (!dataQuality.bundled) contractScore -= 10;
+    if (!dataQuality.liquidityLock) contractScore -= 6;
+    if (!dataQuality.taxes) contractScore -= 6;
+  }
   if (!snapshot.liquidityLocked) contractScore -= 10;
   if (snapshot.proxyContract) contractScore -= 6;
   if (!risk.passed) contractScore = 5;
@@ -74,7 +81,7 @@ export function runWarRoom(snapshot: MarketSnapshot, options?: {
     agent("social", "Social Scout", "SS", rawCore[1], rawCore[1] >= 70 ? "Narrative velocity is accelerating." : "Social traction is not decisive.", `Mention velocity ${Math.round(snapshot.socialVelocityPct)}% vs baseline`, [`Social velocity ${snapshot.socialVelocityPct.toFixed(0)}%`, `Market context ${regime.label}`], "#b05cff"),
     agent("wallet", "Wallet Tracker", "WT", rawCore[2], rawCore[2] >= 70 ? "Wallet/holder participation is expanding." : "Wallet flow needs confirmation.", `${snapshot.smartMoneyBuys} tracked buys · ${snapshot.smartMoneySells} tracked sells · holder growth ${holderGrowth.toFixed(1)}%`, [`Net tracked flow ${snapshot.smartMoneyBuys - snapshot.smartMoneySells}`, `Holder count ${snapshot.holders.toLocaleString()}`, `Holder growth ${holderGrowth.toFixed(1)}%`, `${launchVelocity.holdersPerMinute.toFixed(2)} holders/min`], "#29e693"),
     agent("quant", "Quant Bot", "QB", rawCore[3], rawCore[3] >= 70 ? "Token-level momentum, turnover and flow align." : "Risk/reward is not clean yet.", `Alpha ${alpha.score}/100 · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume/MC ${volumeToMc.toFixed(2)}x`, [`Volume 24h $${Math.round(snapshot.volume24h).toLocaleString()}`, `Liquidity/MC ${(snapshot.liquidity / Math.max(snapshot.marketCap, 1) * 100).toFixed(1)}%`, `Reward/risk proxy ${alpha.rewardRiskProxy.toFixed(2)}x`, `$${Math.round(launchVelocity.volumeUsdPerMinute).toLocaleString()}/min launch volume`], "#28c9ff"),
-    agent("contract", "Contract Bot", "CB", rawCore[4], risk.passed ? "Core security checks passed." : "Hard safety veto triggered.", risk.passed ? `Top 10 ${snapshot.top10Pct.toFixed(1)}% · bundles ${snapshot.bundledPct.toFixed(1)}%` : risk.hardBlocks[0], risk.passed ? risk.passedChecks.slice(0, 3) : risk.hardBlocks.slice(0, 3), "#ffd34f"),
+    agent("contract", "Contract Bot", "CB", rawCore[4], risk.passed ? "Verified safety checks passed; unknown fields remain penalized." : "Hard safety veto triggered.", risk.passed ? `${dataQuality?.top10 === false ? "Top 10 unverified" : `Top 10 ${snapshot.top10Pct.toFixed(1)}%`} · ${dataQuality?.bundled === false ? "bundles unverified" : `bundles ${snapshot.bundledPct.toFixed(1)}%`}` : risk.hardBlocks[0], risk.passed ? [...risk.passedChecks.slice(0, 2), ...risk.warnings.slice(0, 1)] : risk.hardBlocks.slice(0, 3), "#ffd34f"),
     agent("bear", "Bear Bot", "BB", rawCore[5], rawCore[5] >= 58 ? "Red team found no fatal bear case." : "Downside case is too strong.", risk.warnings[0] ?? `${memeLane ? memeRegime.label : regime.label} stress test`, risk.warnings.length ? risk.warnings.slice(0, 3) : [memeRegime.reasons[0] ?? regime.reasons[0] ?? "No elevated deterministic warnings", `Volatility ${(snapshot.volatility * 100).toFixed(0)}%`], "#ff5f6d"),
   ];
   const preMeeting = captureIndependentReads(rawAgents, preMeetingAt, memoryHints);
@@ -197,6 +204,7 @@ export function runWarRoom(snapshot: MarketSnapshot, options?: {
   const preMeetingAudit = preMeeting.map((read) => `PRE-MEETING · ${read.agentId.toUpperCase()} · ${read.score}% · ${read.thesis}${read.memoryHints?.length ? ` · ${read.memoryHints.length} relevant memories` : ""}`);
   const auditTrail = [
     `${snapshot.chain}: $${snapshot.symbol} admitted to War Room`,
+    `DATA PROVENANCE · ${snapshot.dataProvenance?.live ? "LIVE" : "ADAPTER"} · market ${snapshot.dataProvenance?.marketSource ?? "adapter"} · security ${snapshot.dataProvenance?.securitySource ?? "adapter"}`,
     `DECISION LANE · ${memeLane ? `MEME-NATIVE · ${memeRegime.label} · breakout ${memeRegime.breakoutScore}/100` : `STANDARD · ${regime.label}`}`,
     `MARKET CONTEXT · ${regime.label} · ${regime.confidence}% confidence${memeLane ? ` · sizing modifier ${memeRegime.broadMarketModifier.toFixed(2)}x, not directional veto` : ` · trade ${regime.tradeAllowed ? "ALLOWED" : "BLOCKED"}`}`,
     `ALPHA EVIDENCE · ${alpha.action} · ${alpha.score}/100 · reward/risk proxy ${alpha.rewardRiskProxy.toFixed(2)}x`,

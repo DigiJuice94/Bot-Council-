@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runWarRoom } from "@/lib/engine";
-import { fetchLiveCandidate } from "@/lib/market-data";
-import { createDemoScoutCandidate } from "@/lib/discovery";
+import { fetchLiveCandidate, liveMarketDataMode } from "@/lib/market-data";
 import { ensurePositionGuardianLoop } from "@/lib/position-manager";
 import { classifyMarketRegime } from "@/lib/regime";
 import { relevantMemoryHints, resolveAdaptiveWeights } from "@/lib/learning-store";
@@ -25,13 +24,18 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedChain = chain ?? previous?.chain ?? "Solana";
-  let snapshot: MarketSnapshot | null = null;
-  try {
-    snapshot = await fetchLiveCandidate(requestedChain);
-  } catch {
-    snapshot = null;
+  const snapshot = await fetchLiveCandidate(requestedChain);
+  if (!snapshot) {
+    return NextResponse.json({
+      ok: false,
+      chain: requestedChain,
+      dataMode: liveMarketDataMode(),
+      message: "No qualifying real market candidate is available right now. Demo/fake candidates are disabled.",
+    }, {
+      status: 503,
+      headers: { "Cache-Control": "no-store", "X-Market-Data-Mode": liveMarketDataMode() },
+    });
   }
-  if (!snapshot) snapshot = createDemoScoutCandidate(previous, requestedChain);
 
   const regime = classifyMarketRegime(snapshot);
   const [learning, memoryHints, profitability] = await Promise.all([
@@ -51,7 +55,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(result, {
     headers: {
       "Cache-Control": "no-store",
-      "X-Market-Data-Mode": process.env.MARKET_DATA_BASE_URL ? "adapter" : "demo",
+      "X-Market-Data-Mode": liveMarketDataMode(),
       "X-Learning-Mode": learning.source,
     },
   });

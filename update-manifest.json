@@ -1,41 +1,47 @@
 {
-  "version": "2.11",
-  "name": "Autonomous Council \u2014 Guaranteed Council Artwork",
+  "version": "2.11.2",
+  "name": "Real Paper Feed — No Demo Runtime",
   "features": {
     "server_boot_autopilot": true,
     "no_scan_button": true,
     "no_manual_paper_execute_button": true,
     "automatic_paper_entries_after_council_approval": true,
     "six_chain_round_robin_scanning": true,
-    "position_guardian_server_loop_retained": true,
+    "direct_dexscreener_live_discovery": true,
+    "goplus_security_enrichment": true,
+    "position_guardian_live_marks": true,
+    "demo_runtime_fallback_removed": true,
+    "fake_decision_card_removed": true,
+    "critical_unknown_security_fails_closed": true,
+    "unknown_data_not_fabricated": true,
     "eight_bot_decision_process_retained": true,
     "launch_velocity_retained": true,
     "winner_engine_retained": true,
     "embedded_exact_council_art_data_uri": true,
-    "public_asset_fallback_retained": true,
     "chat_log_ui": true,
     "trades_log_ui": true,
-    "bot_roster_ui": true,
-    "hard_risk_vetoes_unchanged": true,
-    "demo_candidates_never_auto_executed": true
+    "bot_roster_ui": true
   },
-  "new_files": [
-    "autopilot.ts",
-    "council-art.ts",
-    "instrumentation.ts",
-    "route (6).ts"
-  ],
   "major_changed_files": [
+    "market-data.ts",
+    "risk.ts",
+    "engine.ts",
+    "regime.ts",
+    "route.ts",
+    "autopilot.ts",
     "WarRoomDashboard.tsx",
     "globals.css",
+    "types.ts",
+    "discovery.ts",
     "prepare-structure.mjs",
     "package.json",
-    "UPDATE_NOTES.md"
+    "UPDATE_NOTES.md",
+    "V2.11.2_TEST_REPORT.md"
   ],
   "validation": {
     "core_typescript": "passed",
-    "prepare_structure_syntax": "passed",
-    "embedded_art_exact_match": true,
-    "manual_trade_controls_removed": true
+    "live_provider_mapping_fixture": "passed",
+    "critical_security_fail_closed": "passed",
+    "hardcoded_fake_token_search": "passed"
   }
 }

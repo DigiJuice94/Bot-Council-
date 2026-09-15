@@ -31,7 +31,6 @@ const mappings = [
   ['engine.ts', 'lib/engine.ts'],
   ['execution.ts', 'lib/execution.ts'],
   ['experiments.ts', 'lib/experiments.ts'],
-  ['mock-market.ts', 'lib/mock-market.ts'],
   ['risk.ts', 'lib/risk.ts'],
   ['types.ts', 'lib/types.ts'],
   ['route.ts', 'app/api/cycle/route.ts'],

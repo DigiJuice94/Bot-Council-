@@ -18,8 +18,8 @@ const definitions: Record<MarketRegimeId, Omit<MarketRegime, "confidence" | "rea
 
 export function classifyMarketRegime(snapshot: MarketSnapshot): MarketRegime {
   const c = snapshot.context ?? {};
-  const benchmark24h = pct(c.benchmark24hPct, snapshot.priceChange24h * 0.25);
-  const benchmark7d = pct(c.benchmark7dPct, benchmark24h * 2.5);
+  const benchmark24h = pct(c.benchmark24hPct, 0);
+  const benchmark7d = pct(c.benchmark7dPct, 0);
   const chainVolumeChange = pct(c.chainVolumeChangePct, snapshot.volumeAccelerationPct ?? snapshot.socialVelocityPct * 0.18);
   const newPairsChange = pct(c.newPairsChangePct, 0);
   const liquidityRatioPct = snapshot.marketCap > 0 ? snapshot.liquidity / snapshot.marketCap * 100 : 0;

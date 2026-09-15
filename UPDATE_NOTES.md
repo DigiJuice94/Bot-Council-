@@ -1,37 +1,24 @@
-# Bot War Room V2.11 — Autonomous Council
+# Bot War Room V2.11.2 — Real Paper Feed
 
-V2.11 fixes both website issues reported after V2.10.1.
+This patch removes the remaining fake/demo runtime path from the autonomous website.
 
-## 1. Council artwork cannot disappear anymore
+## What was wrong in V2.11
 
-The exact supplied eight-bot/table artwork is now embedded into the compiled client as a PNG data URI in `council-art.ts`. The browser no longer depends on `/public/bot-council-reference.png` successfully resolving. The original PNG and public copy mapping are still retained as a fallback/provenance asset, but the rendered council scene uses the embedded asset.
+The autonomous server correctly refused to auto-execute demo candidates when `MARKET_DATA_BASE_URL` was missing, but the dashboard still rendered a hard-coded `$WAVE` / `$0.0124` / `78%` placeholder. The `/api/cycle` route also still had a fallback to `createDemoScoutCandidate()`. That made the site *look* like it was evaluating a token even though the paper trader was waiting for a market-data adapter.
 
-This specifically fixes the V2.10.1 failure mode where CSS hid the stand-in bots but a missing/404 public image left the War Room blank.
+## V2.11.2 fixes
 
-## 2. No human scan or paper-buy controls
+- **No fake token card:** when there is no real candidate yet, the decision card says `LIVE FEED / SCANNING` and renders dashes instead of a fake token, price, conviction, or risk level.
+- **No demo fallback in `/api/cycle`:** if no real candidate exists, the API returns a real-data unavailable response instead of inventing a token.
+- **Built-in live discovery:** when no custom adapter is explicitly selected, the server now discovers real candidates from DEX Screener across Solana, Ethereum, Base, BNB Chain, Monad, and Robinhood Chain.
+- **Real mark prices for Guardian:** open paper positions are refreshed from the live DEX pair instead of a mock snapshot.
+- **GoPlus security enrichment:** live candidates are enriched with contract/security information. Solana uses GoPlus' Solana token-security endpoint; EVM chains use the chain-specific token-security endpoint.
+- **Fail closed on critical unknown safety:** if sellability/honeypot verification is unavailable, or Solana mint/freeze authority cannot be verified, the deterministic risk gate blocks the paper entry instead of assuming the token is safe.
+- **Unknown means unknown:** bundled supply, smart-money flow, and social velocity are not fabricated. Missing providers create warnings and reduce paper position size.
+- **Default is real data:** a legacy `MARKET_DATA_BASE_URL` is used for live scanning only when `WAR_ROOM_MARKET_DATA_MODE=adapter` is explicitly set. Otherwise the autonomous scanner uses direct live DEX discovery.
+- **Eight-bot Council remains intact:** Launch Scout, Social Scout, Wallet Tracker, Quant Bot, Contract Bot, Bear Bot, CIO, and Executor still form the decision path. This patch changes the evidence source, not the Council architecture.
+- **Automatic paper execution remains server-owned:** no Scan button and no Execute Paper button are required. A verified Council BUY is automatically paper-filled and handed to Position Guardian.
 
-`Scan next candidate`, the auto-scout toggle, and `Execute paper` have been removed from the UI.
+## Important scope
 
-A server-owned `autopilot.ts` starts at Node server boot through Next.js `instrumentation.ts`. It rotates across Solana, Ethereum, Base, BNB Chain, Monad and Robinhood Chain. When the eight-bot Council reaches an approved BUY and deterministic risk allows the order, Executor performs the paper fill automatically and registers it with Position Guardian.
-
-Guardian remains a separate server loop responsible for scale-ins, trims, stops, re-entry rules and final exits.
-
-The default autonomous mode remains paper. Live wallet signing is not silently enabled.
-
-## 3. No fake autonomous trading
-
-The autonomous worker only scans `fetchLiveCandidate()` from `MARKET_DATA_BASE_URL`. If the live market-data adapter is not connected, it waits and reports that state. Demo candidates are never auto-executed.
-
-`WAR_ROOM_SCAN_INTERVAL_MS` can change the server scan cadence (2s–60s, default 5s). Chains rotate round-robin, so all six are continuously covered without a person selecting tabs.
-
-## 4. Dashboard matches the agreed monitoring layout
-
-The page now centers the War Room scene and then shows:
-
-- autonomous status
-- Chat Log from the real Council discussion
-- Trades Log from Guardian-managed positions
-- the eight-role Bot Roster
-- compact system/safety status
-
-The website is now a monitor for an autonomous system, not a control panel a person must click through.
+This is **paper trading**, not live-money execution. Direct DEX discovery does not magically provide every data domain. V2.11.2 deliberately leaves unavailable social/smart-money/bundle fields unverified rather than making them up. Dedicated providers can be connected later to strengthen those bots without changing the autonomous paper path.
