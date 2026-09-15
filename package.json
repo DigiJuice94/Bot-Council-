@@ -1,6 +1,6 @@
 {
-  "name": "bot-war-room-v2-12-1-real-paper",
-  "version": "0.2.12-1",
+  "name": "bot-war-room-v2-12-2-real-market-paper-trader",
+  "version": "0.2.12-2",
   "private": true,
   "scripts": {
     "dev": "next dev",

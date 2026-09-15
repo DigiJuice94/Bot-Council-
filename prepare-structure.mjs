@@ -3,6 +3,16 @@ import { dirname, resolve } from 'node:path';
 
 const root = process.cwd();
 
+// Production runtime uses REAL market data only. Legacy demo/test files must never
+// participate in the Railway build, even if an older upload left them behind.
+for (const staleFile of ['smoke.ts', 'mock-market.ts']) {
+  const target = resolve(root, staleFile);
+  if (existsSync(target)) {
+    rmSync(target, { force: true });
+    console.log(`[structure] removed stale ${staleFile}`);
+  }
+}
+
 // Compact releases are often uploaded over an older Railway working tree.
 // Remove generated folders first so stale files from prior versions cannot
 // participate in Next.js/TypeScript builds (for example old tests/smoke.ts).

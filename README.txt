@@ -1,10 +1,13 @@
-Bot War Room V2.12.1 — compact deployment folder (stale-build cleanup)
+BOT WAR ROOM V2.12.2 — PRODUCTION CLEANUP
 
-This package intentionally contains ONE canonical copy of each source file.
-The build command runs prepare-structure.mjs, which creates app/, lib/, components/, public/, and api routes during deployment.
+This is the compact one-folder real-market paper trader.
 
-Paper wallet start: $1,000.
-No demo candidate fallback is included.
-Set your Railway environment variables from .env.example.
+Production data path:
+Birdeye/DEX Screener -> Helius/Birdeye/GoPlus security -> 8-bot Council -> CIO -> Executor -> deterministic risk -> $1,000 paper wallet -> Position Guardian.
 
-Build fix: prepare-structure.mjs now deletes stale generated app/lib/components/tests trees before rebuilding them, so old smoke tests from previous uploads cannot break deployment.
+There is no mock-market module or smoke-test market generator in this package.
+The build script also deletes stale smoke.ts, mock-market.ts, generated tests/, app/, lib/, and components/ from older Railway uploads before Next.js type-checks the project.
+
+Required Railway variables include BIRDEYE_API_KEY, HELIUS_API_KEY, SOLANA_RPC_URL, JUPITER_API_KEY, REDIS_URL and the PAPER_/WAR_ROOM_ variables already discussed.
+
+This build is paper trading: real market data, simulated capital.

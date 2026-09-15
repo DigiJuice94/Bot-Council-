@@ -38,6 +38,8 @@
   "exclude": [
     "node_modules",
     ".smoke",
-    "tests"
+    "tests",
+    "smoke.ts",
+    "mock-market.ts"
   ]
 }
