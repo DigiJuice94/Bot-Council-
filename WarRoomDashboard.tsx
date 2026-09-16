@@ -121,11 +121,21 @@ function filterHistoryByRange<T extends { at: number }>(rows: T[], range: MainGr
   return rows.filter((row) => row.at >= cutoff);
 }
 
+function graphBounds(values: number[]) {
+  const finite = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!finite.length) return { min: 0, max: 1 };
+  const rawMin = Math.min(...finite);
+  const rawMax = Math.max(...finite);
+  const rawSpan = Math.max(1e-12, rawMax - rawMin);
+  // Zoom out slightly so the live line has breathing room above and below.
+  const fallbackSpan = Math.max(Math.abs(rawMax) * 0.02, 1e-8);
+  const span = Math.max(rawSpan, fallbackSpan);
+  const extra = span * 0.18;
+  return { min: rawMin - extra, max: rawMax + extra };
+}
+
 function graphLabels(values: number[], count = 6) {
-  const finite = values.filter(Number.isFinite);
-  if (!finite.length) return [];
-  const min = Math.min(...finite);
-  const max = Math.max(...finite);
+  const { min, max } = graphBounds(values);
   const span = Math.max(1e-12, max - min);
   return Array.from({ length: count }, (_, i) => max - (span * i) / Math.max(1, count - 1));
 }
@@ -138,10 +148,9 @@ function compactGraphValue(value: number, currency = false) {
   return value.toFixed(2);
 }
 
-function svgPolyline(values: number[], width = 1000, height = 220, pad = 16) {
+function svgPolyline(values: number[], scaleValues: number[], width = 1000, height = 220, pad = 16) {
   if (!values.length) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const { min, max } = graphBounds(scaleValues);
   const span = Math.max(0.00000001, max - min);
   const usableW = Math.max(1, width - pad * 2);
   const usableH = Math.max(1, height - pad * 2);
@@ -153,12 +162,28 @@ function svgPolyline(values: number[], width = 1000, height = 220, pad = 16) {
 }
 
 function relativeY(value: number, values: number[], height = 220, pad = 16) {
-  const finite = values.filter(Number.isFinite);
-  if (!finite.length) return height / 2;
-  const min = Math.min(...finite);
-  const max = Math.max(...finite);
+  const { min, max } = graphBounds(values);
   const span = Math.max(0.00000001, max - min);
   return pad + (1 - (value - min) / span) * Math.max(1, height - pad * 2);
+}
+
+function timeAxisLabel(timestamp: number, range: MainGraphRange) {
+  const date = new Date(timestamp);
+  if (range === "all") return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  if (range === "1h") return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: range === "1m" ? "2-digit" : undefined });
+}
+
+function graphTimeLabels(timestamps: number[], range: MainGraphRange, count = 5) {
+  if (!timestamps.length) return [];
+  const first = timestamps[0];
+  const last = timestamps[timestamps.length - 1];
+  if (timestamps.length === 1 || first === last) return [{ pct: 100, label: timeAxisLabel(last, range) }];
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = index / Math.max(1, count - 1);
+    const target = first + (last - first) * ratio;
+    return { pct: ratio * 100, label: timeAxisLabel(target, range) };
+  });
 }
 
 function DecisionCard({ result, replaying, dataMode, currentChain }: {
@@ -390,14 +415,24 @@ export default function WarRoomDashboard() {
   const selectedGraphPosition = mainGraphSelection === "portfolio" ? undefined : openPositions.find((position) => position.id === mainGraphSelection);
   const portfolioGraphRows: EquityHistoryPoint[] = filterHistoryByRange<EquityHistoryPoint>(equityHistory, mainGraphRange);
   const positionGraphRows: PositionHistoryPoint[] = selectedGraphPosition ? filterHistoryByRange<PositionHistoryPoint>(positionHistory[selectedGraphPosition.id] ?? [], mainGraphRange) : [];
-  const mainGraphValues = selectedGraphPosition ? positionGraphRows.map((point) => point.price) : portfolioGraphRows.map((point) => point.equity);
   const mainGraphCurrent = selectedGraphPosition ? selectedGraphPosition.markPrice : (status?.paperWallet?.equityUsd ?? 0);
+  const rawGraphValues = selectedGraphPosition ? positionGraphRows.map((point) => point.price) : portfolioGraphRows.map((point) => point.equity);
+  const rawGraphTimes = selectedGraphPosition ? positionGraphRows.map((point) => point.at) : portfolioGraphRows.map((point) => point.at);
+  // The last plotted point must always equal the current live value shown in the badge.
+  const mainGraphValues = mainGraphCurrent > 0
+    ? [...rawGraphValues.slice(0, -1), mainGraphCurrent]
+    : rawGraphValues;
+  const graphNow = Date.now();
+  const mainGraphTimes = mainGraphValues.length
+    ? [...rawGraphTimes.slice(0, Math.max(0, mainGraphValues.length - 1)), graphNow].slice(-mainGraphValues.length)
+    : [];
   const mainGraphEntry = selectedGraphPosition ? selectedGraphPosition.entryPrice : (status?.paperWallet?.startingCashUsd ?? 1000);
   const mainGraphStop = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 - (selectedGraphPosition.exitStrategy?.stopLossPct ?? 0) / 100) : undefined;
   const mainGraphTp1 = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 + ((selectedGraphPosition.exitStrategy?.takeProfits?.[0]?.gainPct ?? 0) / 100)) : undefined;
   const mainGraphHigh = selectedGraphPosition ? selectedGraphPosition.highWaterPrice : undefined;
   const mainGraphScale = [...mainGraphValues, mainGraphCurrent, mainGraphEntry, ...(mainGraphStop ? [mainGraphStop] : []), ...(mainGraphTp1 ? [mainGraphTp1] : []), ...(mainGraphHigh ? [mainGraphHigh] : [])].filter((value) => Number.isFinite(value) && value > 0);
   const mainGraphYAxis = graphLabels(mainGraphScale, 6);
+  const mainGraphXAxis = graphTimeLabels(mainGraphTimes, mainGraphRange, 5);
   const mainGraphPnlPct = selectedGraphPosition?.pnlPct ?? (status?.paperWallet?.totalReturnPct ?? 0);
   const mainGraphPositive = mainGraphPnlPct >= 0;
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
@@ -585,10 +620,11 @@ export default function WarRoomDashboard() {
               {mainGraphEntry > 0 && <line x1="0" y1={relativeY(mainGraphEntry, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphEntry, mainGraphScale, 420, 26)} className="market-entry-line" />}
               {mainGraphStop && <line x1="0" y1={relativeY(mainGraphStop, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphStop, mainGraphScale, 420, 26)} className="market-stop-line" />}
               {mainGraphTp1 && <line x1="0" y1={relativeY(mainGraphTp1, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphTp1, mainGraphScale, 420, 26)} className="market-target-line" />}
-              <polyline points={svgPolyline(mainGraphValues, 1000, 420, 26)} className={mainGraphPositive ? "market-main-line positive-line" : "market-main-line negative-line"} />
+              <polyline points={svgPolyline(mainGraphValues, mainGraphScale, 1000, 420, 26)} className="market-main-line" />
             </svg>
             <div className="market-y-axis">{mainGraphYAxis.map((value, index) => <span key={`${value}-${index}`} style={{top:`${(index/(Math.max(1,mainGraphYAxis.length-1)))*100}%`}}>{compactGraphValue(value,true)}</span>)}</div>
-            {mainGraphCurrent > 0 && <span className={mainGraphPositive ? "market-current-badge positive" : "market-current-badge negative"} style={{top:`${Math.max(3, Math.min(94, relativeY(mainGraphCurrent, mainGraphScale, 420, 26)/420*100))}%`}}>{compactGraphValue(mainGraphCurrent,true)}</span>}
+            <div className="market-x-axis">{mainGraphXAxis.map((tick, index) => <span key={`${tick.label}-${index}`} style={{left:`${tick.pct}%`}}>{tick.label}</span>)}</div>
+            {mainGraphCurrent > 0 && <span className="market-current-badge" style={{top:`${Math.max(3, Math.min(94, relativeY(mainGraphCurrent, mainGraphScale, 420, 26)/420*100))}%`}}>{compactGraphValue(mainGraphCurrent,true)}</span>}
             {!mainGraphValues.length && <div className="market-chart-empty">Waiting for live Guardian marks…</div>}
           </div>
 

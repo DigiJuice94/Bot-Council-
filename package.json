@@ -1,6 +1,6 @@
 {
-  "name": "bot-war-room-v2-20-1",
-  "version": "0.2.20-1",
+  "name": "bot-war-room-v2-20-2",
+  "version": "0.2.20-2",
   "private": true,
   "scripts": {
     "dev": "next dev",

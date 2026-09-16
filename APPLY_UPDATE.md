@@ -1,8 +1,7 @@
-# Apply Bot War Room V2.20.1
+# Apply Bot War Room V2.20.2
 
-Use this full one-folder package instead of V2.20.
+This is the full one-folder release.
 
-The only functional change from V2.20 is the CSS build repair in `v214.css`.
+Upload/replace the contents of `Bot-War-Room-V2.20.2-FULL` in the repository root and redeploy Railway.
 
-Railway build command remains:
-`node prepare-structure.mjs && next build`
+No new environment variables are required.
