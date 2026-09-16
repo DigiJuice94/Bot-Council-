@@ -4,6 +4,7 @@ import { applyFreshChainPatch } from './fresh-chain-patch.mjs';
 import { applyPositionSizingPatch } from './position-sizing-patch.mjs';
 import { applyExitLiquidityPatch } from './exit-liquidity-patch.mjs';
 import { applyTrainingTradeSizePatch } from './training-trade-size-patch.mjs';
+import { applyTokenDisplayPatch } from './token-display-patch.mjs';
 
 const root = process.cwd();
 
@@ -96,5 +97,6 @@ applyFreshChainPatch(root);
 applyPositionSizingPatch(root);
 applyExitLiquidityPatch(root);
 applyTrainingTradeSizePatch(root);
+applyTokenDisplayPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);

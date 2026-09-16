@@ -867,3 +867,38 @@
     padding-bottom:6px;
   }
 }
+
+
+/* V2.23 — token images, contract copy, buy size and USD P/L */
+.token-avatar{
+  width:44px;height:44px;flex:0 0 44px;border-radius:50%;overflow:hidden;
+  display:grid;place-items:center;background:#0b0c10;border:1px solid #252832;
+  box-shadow:0 4px 12px rgba(15,23,42,.08);
+}
+.token-avatar.compact{width:28px;height:28px;flex-basis:28px}
+.token-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.token-avatar b{color:#fff;font-size:15px;line-height:1}
+.token-avatar.compact b{font-size:10px}
+.enriched-trades-table{overflow-x:auto}
+.enriched-trades-table .trade-row{
+  grid-template-columns:minmax(235px,1.65fr) minmax(82px,.72fr) minmax(78px,.65fr) minmax(92px,.8fr) minmax(92px,.8fr) minmax(92px,.72fr) minmax(92px,.72fr) minmax(72px,.55fr)!important;
+  min-width:1040px;gap:12px!important;align-items:center;
+}
+.trade-token-cell{display:flex;align-items:center;gap:10px;min-width:0}
+.trade-token-copy{min-width:0}
+.trade-token-copy>b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ca-line{display:flex;align-items:center;gap:6px;margin-top:4px;min-width:0}
+.ca-line code{
+  max-width:115px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8e949e;
+  font:600 8px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+.ca-line button{
+  border:1px solid #e2e5e9;border-radius:999px;background:#fff;color:#5f6670;
+  padding:3px 6px;font-size:7px;font-weight:850;cursor:pointer;
+}
+.ca-line button:hover{border-color:#bfc4cb;color:#111}
+.trade-buy-size{color:#17191d;font-size:11px}
+.trade-pnl{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.trade-pnl small{font-size:9px;font-weight:800;color:inherit}
+.allocation-row>.token-avatar{width:20px;height:20px;flex-basis:20px;border-color:#333}
+.allocation-row>.token-avatar b{font-size:7px}

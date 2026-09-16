@@ -78,6 +78,28 @@ function ago(value?: string) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function shortCa(address?: string) {
+  if (!address) return "—";
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function positionPnlUsd(position: ManagedPosition) {
+  if (position.status === "closed") return position.realizedPnlUsd ?? 0;
+  const openValue = Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0);
+  return (position.realizedProceedsUsd ?? 0) + openValue - (position.entryNotionalUsd ?? 0);
+}
+
+function TokenAvatar({ imageUrl, symbol, compact = false }: { imageUrl?: string; symbol: string; compact?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const initial = symbol.replace(/^\$/, "").slice(0, 1).toUpperCase() || "?";
+  return <span className={`token-avatar ${compact ? "compact" : ""}`}>
+    {imageUrl && !failed
+      ? <img src={imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      : <b>{initial}</b>}
+  </span>;
+}
+
 function chatTone(bot: string, kind: ChatRow["kind"]) {
   const name = bot.toLowerCase();
   if (kind === "system" || name.includes("system")) return "system";
@@ -276,7 +298,7 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: {
   return (
     <section className="decision-card" aria-live="polite">
       <div className="decision-card-top">
-        <div className="asset-heading"><span className="asset-logo">{symbol.slice(0, 1)}</span><div><h2>${symbol}</h2><p>{chain} · {source}</p></div></div>
+        <div className="asset-heading"><TokenAvatar imageUrl={result.snapshot.imageUrl} symbol={symbol} /><div><h2>${symbol}</h2><p>{chain} · {source}</p></div></div>
         <div className={`decision-badge badge-${decision.toLowerCase()}`}>{decision}<small>{replaying ? "Council reasoning replay" : "Current Decision"}</small></div>
       </div>
       <div className="decision-stats">
@@ -342,6 +364,7 @@ export default function WarRoomDashboard() {
   const [positionHistory, setPositionHistory] = useState<Record<string, PositionHistoryPoint[]>>({});
   const [mainGraphSelection, setMainGraphSelection] = useState<string>("portfolio");
   const [mainGraphRange, setMainGraphRange] = useState<MainGraphRange>("15m");
+  const [copiedCa, setCopiedCa] = useState<string | null>(null);
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
@@ -519,11 +542,13 @@ export default function WarRoomDashboard() {
   const allocationTotal = Math.max(0.01, (status?.paperWallet?.cashUsd ?? 0) + openPositionValue);
   const allocationPalette = ["#f4f4f4","#d7d7d7","#bbbbbb","#9f9f9f","#838383","#686868","#505050","#393939","#232323"];
   const allocationRaw = [
-    { id: "cash", label: "Cash", value: Math.max(0, status?.paperWallet?.cashUsd ?? 0) },
+    { id: "cash", label: "Cash", imageUrl: undefined as string | undefined, symbol: "$", value: Math.max(0, status?.paperWallet?.cashUsd ?? 0) },
     ...openPositions
       .map((position) => ({
         id: position.id,
         label: `$${position.symbol}`,
+        imageUrl: position.imageUrl,
+        symbol: position.symbol,
         value: Math.max(0, (position.remainingQuantity ?? 0) * (position.markPrice ?? 0)),
       }))
       .filter((row) => row.value > 0)
@@ -606,6 +631,23 @@ export default function WarRoomDashboard() {
     });
   };
 
+  const copyContract = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+    } catch {
+      const node = document.createElement("textarea");
+      node.value = address;
+      node.style.position = "fixed";
+      node.style.opacity = "0";
+      document.body.appendChild(node);
+      node.select();
+      document.execCommand("copy");
+      node.remove();
+    }
+    setCopiedCa(address);
+    window.setTimeout(() => setCopiedCa((current) => current === address ? null : current), 1400);
+  };
+
   return (
     <main className="light-app">
       <section id="live" className="council-stage">
@@ -631,7 +673,7 @@ export default function WarRoomDashboard() {
           <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
         </div>
         <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 7}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
-        <div className="sizing-policy-strip"><span><b>$50+ training trades</b><small>New paper BUYs and winner scale-ins must be at least $50 · weak setups are observed, not micro-bought · confirmed winners can still scale toward 15%</small></span><span className="sizing-live-note">Guardian exits/trims may be smaller so positions never get trapped</span></div>
+        <div className="sizing-policy-strip"><span><b>$50+ meaningful training</b><small>If Council approves a BUY or qualified probe, soft sizing warnings cannot shrink it below $50 · only real cash/exposure capacity can delay it</small></span><span className="sizing-live-note">Hard safety vetoes still block · exits/trims may stay smaller</span></div>
         <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
         <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
@@ -771,7 +813,7 @@ export default function WarRoomDashboard() {
           </div>
           <div className="allocation-legend">
             {allocationSlices.map((slice) => <div className="allocation-row" key={slice.id} title={`${slice.label}: $${slice.value.toFixed(2)} · ${slice.pct.toFixed(2)}%`}>
-              <i style={{background:slice.color}} />
+              {slice.id === "cash" ? <i style={{background:slice.color}} /> : <TokenAvatar imageUrl={slice.imageUrl} symbol={slice.symbol} compact />}
               <span><b>{slice.label}</b><small>${slice.value.toFixed(2)}</small></span>
               <strong>{slice.pct.toFixed(1)}%</strong>
             </div>)}
@@ -786,9 +828,35 @@ export default function WarRoomDashboard() {
 
       <section id="trades" className="log-panel page-panel">
         <div className="wide-panel-head"><div><h2>↗ Trades Log</h2><p>Positions executed and managed automatically by the War Room</p></div><span className="quiet-chip">Guardian owned</span></div>
-        <div className="trades-table">
-          <div className="trade-row trade-head"><span>Token</span><span>Chain</span><span>Entry</span><span>Mark / Exit</span><span>Status</span><span>P/L</span><span>Time</span></div>
-          {positions.length ? positions.slice(0, 12).map((position) => <div className="trade-row" key={position.id}><b>${position.symbol}</b><span>{position.chain}</span><span>{price(position.entryPrice)}</span><span>{price(position.markPrice)}</span><span><em className={`status-${position.status}`}>{position.status === "closed" ? "Closed" : "Open"}</em></span><strong className={position.pnlPct >= 0 ? "positive" : "negative"}>{position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%</strong><span>{ago(position.openedAt)}</span></div>) : <div className="empty-row">No autonomous paper positions yet. Executor is waiting for a Council-approved BUY.</div>}
+        <div className="trades-table enriched-trades-table">
+          <div className="trade-row trade-head"><span>Token / CA</span><span>Chain</span><span>Buy Size</span><span>Entry</span><span>Mark / Exit</span><span>Status</span><span>P/L</span><span>Time</span></div>
+          {positions.length ? positions.slice(0, 16).map((position) => {
+            const pnlUsd = positionPnlUsd(position);
+            return <div className="trade-row" key={position.id}>
+              <div className="trade-token-cell">
+                <TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact />
+                <div className="trade-token-copy">
+                  <b>${position.symbol}</b>
+                  <span className="ca-line">
+                    <code title={position.tokenAddress}>CA {shortCa(position.tokenAddress)}</code>
+                    <button type="button" onClick={() => void copyContract(position.tokenAddress)} title={`Copy full CA: ${position.tokenAddress}`} aria-label={`Copy ${position.symbol} contract address`}>
+                      {copiedCa === position.tokenAddress ? "COPIED" : "COPY"}
+                    </button>
+                  </span>
+                </div>
+              </div>
+              <span>{position.chain}</span>
+              <strong className="trade-buy-size">${(position.entryNotionalUsd ?? 0).toFixed(2)}</strong>
+              <span>{price(position.entryPrice)}</span>
+              <span>{price(position.markPrice)}</span>
+              <span><em className={`status-${position.status}`}>{position.status === "closed" ? "Closed" : position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></span>
+              <strong className={pnlUsd >= 0 ? "positive trade-pnl" : "negative trade-pnl"}>
+                <span>{position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%</span>
+                <small>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</small>
+              </strong>
+              <span>{ago(position.openedAt)}</span>
+            </div>;
+          }) : <div className="empty-row">No autonomous paper positions yet. Executor is waiting for a Council-approved BUY.</div>}
         </div>
       </section>
 

@@ -37,18 +37,33 @@ export function applyTrainingTradeSizePatch(root = process.cwd()) {
   // risk budget for a meaningful trade, otherwise we observe it without buying.
   if (request.mode === "paper" && request.side === "BUY") {
     const minimumBuyUsd = Math.max(10, Number(process.env.PAPER_MIN_BUY_USD ?? 50));
-    const riskCapacityUsd = Math.max(0, portfolio.equityUsd * Math.max(0, result.risk.maxPositionPct) / 100);
-    const trainingCapacityUsd = Math.min(Math.max(0, portfolio.cashUsd), riskCapacityUsd);
+    // Once Council / exploration has already approved the setup, soft sizing penalties
+    // cannot reduce it below the meaningful $50 paper-training floor.
+    // Only real cash / portfolio / chain capacity can prevent the floor.
+    const totalRoomPct = Math.max(0, portfolio.maxTotalExposurePct - portfolio.totalExposurePct);
+    const chainRoomPct = Math.max(0, portfolio.maxChainExposurePct - portfolio.chainExposurePct);
+    const totalRoomUsd = Math.max(0, portfolio.equityUsd * totalRoomPct / 100);
+    const chainRoomUsd = Math.max(0, portfolio.equityUsd * chainRoomPct / 100);
+    const trainingCapacityUsd = Math.min(
+      Math.max(0, portfolio.cashUsd),
+      totalRoomUsd,
+      chainRoomUsd,
+    );
     if (trainingCapacityUsd + 0.005 < minimumBuyUsd) {
-      const reason = \`Training entry skipped: setup only supports $\${trainingCapacityUsd.toFixed(2)} within current risk/cash limits, below the $\${minimumBuyUsd.toFixed(2)} paper-training minimum.\`;
+      const reason = \`Training entry waiting on capacity: only $\${trainingCapacityUsd.toFixed(2)} remains inside cash / portfolio / chain limits, below the $\${minimumBuyUsd.toFixed(2)} minimum. This is not a quality rejection.\`;
       recordRejection(reason);
-      addChat("Executor", \`\${exploration ? "PAPER TRAINING PROBE" : "AUTO PAPER"} skipped for $\${result.snapshot.symbol}: \${reason}\`, "execution");
+      addChat("Executor", \`\${exploration ? "PAPER TRAINING PROBE" : "AUTO PAPER"} waiting on capacity for $\${result.snapshot.symbol}: \${reason}\`, "execution");
       return false;
     }
     request = {
       ...request,
       notionalUsd: Number(Math.min(trainingCapacityUsd, Math.max(minimumBuyUsd, request.notionalUsd)).toFixed(2)),
     };
+    addChat(
+      "Executor",
+      \`\${exploration ? "PAPER TRAINING PROBE" : "AUTO PAPER"} sizing $\${result.snapshot.symbol} at $\${request.notionalUsd.toFixed(2)}. Approved setups cannot be shrunk into micro trades by soft sizing warnings; hard safety vetoes still apply.\`,
+      "execution",
+    );
   }
 
   const context = entryContext(result, portfolio);
@@ -65,9 +80,11 @@ export function applyTrainingTradeSizePatch(root = process.cwd()) {
   if (notionalUsd <= 0) return null;`,
       `  const minimumBuyUsd = Math.max(10, Number(process.env.PAPER_MIN_BUY_USD ?? 50));
   const maxPct = Math.max(5, Math.min(10, Number(process.env.PAPER_EXPLORATION_MAX_PCT ?? 6)));
-  const probeCapacityUsd = Math.min(portfolio.cashUsd, portfolio.equityUsd * maxPct / 100);
-  if (probeCapacityUsd + 0.005 < minimumBuyUsd) return null;
-  const notionalUsd = Number(Math.min(probeCapacityUsd, Math.max(minimumBuyUsd, portfolio.equityUsd * maxPct / 100)).toFixed(2));`,
+  const targetProbeUsd = Math.max(minimumBuyUsd, portfolio.equityUsd * maxPct / 100);
+  // Final execution checks actual portfolio/chain capacity. Do not suppress an
+  // otherwise qualified probe just because soft sizing would have been a micro trade.
+  const notionalUsd = Number(Math.min(Math.max(0, portfolio.cashUsd), targetProbeUsd).toFixed(2));
+  if (notionalUsd + 0.005 < minimumBuyUsd) return null;`,
       "meaningful WATCH probe sizing"
     );
 
@@ -111,5 +128,5 @@ export function applyTrainingTradeSizePatch(root = process.cwd()) {
     return text;
   });
 
-  console.log("[v2.22-training-size] Training mode now requires $50+ new paper BUYs and $50+ scale-ins by default. Small exits/trims remain allowed so Guardian can manage risk.");
+  console.log("[v2.22.1-training-size] Approved paper setups receive at least $50 whenever cash and exposure capacity allow; soft sizing warnings no longer starve training trades.");
 }
