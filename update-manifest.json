@@ -1,6 +1,6 @@
 {
-  "version": "2.27.1",
-  "name": "Local Independent Council \u2014 TypeScript Global Fix",
+  "version": "2.28",
+  "name": "Profit-First Exit Strategist + Persistent Portfolio History",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -174,7 +174,26 @@
     "private_round_before_reveal": true,
     "separate_local_runner_cio": true,
     "chat_error_deduplication": true,
-    "v227_error_dedupe_globals_declared": true
+    "v227_error_dedupe_globals_declared": true,
+    "dedicated_exit_strategist": true,
+    "profit_targets_pct": [
+      25,
+      50,
+      100,
+      200
+    ],
+    "profit_distribution_pct": [
+      20,
+      20,
+      25,
+      25
+    ],
+    "moonbag_pct": 10,
+    "dead_trade_recycling": true,
+    "cash_pressure_recycling": true,
+    "high_water_profit_locks": true,
+    "persistent_all_time_equity_history": true,
+    "persistent_all_time_high": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -251,7 +270,11 @@
     "v227-resilience-patch.mjs",
     "V2.27_UPDATE_NOTES.md",
     "V2.27_TEST_REPORT.md",
-    "V2.27.1_BUILD_FIX.md"
+    "V2.27.1_BUILD_FIX.md",
+    "exit-strategy-bot.ts",
+    "v228-exit-history-patch.mjs",
+    "V2.28_UPDATE_NOTES.md",
+    "V2.28_TEST_REPORT.md"
   ],
   "validation": {
     "node_patch_syntax": "pass",

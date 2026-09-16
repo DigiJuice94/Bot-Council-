@@ -9,6 +9,7 @@ import { applyEarlyRunnerCorePatch } from './early-runner-core-patch.mjs';
 import { applyIndependentCouncilPatch } from './independent-council-patch.mjs';
 import { applyPaperNoKillSwitchPatch } from './paper-no-killswitch-patch.mjs';
 import { applyV227ResiliencePatch } from './v227-resilience-patch.mjs';
+import { applyV228ExitHistoryPatch } from './v228-exit-history-patch.mjs';
 
 const root = process.cwd();
 
@@ -42,6 +43,7 @@ const mappings = [
   ['autopilot.ts', 'lib/autopilot.ts'],
   ['agent-entity-runtime.ts', 'lib/agent-entity-runtime.ts'],
   ['agent-entity-store.ts', 'lib/agent-entity-store.ts'],
+  ['exit-strategy-bot.ts', 'lib/exit-strategy-bot.ts'],
   ['chains.ts', 'lib/chains.ts'],
   ['debate.ts', 'lib/debate.ts'],
   ['alpha-engine.ts', 'lib/alpha-engine.ts'],
@@ -108,5 +110,6 @@ applyEarlyRunnerCorePatch(root);
 applyIndependentCouncilPatch(root);
 applyPaperNoKillSwitchPatch(root);
 applyV227ResiliencePatch(root);
+applyV228ExitHistoryPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);
