@@ -1,6 +1,6 @@
 {
-  "version": "2.20",
-  "name": "Single FOMO-Style Live Market Chart",
+  "version": "2.20.1",
+  "name": "Single FOMO Chart \u2014 CSS Build Fix",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -86,7 +86,8 @@
       "all"
     ],
     "entry_stop_tp_overlays": true,
-    "position_chart_grid_removed": true
+    "position_chart_grid_removed": true,
+    "v220_css_literal_newline_fix": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -129,6 +130,7 @@
     "V2.19_UPDATE_NOTES.md",
     "V2.19_TEST_REPORT.md",
     "V2.20_UPDATE_NOTES.md",
-    "V2.20_TEST_REPORT.md"
+    "V2.20_TEST_REPORT.md",
+    "V2.20.1_BUILD_FIX.md"
   ]
 }
