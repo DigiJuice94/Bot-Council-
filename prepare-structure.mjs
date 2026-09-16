@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { applyFreshChainPatch } from './fresh-chain-patch.mjs';
 import { applyPositionSizingPatch } from './position-sizing-patch.mjs';
+import { applyExitLiquidityPatch } from './exit-liquidity-patch.mjs';
 
 const root = process.cwd();
 
@@ -92,5 +93,6 @@ if (!existsSync(resolve(root, 'app/page.tsx')) || !existsSync(resolve(root, 'app
 
 applyFreshChainPatch(root);
 applyPositionSizingPatch(root);
+applyExitLiquidityPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);

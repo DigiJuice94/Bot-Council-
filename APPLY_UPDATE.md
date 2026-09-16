@@ -1,13 +1,15 @@
-# Apply Bot War Room V2.18.1
+# Apply Bot War Room V2.18.2
 
-This is V2.18 plus a Railway build rescue.
+This is cumulative on top of V2.18.1.
 
-## Important
-Replace the repository-root `package.json` with the one in this folder.
-The current repo package.json belongs to a different Express project and does not
-contain an npm `build` script.
+Replace/upload the included files into the repository root and redeploy Railway.
 
-Then upload/replace the remaining V2.18.1 files as usual and redeploy Railway.
-
-Expected build command:
+The build command remains:
 `node prepare-structure.mjs && next build`
+
+During structure preparation the build now applies:
+1. seven-chain scanner patch
+2. larger paper-sizing patch
+3. Guardian exit-liquidity hotfix
+
+No new environment variables are required.
