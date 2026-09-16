@@ -10,6 +10,7 @@ import { applyIndependentCouncilPatch } from './independent-council-patch.mjs';
 import { applyPaperNoKillSwitchPatch } from './paper-no-killswitch-patch.mjs';
 import { applyV227ResiliencePatch } from './v227-resilience-patch.mjs';
 import { applyV228ExitHistoryPatch } from './v228-exit-history-patch.mjs';
+import { applyV2281PaperResetPatch } from './v2281-paper-reset-patch.mjs';
 
 const root = process.cwd();
 
@@ -82,6 +83,7 @@ const mappings = [
   ['route (5).ts', 'app/api/learning/route.ts'],
   ['route (6).ts', 'app/api/autopilot/route.ts'],
   ['route (7).ts', 'app/api/journal/route.ts'],
+  ['route (8).ts', 'app/api/paper-reset/route.ts'],
 ];
 
 let restored = 0;
@@ -111,5 +113,6 @@ applyIndependentCouncilPatch(root);
 applyPaperNoKillSwitchPatch(root);
 applyV227ResiliencePatch(root);
 applyV228ExitHistoryPatch(root);
+applyV2281PaperResetPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);
