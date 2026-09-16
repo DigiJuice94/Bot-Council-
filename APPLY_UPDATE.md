@@ -1,9 +1,8 @@
-# Apply Bot War Room V2.27
+# Apply Bot War Room V2.27.1
 
-Replace V2.26.4 with this cumulative one-folder release and redeploy Railway.
+Replace V2.27 with this cumulative one-folder release and redeploy Railway.
 
-No OpenAI API key is required anymore.
+This release fixes only the exact TypeScript global-property errors from V2.27.
 
-You can remove `OPENAI_API_KEY`, `COUNCIL_AGENT_MODEL`, `COUNCIL_CIO_MODEL`, and `COUNCIL_AGENT_TIMEOUT_MS` from Railway if they are present.
-
-No new paid API is required for the Council.
+No new Railway variables are required.
+No OpenAI API key is required.

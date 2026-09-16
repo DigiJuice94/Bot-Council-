@@ -83,6 +83,8 @@ type AutopilotGlobal = typeof globalThis & {
   __botWarRoomAutopilotStateV14?: AutopilotStatus;
   __botWarRoomAutopilotBusyV14?: boolean;
   __botWarRoomAutopilotCursorV14?: number;
+  __botWarRoomLastErrorMessageV227?: string;
+  __botWarRoomLastErrorAtV227?: number;
 };
 const globalState = globalThis as AutopilotGlobal;
 

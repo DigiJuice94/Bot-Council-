@@ -4,7 +4,7 @@ import "./v213.css";
 import "./v214.css";
 
 export const metadata: Metadata = {
-  title: "Bot War Room V2.27 — Local Independent Council",
+  title: "Bot War Room V2.27.1 — TypeScript Global Fix",
   description: "Autonomous multi-chain Runner Genome research council with chronological live group chat, fresh-coin paper trading, Filing Cabinet learning and Code Deciphered graduation.",
 };
 
