@@ -1,6 +1,6 @@
 {
-  "version": "2.18.2",
-  "name": "Paced Council Chat + Guardian Exit Liquidity Hotfix",
+  "version": "2.19",
+  "name": "Live Wallet + Position Charts",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -68,7 +68,12 @@
     "sell_slippage_reduces_paper_proceeds": true,
     "distressed_paper_exit_mode": true,
     "paper_trim_slippage_limit_bps": 750,
-    "distressed_exit_cap_bps": 9000
+    "distressed_exit_cap_bps": 9000,
+    "live_wallet_equity_chart": true,
+    "live_open_position_charts": true,
+    "wallet_reconciliation_panel": true,
+    "realized_unrealized_split": true,
+    "chart_section_above_trade_logs": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -107,6 +112,8 @@
     "package.json",
     "V2.18.1_BUILD_FIX.md",
     "exit-liquidity-patch.mjs",
-    "V2.18.2_EXIT_FIX.md"
+    "V2.18.2_EXIT_FIX.md",
+    "V2.19_UPDATE_NOTES.md",
+    "V2.19_TEST_REPORT.md"
   ]
 }

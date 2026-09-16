@@ -1,15 +1,7 @@
-# Apply Bot War Room V2.18.2
+# Apply Bot War Room V2.19
 
-This is cumulative on top of V2.18.1.
+This is cumulative on top of V2.18.2.
 
-Replace/upload the included files into the repository root and redeploy Railway.
+Upload/replace the included files in the repository root and redeploy Railway.
 
-The build command remains:
-`node prepare-structure.mjs && next build`
-
-During structure preparation the build now applies:
-1. seven-chain scanner patch
-2. larger paper-sizing patch
-3. Guardian exit-liquidity hotfix
-
-No new environment variables are required.
+The new Live Wallet & Positions graph section will appear immediately above Trades Log. No new environment variables are required.

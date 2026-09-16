@@ -102,6 +102,32 @@ function chatInitials(bot: string) {
 
 const CHAT_REVEAL_MS = 1150;
 
+type EquityHistoryPoint = { at: number; equity: number; cash: number; openValue: number };
+type PositionHistoryPoint = { at: number; price: number };
+
+function svgPolyline(values: number[], width = 1000, height = 220, pad = 16) {
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(0.00000001, max - min);
+  const usableW = Math.max(1, width - pad * 2);
+  const usableH = Math.max(1, height - pad * 2);
+  return values.map((value, index) => {
+    const x = values.length <= 1 ? width / 2 : pad + (index / (values.length - 1)) * usableW;
+    const y = pad + (1 - (value - min) / span) * usableH;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+}
+
+function relativeY(value: number, values: number[], height = 220, pad = 16) {
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return height / 2;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const span = Math.max(0.00000001, max - min);
+  return pad + (1 - (value - min) / span) * Math.max(1, height - pad * 2);
+}
+
 function DecisionCard({ result, replaying, dataMode, currentChain }: {
   result: WarRoomResult | null;
   replaying: boolean;
@@ -208,6 +234,8 @@ export default function WarRoomDashboard() {
   const [chatQueue, setChatQueue] = useState<ChatRow[]>([]);
   const [chatLive, setChatLive] = useState(true);
   const [chatInitialized, setChatInitialized] = useState(false);
+  const [equityHistory, setEquityHistory] = useState<EquityHistoryPoint[]>([]);
+  const [positionHistory, setPositionHistory] = useState<Record<string, PositionHistoryPoint[]>>({});
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
@@ -288,9 +316,36 @@ export default function WarRoomDashboard() {
   const currentTurn = talking ? discussion[activeTurn] : undefined;
   const displayedTurn = currentTurn ?? scanBubble ?? undefined;
   const roomBots = replayResult?.agents ?? result?.agents ?? fallbackBots;
+  useEffect(() => {
+    if (!status?.paperWallet) return;
+    const now = Date.now();
+    const openPositions = (status.positions ?? []).filter((position) => position.status !== "closed");
+    const openValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
+    setEquityHistory((current) => {
+      const next = [...current, { at: now, equity: status.paperWallet.equityUsd, cash: status.paperWallet.cashUsd, openValue }];
+      return next.slice(-240);
+    });
+    setPositionHistory((current) => {
+      const next = { ...current };
+      for (const position of openPositions) {
+        const rows = next[position.id] ?? [];
+        next[position.id] = [...rows, { at: now, price: position.markPrice }].slice(-180);
+      }
+      return next;
+    });
+  }, [status?.generatedAt]);
+
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   const chat = status?.chat ?? [];
   const positions = status?.positions ?? [];
+  const openPositions = positions.filter((position) => position.status !== "closed");
+  const openPositionValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
+  const openPositionCost = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.entryPrice ?? 0), 0);
+  const unrealizedPnl = openPositionValue - openPositionCost;
+  const realizedPnl = positions.reduce((sum, position) => sum + (position.realizedPnlUsd ?? 0), 0);
+  const reconciledEquity = (status?.paperWallet?.cashUsd ?? 0) + openPositionValue;
+  const reconciliationDelta = status?.paperWallet ? status.paperWallet.equityUsd - reconciledEquity : 0;
+  const reconciliationPass = Math.abs(reconciliationDelta) <= 0.10;
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
   const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
 
@@ -360,7 +415,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.18</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.19</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -428,6 +483,61 @@ export default function WarRoomDashboard() {
             <small>Scroll up at any time to pause the live feed.</small>
             {!chatLive && <button onClick={resumeLiveChat}>Resume Live</button>}
           </div>
+        </div>
+      </section>
+
+      <section id="wallet-live" className="wallet-live-panel page-panel">
+        <div className="wide-panel-head wallet-live-head">
+          <div><h2>⌁ Live Wallet & Positions</h2><p>Updates automatically as open coins move. Buys, trims and exits are reflected in wallet equity and position charts.</p></div>
+          <span className={reconciliationPass ? "wallet-reconcile pass" : "wallet-reconcile fail"}>{reconciliationPass ? "RECONCILIATION PASS" : "RECONCILIATION ERROR"}</span>
+        </div>
+
+        <div className="wallet-audit-grid">
+          <span><small>Cash</small><b>${(status?.paperWallet?.cashUsd ?? 0).toFixed(2)}</b></span>
+          <span><small>Open Cost</small><b>${openPositionCost.toFixed(2)}</b></span>
+          <span><small>Current Position Value</small><b>${openPositionValue.toFixed(2)}</b></span>
+          <span><small>Unrealized P/L</small><b className={unrealizedPnl >= 0 ? "positive" : "negative"}>{unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}</b></span>
+          <span><small>Realized P/L</small><b className={realizedPnl >= 0 ? "positive" : "negative"}>{realizedPnl >= 0 ? "+" : ""}${realizedPnl.toFixed(2)}</b></span>
+          <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
+        </div>
+
+        <div className="wallet-equity-card">
+          <div className="chart-title-row"><div><b>Portfolio Equity</b><small>{equityHistory.length ? `${equityHistory.length} live marks` : "Waiting for marks"}</small></div><strong className={(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "+" : ""}${(status?.paperWallet?.totalPnlUsd ?? 0).toFixed(2)}</strong></div>
+          <div className="live-chart-wrap">
+            <svg className="equity-live-chart" viewBox="0 0 1000 220" preserveAspectRatio="none" aria-label="Live portfolio equity chart">
+              <line x1="0" y1={relativeY(status?.paperWallet?.startingCashUsd ?? 1000, [...equityHistory.map((point) => point.equity), status?.paperWallet?.startingCashUsd ?? 1000])} x2="1000" y2={relativeY(status?.paperWallet?.startingCashUsd ?? 1000, [...equityHistory.map((point) => point.equity), status?.paperWallet?.startingCashUsd ?? 1000])} className="equity-start-line" />
+              <polyline points={svgPolyline(equityHistory.map((point) => point.equity))} className="equity-main-line" />
+            </svg>
+            {!equityHistory.length && <div className="chart-empty">Live wallet marks will draw here as Guardian updates positions.</div>}
+          </div>
+          <div className="chart-legend"><span><i className="legend-equity" />Equity</span><span><i className="legend-start" />Starting wallet</span><small>Refreshes from the same wallet + Guardian data powering the account totals above.</small></div>
+        </div>
+
+        <div className="position-live-grid">
+          {openPositions.length ? openPositions.slice(0, 8).map((position) => {
+            const history = positionHistory[position.id] ?? [];
+            const marks = history.map((point) => point.price);
+            const entry = position.entryPrice;
+            const high = position.highWaterPrice ?? Math.max(entry, position.markPrice);
+            const stop = entry * (1 - (position.exitStrategy?.stopLossPct ?? 0) / 100);
+            const trail = high * (1 - (position.exitStrategy?.trailingStopPct ?? 0) / 100);
+            const tp1 = entry * (1 + ((position.exitStrategy?.takeProfits?.[0]?.gainPct ?? 0) / 100));
+            const scale = [...marks, entry, high, stop, trail, tp1].filter((value) => Number.isFinite(value) && value > 0);
+            return <article className="position-live-card" key={position.id}>
+              <div className="position-live-title"><div><b>${position.symbol}</b><small>{position.chain} · {position.winnerState ?? "building"}</small></div><strong className={position.pnlPct >= 0 ? "positive" : "negative"}>{position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%</strong></div>
+              <div className="position-chart-wrap">
+                <svg viewBox="0 0 500 150" preserveAspectRatio="none" aria-label={`Live chart for ${position.symbol}`}>
+                  <line x1="0" y1={relativeY(entry, scale, 150, 12)} x2="500" y2={relativeY(entry, scale, 150, 12)} className="position-entry-line" />
+                  <line x1="0" y1={relativeY(stop, scale, 150, 12)} x2="500" y2={relativeY(stop, scale, 150, 12)} className="position-stop-line" />
+                  <line x1="0" y1={relativeY(tp1, scale, 150, 12)} x2="500" y2={relativeY(tp1, scale, 150, 12)} className="position-target-line" />
+                  <polyline points={svgPolyline(marks, 500, 150, 12)} className={position.pnlPct >= 0 ? "position-price-line positive-line" : "position-price-line negative-line"} />
+                </svg>
+                {!history.length && <div className="chart-empty small">Waiting for next live mark…</div>}
+              </div>
+              <div className="position-metrics"><span><small>Entry</small><b>{price(entry)}</b></span><span><small>Now</small><b>{price(position.markPrice)}</b></span><span><small>High</small><b>{price(high)}</b></span><span><small>Stop</small><b>{price(stop)}</b></span></div>
+              <div className="position-chart-legend"><span className="entry-key">Entry</span><span className="stop-key">Stop</span><span className="target-key">TP1</span><span>{ago(position.openedAt)}</span></div>
+            </article>;
+          }) : <div className="wallet-no-positions">No open positions. Live position charts will appear immediately after the next paper BUY.</div>}
         </div>
       </section>
 
