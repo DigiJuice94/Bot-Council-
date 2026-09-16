@@ -450,7 +450,17 @@ export type CouncilProcess = {`,
     };
     addChat("Executor", \`\${exploration ? "EARLY-RUNNER PROBE" : "EARLY-RUNNER BUY"} $\${result.snapshot.symbol}: $\${request.notionalUsd.toFixed(2)} · Genome \${result.runnerGenome?.entryScore.toFixed(0) ?? "—"}/100 · dumper risk $\${result.runnerGenome?.dumperRiskScore.toFixed(0) ?? "—"}/100. Win or lose, file the outcome and update the model.\`, "execution");
   }`;
-    text = replaceRequired(text, oldFixed, newDynamic, "dynamic $50+ Runner Genome sizing");
+    // V2.26.1 build hardening: do not depend on the exact text emitted by an
+    // earlier sizing patch. Replace only the pre-context sizing section inside
+    // executeRequest(), using stable function/context boundaries.
+    if (!text.includes("const genomeTarget = Math.max(minimumBuyUsd, result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd)")) {
+      const executeHeader = 'async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskContext, request: ExecutionRequest, exploration: boolean) {';
+      const executeAt = text.indexOf(executeHeader);
+      const contextAt = executeAt >= 0 ? text.indexOf('  const context = entryContext(result, portfolio);', executeAt + executeHeader.length) : -1;
+      if (executeAt < 0 || contextAt < 0) fail("Could not find structural boundary: dynamic $50+ Runner Genome sizing");
+      const insertionAt = executeAt + executeHeader.length;
+      text = text.slice(0, insertionAt) + "\\n" + newDynamic + "\\n\\n" + text.slice(contextAt);
+    }
 
     text = replaceRequired(
       text,
@@ -483,7 +493,15 @@ export type CouncilProcess = {`,
   const minimumBuyUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
   if (portfolio.cashUsd + 0.005 < minimumBuyUsd) return null;
   const notionalUsd = Number(Math.max(minimumBuyUsd, Math.min(result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd, Number(process.env.PAPER_WATCH_MAX_BUY_USD ?? 100))).toFixed(2));`;
-    text = replaceRequired(text, oldExplore, newExplore, "WATCH becomes active training opportunity");
+    // Structural replacement for the WATCH/probe gate. Previous versions changed
+    // the notional-sizing lines, so exact full-block matching is intentionally avoided.
+    if (!text.includes("Do not re-run old Alpha/quorum filters.")) {
+      const exploreHeader = 'function explorationRequest(result: WarRoomResult, portfolio: PortfolioRiskContext): ExecutionRequest | null {';
+      const exploreAt = text.indexOf(exploreHeader);
+      const exploreReturnAt = exploreAt >= 0 ? text.indexOf('  return {\\n    mode: "paper",', exploreAt + exploreHeader.length) : -1;
+      if (exploreAt < 0 || exploreReturnAt < 0) fail("Could not find structural boundary: WATCH becomes active training opportunity");
+      text = text.slice(0, exploreAt) + newExplore + "\\n" + text.slice(exploreReturnAt);
+    }
     text = replaceRequired(text, '    maxSlippageBps: 135,', '    maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : 135,', "WATCH early-runner slippage");
 
     const oldPromise = `  const [learning, memoryHints, profitability, portfolio] = await Promise.all([
@@ -545,7 +563,14 @@ export type CouncilProcess = {`,
       lastReason: \`Winner add remains valid, but only $\${portfolio.cashUsd.toFixed(2)} paper cash is available. Waiting for $\${minimumAddUsd.toFixed(2)}+ cash.\`,
     };
   }`;
-    text = replaceRequired(text, oldScale, newScale, "dynamic winner adds");
+    // Structural replacement for the winner-add sizing block. Keep the fill and
+    // accounting code below it untouched.
+    if (!text.includes("const genomeAddTarget = entryGenomeScore >= 88 ? 100 : entryGenomeScore >= 78 ? 75 : minimumAddUsd;")) {
+      const scaleStart = text.indexOf('  const initialNotional = Math.max(0.01, position.initialNotionalUsd ?? position.entryNotionalUsd);');
+      const scaleFillAt = scaleStart >= 0 ? text.indexOf('  const fill = await executePaper(', scaleStart) : -1;
+      if (scaleStart < 0 || scaleFillAt < 0) fail("Could not find structural boundary: dynamic winner adds");
+      text = text.slice(0, scaleStart) + newScale + "\\n\\n" + text.slice(scaleFillAt);
+    }
 
     text = replaceRequired(
       text,

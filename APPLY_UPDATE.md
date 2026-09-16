@@ -1,22 +1,13 @@
-# Apply Bot War Room V2.26
+# Apply Bot War Room V2.26.1
 
-Use this cumulative one-folder release.
+This replaces V2.26 and fixes the Railway patch-anchor failure shown in the build log.
 
-Upload/replace the contents of `Bot-War-Room-V2.26-FULL` into the repository root and redeploy Railway.
+Upload/replace the contents of `Bot-War-Room-V2.26.1-FULL` in the repository root and redeploy Railway.
 
-## Required for true independent AI entities
-
-Add this in Railway Variables:
+For true independent AI entities, keep/add in Railway Variables:
 
 `OPENAI_API_KEY=...`
 
-Do not paste the API key into chat.
+Do not paste the key into chat.
 
-Recommended defaults are already in `env.example`:
-- `COUNCIL_ENTITY_MODE=independent-ai`
-- `COUNCIL_AGENT_MODEL=gpt-5.6-luna`
-- `COUNCIL_CIO_MODEL=gpt-5.6-terra`
-- `COUNCIL_DEBATE_ROUND=true`
-- `COUNCIL_ALLOW_DEGRADED_FALLBACK=false`
-
-Without the API key, V2.26 will not silently claim the old shared engine is eight independent AI entities.
+The Early Runner Core and independent eight-entity architecture are unchanged; this release hardens the build pipeline.
