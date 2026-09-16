@@ -30,25 +30,25 @@ type AutopilotPayload = {
 };
 
 const fallbackBots: AgentOpinion[] = [
-  { id: "launch", name: "Launch Scout", shortName: "LS", score: 0, stance: "neutral", summary: "Waiting for a real listing.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "social", name: "Social Scout", shortName: "SS", score: 0, stance: "neutral", summary: "Waiting for real evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "wallet", name: "Wallet Tracker", shortName: "WT", score: 0, stance: "neutral", summary: "Waiting for real holder data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "quant", name: "Quant Bot", shortName: "QB", score: 0, stance: "neutral", summary: "Waiting for real market data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "contract", name: "Contract Bot", shortName: "CB", score: 0, stance: "neutral", summary: "Waiting for security evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "bear", name: "Bear Bot", shortName: "BB", score: 0, stance: "neutral", summary: "Waiting to red-team a real candidate.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "cio", name: "CIO", shortName: "CIO", score: 0, stance: "neutral", summary: "Waiting for the six research reads.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "executor", name: "Executor", shortName: "EX", score: 0, stance: "neutral", summary: "Waiting for a Council-approved paper order.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "launch", name: "Early Runner Scout", shortName: "LS", score: 0, stance: "neutral", summary: "Waiting for a real listing.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "social", name: "Narrative Ignition Scout", shortName: "SS", score: 0, stance: "neutral", summary: "Waiting for real evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "wallet", name: "Early Flow Analyst", shortName: "WT", score: 0, stance: "neutral", summary: "Waiting for real holder data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "quant", name: "Runner Pattern Quant", shortName: "QB", score: 0, stance: "neutral", summary: "Waiting for real market data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "contract", name: "Fast Safety Gate", shortName: "CB", score: 0, stance: "neutral", summary: "Waiting for security evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "bear", name: "Dumper Pattern Specialist", shortName: "BB", score: 0, stance: "neutral", summary: "Waiting to red-team a real candidate.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "portfolio", name: "Portfolio Strategist", shortName: "PS", score: 0, stance: "neutral", summary: "Waiting to size a real opportunity.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "cio", name: "Runner CIO", shortName: "CIO", score: 0, stance: "neutral", summary: "Waiting for seven locked private reads.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
 ];
 
 const botDescriptions: Record<string, { label: string; text: string; tag: string; icon: string }> = {
-  cio: { label: "CIO", text: "Synthesizes the six research reads, resolves debate and calls the shot.", tag: "LEAD", icon: "♛" },
-  launch: { label: "Launch Scout", text: "Finds new launches, launch velocity and emerging narratives.", tag: "DISCOVERY", icon: "↗" },
-  social: { label: "Social Scout", text: "Monitors social velocity, narrative momentum and attention.", tag: "SENTIMENT", icon: "●" },
-  wallet: { label: "Wallet Tracker", text: "Tracks holders, unique buyers and smart-money accumulation.", tag: "ON-CHAIN", icon: "▣" },
-  quant: { label: "Quant Bot", text: "Analyzes market structure, momentum, volume and liquidity.", tag: "ANALYSIS", icon: "▥" },
-  contract: { label: "Contract Bot", text: "Audits sellability, authorities, concentration and security.", tag: "SECURITY", icon: "▤" },
-  bear: { label: "Bear Bot", text: "Challenges the thesis and hunts for hidden downside.", tag: "RISK", icon: "◆" },
-  executor: { label: "Executor", text: "Automatically paper-executes approved trades and hands them to Guardian.", tag: "EXECUTION", icon: "ϟ" },
+  cio: { label: "Runner CIO", text: "Synthesizes Runner Genome evidence, specialist debate and missed-runner lessons to call the shot.", tag: "LEAD", icon: "♛" },
+  launch: { label: "Early Runner Scout", text: "Hunts the $10K-$50K launch window and compares each setup with previous runners.", tag: "DISCOVERY", icon: "↗" },
+  social: { label: "Narrative Ignition Scout", text: "Looks for attention accelerating before price rather than chasing social signals after the move.", tag: "IGNITION", icon: "●" },
+  wallet: { label: "Early Flow Analyst", text: "Studies first-minute buyers, holder velocity, accumulation and distribution behavior.", tag: "FLOW", icon: "▣" },
+  quant: { label: "Runner Pattern Quant", text: "Models MC velocity, volume acceleration, buy pressure and runner-pattern similarity.", tag: "GENOME", icon: "▥" },
+  contract: { label: "Fast Safety Gate", text: "Looks for specific hard sellability/scam failures without punishing a coin merely for being early.", tag: "SAFETY", icon: "▤" },
+  bear: { label: "Dumper Pattern Specialist", text: "Compares each setup with failed launches and identifies distribution patterns before the dump.", tag: "DUMPER", icon: "◆" },
+  portfolio: { label: "Portfolio Strategist", text: "Forms its own private opinion on starter size, capital allocation and when stronger Runner Genome evidence deserves more than the $50 minimum.", tag: "SIZING", icon: "◫" },
 };
 
 function price(n: number) {
@@ -308,10 +308,15 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: {
         <div className="spark-wrap" aria-hidden="true"><svg viewBox="0 0 120 42" preserveAspectRatio="none"><polyline points={spark} /></svg></div>
       </div>
       <p className="decision-thesis">{thesis}</p>
+      {result.independentCouncil && <div className={`entity-proof ${result.independentCouncil.mode === "independent-ai" ? "verified" : "degraded"}`}>
+        <b>{result.independentCouncil.mode === "independent-ai" ? "8 INDEPENDENT ENTITIES" : "ISOLATED LOCAL FALLBACK"}</b>
+        <span>7 private reads → peer reveal/meeting → separate Runner CIO</span>
+        <small>{result.independentCouncil.agentModel} · CIO {result.independentCouncil.cioModel}</small>
+      </div>}
       <div className="decision-context-mini">
-        <span><b>{result.councilProcess.lane === "meme" ? result.memeRegime.label : result.regime.label}</b><small>{result.councilProcess.lane === "meme" ? "Meme lane" : "Regime"}</small></span>
+        <span><b>{result.councilProcess.lane === "early-runner" ? "EARLY RUNNER" : result.councilProcess.lane === "meme" ? result.memeRegime.label : result.regime.label}</b><small>{result.councilProcess.lane === "early-runner" ? `$${Math.round(result.snapshot.marketCap).toLocaleString()} MC` : result.councilProcess.lane === "meme" ? "Meme lane" : "Regime"}</small></span>
         <span><b>{result.councilProcess.alignedBots}/8</b><small>Bot alignment</small></span>
-        <span><b>{result.memeRegime.isMeme ? `${result.memeRegime.launchVelocityScore.toFixed(0)}/100` : `${result.alpha.score}/100`}</b><small>{result.memeRegime.isMeme ? "Launch velocity" : "Alpha"}</small></span>
+        <span><b>{`${result.runnerGenome.entryScore.toFixed(0)}/100`}</b><small>Runner Genome</small></span>
         <span><b>{result.councilProcess.executorVote}</b><small>Executor</small></span>
       </div>
       <div className="decision-options" aria-label="Council decision states">
@@ -341,7 +346,7 @@ function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
     { agentId: "launch", round: "opening" }, { agentId: "social", round: "opening" },
     { agentId: "wallet", round: "opening" }, { agentId: "quant", round: "rebuttal" },
     { agentId: "contract", round: "rebuttal" }, { agentId: "bear", round: "rebuttal" },
-    { agentId: "cio", round: "decision" }, { agentId: "executor", round: "execution" },
+    { agentId: "portfolio", round: "rebuttal" }, { agentId: "cio", round: "decision" },
   ];
   return order.flatMap(({ agentId, round }) => {
     const exact = full.find((turn) => turn.agentId === agentId && (!round || turn.round === round));
@@ -566,7 +571,7 @@ export default function WarRoomDashboard() {
     ? `conic-gradient(${allocationSlices.map((slice) => `${slice.color} ${slice.start.toFixed(2)}% ${slice.end.toFixed(2)}%`).join(",")})`
     : "#222";
 
-  const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
+  const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "portfolio"];
   const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
 
   // First load shows a small recent window so the page does not explode in height.
@@ -652,7 +657,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.20</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.26</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -664,7 +669,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into the eight-bot Council automatically. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market, scales confirmed winners, trims, exits and returns simulated proceeds to cash.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market, scales confirmed winners, trims, exits and returns simulated proceeds to cash.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>
@@ -864,14 +869,14 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="roster" className="roster-panel page-panel">
-        <div className="wide-panel-head"><div><h2>♧ Bot Roster</h2><p>Eight specialized decision roles. One coordinated War Room.</p></div><span>Built for better decisions.</span></div>
+        <div className="wide-panel-head"><div><h2>♧ Bot Roster</h2><p>Eight autonomous entities. Seven work privately first; Runner CIO receives their locked opinions only afterward.</p></div><span>Executor is infrastructure, not a Council seat.</span></div>
         <div className="roster-grid">{roster.map((id) => { const bot = botDescriptions[id]; return <article className="roster-card" key={id}><span className="roster-icon">{bot.icon}</span><div><h3>{bot.label}</h3><p>{bot.text}</p><small>{bot.tag}</small></div></article>; })}</div>
       </section>
 
       <section id="system" className="system-strip page-panel">
         <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled. Decisions and fills are journaled for later analysis.</span></div>
         <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
-        <div><b>Safety still deterministic</b><span>The eight bots cannot vote around honeypot, sellability, concentration, authority or portfolio kill-switch vetoes.</span></div>
+        <div><b>Entities cannot vote around hard safety</b><span>The eight entities decide independently, but deterministic Executor/Guardian infrastructure still enforces explicit sellability, honeypot, authority and accounting constraints.</span></div>
       </section>
     </main>
   );

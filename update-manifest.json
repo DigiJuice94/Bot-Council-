@@ -1,6 +1,6 @@
 {
-  "version": "2.24",
-  "name": "Fixed $50 Opportunity Training + Filing Cabinet",
+  "version": "2.26",
+  "name": "Independent Entity Council",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -103,8 +103,6 @@
     "paper_minimum_new_buy_usd": 50,
     "paper_minimum_scale_in_usd": 50,
     "micro_paper_buys_removed": true,
-    "weak_setups_observed_instead_of_micro_bought": true,
-    "watch_training_probe_target_pct": 6,
     "small_exits_and_trims_still_allowed": true,
     "paper_refill_floor_tracks_minimum_training_buy": true,
     "approved_trade_minimum_usd": 50,
@@ -118,10 +116,46 @@
     "trade_log_buy_size_usd": true,
     "trade_log_pnl_usd": true,
     "holdings_token_images": true,
-    "fixed_paper_training_trade_usd": 50,
     "no_extra_post_decision_sizing_gate": true,
     "fifty_dollar_filing_cabinet": true,
-    "fresh_win_requirement_uses_fifty_dollar_trades": true
+    "fresh_win_requirement_uses_fifty_dollar_trades": true,
+    "primary_mission_early_runner_10k_50k": true,
+    "merged_fresh_discovery_sources": true,
+    "entry_genome_active_in_council": true,
+    "exit_genome_active_in_guardian": true,
+    "minimum_paper_buy_usd": 50,
+    "adaptive_paper_buy_max_usd": 150,
+    "watch_opportunities_become_training_trades": true,
+    "early_runner_liquidity_is_order_aware": true,
+    "paper_daily_loss_kill_switch_relaxed_for_research": true,
+    "fifty_plus_filing_cabinet": true,
+    "bot_focuses_rewritten_for_runner_vs_dumper": true,
+    "seven_chain_runner_discovery": true,
+    "historical_live_genome_features_aligned": true,
+    "first_observation_preserved_for_learning": true,
+    "exit_quality_learned_from_closed_trades": true,
+    "legacy_meme_unsafe_liquidity_block_bypassed_in_paper_early_lane": true,
+    "early_runner_absolute_liquidity_floor_usd": 1000,
+    "early_runner_route_slippage_gate": true,
+    "paper_early_runner_max_open_positions": 20,
+    "paper_early_runner_cash_limited_exposure": true,
+    "runner_native_take_profit_targets_pct": [
+      50,
+      100,
+      200,
+      400
+    ],
+    "runner_moonbag_pct": 25,
+    "live_money_gates_unchanged": true,
+    "seven_isolated_private_specialist_calls": true,
+    "locked_private_opinions_before_reveal": true,
+    "seven_entity_meeting_rebuttal_calls": true,
+    "separate_eighth_runner_cio_call": true,
+    "executor_removed_from_council_seat": true,
+    "portfolio_strategist_added_as_seventh_specialist": true,
+    "private_per_entity_memory": true,
+    "closed_trade_outcomes_return_to_each_entity_memory": true,
+    "no_silent_single_brain_ai_fallback": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -179,6 +213,22 @@
     "V2.23_UPDATE_NOTES.md",
     "V2.23_TEST_REPORT.md",
     "V2.24_UPDATE_NOTES.md",
-    "V2.24_TEST_REPORT.md"
-  ]
+    "V2.24_TEST_REPORT.md",
+    "early-runner-core-patch.mjs",
+    "V2.25_UPDATE_NOTES.md",
+    "V2.25_TEST_REPORT.md",
+    "agent-entity-runtime.ts",
+    "agent-entity-store.ts",
+    "independent-council-patch.mjs",
+    "V2.26_UPDATE_NOTES.md",
+    "V2.26_TEST_REPORT.md"
+  ],
+  "validation": {
+    "node_patch_syntax": "pass",
+    "typescript_parser_syntax": "pass",
+    "css_structure": "pass",
+    "critical_early_runner_checks": "pass",
+    "one_folder_zip": "pass",
+    "full_next_build": "Railway final integration required because this cumulative upload package relies on existing repo root source files during prepare-structure.mjs"
+  }
 }

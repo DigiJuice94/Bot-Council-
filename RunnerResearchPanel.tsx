@@ -24,6 +24,9 @@ type Research = {
   fiftyDollarWinRatePct: number;
   fiftyDollarNetPnlUsd: number;
   fiftyDollarAvgReturnPct: number;
+  medianRunnerPeakMultiple: number;
+  medianRunnerTimeToPeakMinutes: number;
+  medianRunnerDrawdownPct: number;
   recentFiftyDollarTrades: Array<{ symbol: string; chain: string; outcome: string; status: "OPEN" | "WIN" | "LOSS" | "FLAT"; pnlUsd?: number; returnPct?: number; entryAt?: string }>;
   activeHypotheses: number;
   confirmedTells: number;
@@ -129,10 +132,10 @@ export default function RunnerResearchPanel() {
         <div className="v224-fifty-head">
           <div>
             <span>FILING CABINET · LIVE TRAINING SCOREBOARD</span>
-            <h3>Winning with $50 Trades</h3>
-            <p>The Council chooses the opportunity. Every approved paper entry is a fixed $50 rep. Wins and losses both stay in the cabinet so the bots can learn and adjust.</p>
+            <h3>Winning with $50+ Trades</h3>
+            <p>The Council chooses the opportunity. Every approved early-runner paper entry is at least $50. Stronger learned setups can size larger. Wins, losses and missed runners all stay in the cabinet so the bots can learn and adjust.</p>
           </div>
-          <strong>$50</strong>
+          <strong>$50+</strong>
         </div>
         <div className="v224-fifty-metrics">
           <div><small>Trades taken</small><b>{r?.fiftyDollarTrades ?? 0}</b></div>
@@ -151,7 +154,16 @@ export default function RunnerResearchPanel() {
             <em className={`v224-${row.status.toLowerCase()}`}>{row.status}</em>
             <strong className={(row.pnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{row.status === "OPEN" ? "—" : `${(row.pnlUsd ?? 0) >= 0 ? "+" : "-"}$${Math.abs(row.pnlUsd ?? 0).toFixed(2)}`}</strong>
             <span>{row.status === "OPEN" || row.returnPct === undefined ? "—" : `${row.returnPct >= 0 ? "+" : ""}${row.returnPct.toFixed(1)}%`}</span>
-          </div>) : <p className="v214-muted v224-empty">The first fixed $50 paper trades will appear here.</p>}
+          </div>) : <p className="v214-muted v224-empty">The first $50+ early-runner paper trades will appear here.</p>}
+        </div>
+      </article>
+
+      <article className="v225-genome-engines">
+        <div className="v225-genome-title"><span>BACKGROUND LEARNING ENGINES</span><h3>Entry Genome + Exit Genome</h3><p>These do not replace the Council. They continuously mine the Filing Cabinet and feed learned runner/dumper setup patterns back into entries, sizing and Guardian exits.</p></div>
+        <div className="v225-genome-grid">
+          <div><b>ENTRY GENOME</b><strong>{r?.labeledCases ?? 0}</strong><small>runner/dumper cases learned</small><p>Scores every fresh candidate against previous runner and dumper fingerprints before the Council decides.</p></div>
+          <div><b>EXIT GENOME</b><strong>{(r?.medianRunnerPeakMultiple ?? 0).toFixed(2)}×</strong><small>median observed runner peak</small><p>Studies continuation, distribution, typical drawdown and time-to-peak to adapt Guardian trailing/hold behavior.</p></div>
+          <div><b>TYPICAL RUNNER PATH</b><strong>{Math.round(r?.medianRunnerTimeToPeakMinutes ?? 0)}m</strong><small>median time to observed peak</small><p>Typical learned runner drawdown: {(r?.medianRunnerDrawdownPct ?? 0).toFixed(1)}% before/through the move.</p></div>
         </div>
       </article>
 

@@ -5,6 +5,8 @@ import { applyPositionSizingPatch } from './position-sizing-patch.mjs';
 import { applyExitLiquidityPatch } from './exit-liquidity-patch.mjs';
 import { applyTrainingTradeSizePatch } from './training-trade-size-patch.mjs';
 import { applyTokenDisplayPatch } from './token-display-patch.mjs';
+import { applyEarlyRunnerCorePatch } from './early-runner-core-patch.mjs';
+import { applyIndependentCouncilPatch } from './independent-council-patch.mjs';
 
 const root = process.cwd();
 
@@ -36,6 +38,8 @@ const mappings = [
   ['bot-council-reference.png', 'public/bot-council-reference.png'],
   ['council-art.ts', 'lib/council-art.ts'],
   ['autopilot.ts', 'lib/autopilot.ts'],
+  ['agent-entity-runtime.ts', 'lib/agent-entity-runtime.ts'],
+  ['agent-entity-store.ts', 'lib/agent-entity-store.ts'],
   ['chains.ts', 'lib/chains.ts'],
   ['debate.ts', 'lib/debate.ts'],
   ['alpha-engine.ts', 'lib/alpha-engine.ts'],
@@ -98,5 +102,7 @@ applyPositionSizingPatch(root);
 applyExitLiquidityPatch(root);
 applyTrainingTradeSizePatch(root);
 applyTokenDisplayPatch(root);
+applyEarlyRunnerCorePatch(root);
+applyIndependentCouncilPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);

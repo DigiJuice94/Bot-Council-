@@ -1,5 +1,6 @@
 import { createClient } from "redis";
 import type { ManagedPosition, MarketSnapshot, WarRoomResult } from "./types";
+import { recordIndependentCouncilOutcome } from "./agent-entity-store";
 
 const CASES_KEY = "bot-war-room:runner-research:v214:cases";
 const META_KEY = "bot-war-room:runner-research:v214:meta";
@@ -12,6 +13,11 @@ const CASE_HORIZON_MS = 24 * 60 * 60_000;
 let redisPromise: Promise<any | null> | null = null;
 const memoryCases = new Map<string, CoinCaseFile>();
 let memoryMeta: ResearchMeta | null = null;
+
+type GenomeModelRow = { row: CoinCaseFile; features: number[] };
+type GenomeModelCache = { at: number; rows: GenomeModelRow[]; runners: GenomeModelRow[]; dumpers: GenomeModelRow[] };
+let genomeModelCache: GenomeModelCache | null = null;
+const GENOME_MODEL_CACHE_MS = 30_000;
 
 export type ResearchOutcome = "open" | "runner" | "dumper" | "neutral";
 export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor";
@@ -29,6 +35,7 @@ export type ResearchObservation = {
   volumeToMc: number;
   liquidityToMc: number;
   volumeAccelerationPct: number;
+  transactionAccelerationPct: number;
   holderVelocity: number;
   uniqueBuyerVelocity: number;
   top10Pct: number;
@@ -59,6 +66,7 @@ export type CoinCaseFile = {
   nextReviewAt: string;
   firstMarketCap: number;
   peakMarketCap: number;
+  peakAt?: string;
   troughMarketCap: number;
   peakReturnPct: number;
   maxDrawdownPct: number;
@@ -75,6 +83,11 @@ export type CoinCaseFile = {
   paperClosed?: boolean;
   paperPnlUsd?: number;
   paperReturnPct?: number;
+  paperMaxFavorableExcursionPct?: number;
+  paperMaxAdverseExcursionPct?: number;
+  paperProfitCapturePct?: number;
+  paperHoldMinutes?: number;
+  paperExitReason?: string;
   freshWinRecorded?: boolean;
   milestone100k?: string;
   milestone300k?: string;
@@ -131,6 +144,9 @@ export type RunnerResearchSnapshot = {
   fiftyDollarWinRatePct: number;
   fiftyDollarNetPnlUsd: number;
   fiftyDollarAvgReturnPct: number;
+  medianRunnerPeakMultiple: number;
+  medianRunnerTimeToPeakMinutes: number;
+  medianRunnerDrawdownPct: number;
   recentFiftyDollarTrades: Array<{
     symbol: string;
     chain: string;
@@ -170,6 +186,34 @@ export type RunnerResearchSnapshot = {
   requirements: CodeRequirement[];
   dailyAutopsy: string[];
   generatedAt: string;
+};
+
+export type RunnerGenomeGuidance = {
+  earlyRunnerZone: boolean;
+  entryScore: number;
+  dumperRiskScore: number;
+  confidence: number;
+  sampleSize: number;
+  runnerNeighbors: number;
+  dumperNeighbors: number;
+  suggestedTradeUsd: number;
+  entryPattern: "EARLY_BREAKOUT" | "FIRST_PULLBACK" | "MOMENTUM_BUILD" | "OBSERVE";
+  learned: boolean;
+  runnerEvidence: string[];
+  dumperEvidence: string[];
+  expectedPeakMultiple: number;
+  expectedTimeToPeakMinutes: number;
+  typicalRunnerDrawdownPct: number;
+};
+
+export type RunnerExitGenomeGuidance = {
+  continuationScore: number;
+  distributionRiskScore: number;
+  confidence: number;
+  trailingStopPct: number;
+  maxHoldMultiplier: number;
+  action: "HOLD" | "EXIT";
+  reason: string;
 };
 
 async function getRedis() {
@@ -273,6 +317,7 @@ function observationFromSnapshot(snapshot: MarketSnapshot, result?: WarRoomResul
     volumeToMc: mc > 0 ? finite(snapshot.volume24h) / mc : 0,
     liquidityToMc: mc > 0 ? finite(snapshot.liquidity) / mc : 0,
     volumeAccelerationPct: finite(snapshot.volumeAccelerationPct ?? launch.volumeAccelerationPct),
+    transactionAccelerationPct: finite(launch.transactionAccelerationPct),
     holderVelocity: finite(launch.holdersPerMinute),
     uniqueBuyerVelocity: finite(launch.uniqueBuyersPerMinute),
     top10Pct: finite(snapshot.top10Pct),
@@ -371,6 +416,7 @@ async function upsertObservation(snapshot: MarketSnapshot, result?: WarRoomResul
       nextReviewAt: new Date(Date.now() + REVIEW_INTERVAL_MS).toISOString(),
       firstMarketCap: Math.max(0, snapshot.marketCap),
       peakMarketCap: Math.max(0, snapshot.marketCap),
+      peakAt: now,
       troughMarketCap: Math.max(0, snapshot.marketCap),
       peakReturnPct: 0,
       maxDrawdownPct: 0,
@@ -383,9 +429,17 @@ async function upsertObservation(snapshot: MarketSnapshot, result?: WarRoomResul
   row.name = snapshot.name || row.name;
   row.lastSeenAt = now;
   row.nextReviewAt = new Date(Date.now() + REVIEW_INTERVAL_MS).toISOString();
-  row.peakMarketCap = Math.max(row.peakMarketCap, Math.max(0, snapshot.marketCap));
-  row.troughMarketCap = row.troughMarketCap > 0 ? Math.min(row.troughMarketCap, Math.max(0, snapshot.marketCap)) : Math.max(0, snapshot.marketCap);
-  row.observations = [...row.observations, obs].slice(-MAX_OBSERVATIONS_PER_CASE);
+  const observedMc = Math.max(0, snapshot.marketCap);
+  if (observedMc >= row.peakMarketCap) {
+    row.peakMarketCap = observedMc;
+    row.peakAt = now;
+  }
+  row.troughMarketCap = row.troughMarketCap > 0 ? Math.min(row.troughMarketCap, observedMc) : observedMc;
+  // The Runner Genome trains on the earliest fingerprint, so never let the first
+  // observation fall out of the rolling history buffer.
+  row.observations = row.observations.length < MAX_OBSERVATIONS_PER_CASE
+    ? [...row.observations, obs]
+    : [row.observations[0], ...row.observations.slice(-(MAX_OBSERVATIONS_PER_CASE - 2)), obs];
   if (result) row.botNotes = [...row.botNotes, ...noteFromResult(result)].slice(-MAX_BOT_NOTES_PER_CASE);
   const priorOutcome = row.outcome;
   classifyCase(row);
@@ -457,9 +511,14 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
       row.paperClosed = true;
       row.paperPnlUsd = position.realizedPnlUsd;
       row.paperReturnPct = position.pnlPct;
+      row.paperMaxFavorableExcursionPct = position.maxFavorableExcursionPct;
+      row.paperMaxAdverseExcursionPct = position.maxAdverseExcursionPct;
+      row.paperProfitCapturePct = position.profitCapturePct;
+      row.paperHoldMinutes = Math.max(0, (new Date(position.closedAt ?? position.updatedAt).getTime() - new Date(position.openedAt).getTime()) / 60_000);
+      row.paperExitReason = position.lastReason;
       classifyCase(row);
-      const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
-      const meaningfulTrainingTrade = Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= Math.max(0.5, trainingTradeUsd * 0.02);
+      const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? process.env.PAPER_TRAINING_TRADE_USD ?? 50));
+      const meaningfulTrainingTrade = (row.paperRequestedUsd ?? 0) + 0.005 >= trainingTradeUsd;
       if (!row.freshWinRecorded &&
           meaningfulTrainingTrade &&
           (row.paperEntryMarketCap ?? row.firstMarketCap) <= maxFreshMc &&
@@ -470,6 +529,7 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
       }
       await writeCase(row);
     }
+    await recordIndependentCouncilOutcome(position).catch((error) => console.error("[runner-research] entity outcome memory", error));
     seenClosed.add(tokenKey);
   }
   meta.closedTradeTokens = [...seenClosed].slice(-5_000);
@@ -537,8 +597,208 @@ function normalizedFeatures(row: CoinCaseFile): number[] {
     Math.min(10, first.uniqueBuyerVelocity),
     first.top10Pct / 100,
     first.bundledPct / 100,
-    (first.launchVelocityScore ?? 0) / 100,
+    Math.max(0, Math.min(100, finite(first.transactionAccelerationPct) + 50)) / 100,
   ];
+}
+
+
+function snapshotFeatures(snapshot: MarketSnapshot): number[] {
+  const mc = Math.max(1, snapshot.marketCap);
+  const launch = snapshot.launchMetrics ?? {};
+  const volumeToMc = Math.max(0, snapshot.volume24h) / mc;
+  const liquidityToMc = Math.max(0, snapshot.liquidity) / mc;
+  return [
+    Math.log10(Math.max(1e-6, volumeToMc) + 1),
+    Math.log10(Math.max(1e-6, liquidityToMc) + 1),
+    Math.min(8, Math.max(0, snapshot.buySellRatio)),
+    Math.max(-100, Math.min(1000, finite(snapshot.volumeAccelerationPct ?? launch.volumeAccelerationPct))) / 100,
+    Math.min(10, Math.max(0, finite(launch.holdersPerMinute))),
+    Math.min(10, Math.max(0, finite(launch.uniqueBuyersPerMinute))),
+    Math.max(0, snapshot.top10Pct) / 100,
+    Math.max(0, snapshot.bundledPct) / 100,
+    Math.max(0, Math.min(100, finite(snapshot.launchMetrics?.transactionAccelerationPct ?? 0) + 50)) / 100,
+  ];
+}
+
+function vectorDistance(a: number[], b: number[]) {
+  const len = Math.min(a.length, b.length);
+  if (!len) return 999;
+  return Math.sqrt(a.slice(0, len).reduce((sum, value, index) => sum + (value - b[index]) ** 2, 0) / len);
+}
+
+function clampScore(value: number) { return Math.max(0, Math.min(100, value)); }
+function median(values: number[], fallback = 0) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return fallback;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+function timeToPeakMinutes(row: CoinCaseFile) {
+  if (row.peakAt) return Math.max(0, (new Date(row.peakAt).getTime() - new Date(row.firstSeenAt).getTime()) / 60_000);
+  if (!row.observations.length) return 0;
+  const peak = row.observations.reduce((best, obs) => obs.marketCap > best.marketCap ? obs : best, row.observations[0]);
+  return Math.max(0, (new Date(peak.at).getTime() - new Date(row.firstSeenAt).getTime()) / 60_000);
+}
+
+async function genomeModel(): Promise<GenomeModelCache> {
+  if (genomeModelCache && Date.now() - genomeModelCache.at < GENOME_MODEL_CACHE_MS) return genomeModelCache;
+  const cases = await allCases();
+  const labeled = cases.filter((row) => (row.outcome === "runner" || row.outcome === "dumper") && row.observations.length > 0);
+  const earlyLabeled = labeled.filter((row) =>
+    row.firstMarketCap >= 5_000 && row.firstMarketCap <= 150_000 &&
+    (row.observations[0]?.ageMinutes ?? Infinity) <= 1_440
+  );
+  // Prefer the same fresh-coin population we actually trade. Until that sample is
+  // large enough, fall back to all labeled cases rather than pretending certainty.
+  const trainingSet = earlyLabeled.length >= 20 ? earlyLabeled : labeled;
+  const rows = trainingSet.map((row) => ({ row, features: normalizedFeatures(row) }));
+  genomeModelCache = {
+    at: Date.now(),
+    rows,
+    runners: rows.filter((item) => item.row.outcome === "runner"),
+    dumpers: rows.filter((item) => item.row.outcome === "dumper"),
+  };
+  return genomeModelCache;
+}
+
+export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise<RunnerGenomeGuidance> {
+  const model = await genomeModel();
+  const features = snapshotFeatures(snapshot);
+  const nearest = model.rows
+    .map((item) => ({ ...item, distance: vectorDistance(features, item.features) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, Math.min(32, model.rows.length));
+
+  let runnerWeight = 0;
+  let dumperWeight = 0;
+  for (const item of nearest) {
+    const weight = 1 / Math.max(0.05, item.distance);
+    if (item.row.outcome === "runner") runnerWeight += weight;
+    else dumperWeight += weight;
+  }
+  const neighborWeight = runnerWeight + dumperWeight;
+  const learnedRunnerPct = neighborWeight > 0 ? runnerWeight / neighborWeight * 100 : 50;
+
+  const mc = Math.max(0, snapshot.marketCap);
+  const earlyRunnerZone = mc >= 8_000 && mc <= 80_000 && snapshot.ageMinutes <= 1_440;
+  const mcScore = mc >= 10_000 && mc <= 50_000 ? 100 : mc >= 8_000 && mc <= 80_000 ? 78 : mc > 0 && mc <= 150_000 ? 58 : 30;
+  const ageScore = snapshot.ageMinutes <= 30 ? 100 : snapshot.ageMinutes <= 120 ? 88 : snapshot.ageMinutes <= 360 ? 72 : snapshot.ageMinutes <= 1_440 ? 55 : 30;
+  const buyPressureScore = clampScore(35 + (snapshot.buySellRatio - 0.8) * 32);
+  const mcVelocityScore = clampScore(50 + finite(snapshot.marketCapChange5mPct) * 2.4);
+  const volumeIntensity = mc > 0 ? snapshot.volume24h / mc : 0;
+  const volumeIntensityScore = clampScore(Math.log10(1 + Math.max(0, volumeIntensity)) * 45 + 30);
+  const accelerationScore = clampScore(50 + finite(snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct) * 0.22);
+  const holderVelocity = finite(snapshot.launchMetrics?.holdersPerMinute);
+  const buyerVelocity = finite(snapshot.launchMetrics?.uniqueBuyersPerMinute);
+  const participationScore = clampScore(35 + holderVelocity * 10 + buyerVelocity * 14);
+  const liqRatio = mc > 0 ? snapshot.liquidity / mc : 0;
+  const liquidityScore = liqRatio >= 0.08 && liqRatio <= 1.5 ? 85 : liqRatio >= 0.04 ? 68 : liqRatio >= 0.015 ? 50 : 25;
+  const concentrationPenalty = Math.max(0, snapshot.top10Pct - 45) * 0.65 + Math.max(0, snapshot.bundledPct - 12) * 1.25;
+
+  const heuristic = clampScore(
+    mcScore * 0.17 + ageScore * 0.10 + buyPressureScore * 0.18 + mcVelocityScore * 0.14 +
+    volumeIntensityScore * 0.12 + accelerationScore * 0.12 + participationScore * 0.10 + liquidityScore * 0.07 - concentrationPenalty
+  );
+  const learnedWeight = Math.min(0.62, model.rows.length / 120 * 0.62);
+  const entryScore = clampScore(heuristic * (1 - learnedWeight) + learnedRunnerPct * learnedWeight);
+  const safetyDumperPenalty = Math.max(0, snapshot.top10Pct - 60) * 0.8 + Math.max(0, snapshot.bundledPct - 18) * 1.4;
+  const flowDumperPenalty = snapshot.buySellRatio < 0.8 ? (0.8 - snapshot.buySellRatio) * 40 : 0;
+  const dumperRiskScore = clampScore((100 - entryScore) * 0.72 + safetyDumperPenalty + flowDumperPenalty);
+  const evidenceCount = [snapshot.buySellRatio > 0, snapshot.volume24h > 0, snapshot.liquidity > 0, snapshot.holders > 0,
+    snapshot.launchMetrics?.holdersPerMinute !== undefined, snapshot.volumeAccelerationPct !== undefined].filter(Boolean).length;
+  const confidence = clampScore(30 + Math.min(45, model.rows.length * 0.45) + evidenceCount * 4);
+
+  let suggestedTradeUsd = 50;
+  if (entryScore >= 72 && dumperRiskScore <= 62) suggestedTradeUsd = 75;
+  if (entryScore >= 82 && dumperRiskScore <= 52) suggestedTradeUsd = 100;
+  if (entryScore >= 90 && dumperRiskScore <= 42 && confidence >= 55) suggestedTradeUsd = 125;
+  if (entryScore >= 94 && dumperRiskScore <= 35 && confidence >= 70 && model.rows.length >= 80) suggestedTradeUsd = 150;
+
+  const runnerRows = model.runners.map((item) => item.row);
+  const expectedPeakMultiple = median(runnerRows.map((row) => row.firstMarketCap > 0 ? row.peakMarketCap / row.firstMarketCap : 1), 3);
+  const expectedTimeToPeakMinutes = median(runnerRows.map(timeToPeakMinutes), 90);
+  const typicalRunnerDrawdownPct = Math.abs(median(runnerRows.map((row) => row.maxDrawdownPct), -25));
+
+  const runnerEvidence = [
+    earlyRunnerZone ? `Early-runner zone: $${Math.round(mc).toLocaleString()} market cap at ${Math.round(snapshot.ageMinutes)}m age.` : `Outside the primary $10K-$50K hunt zone; genome still scores the setup.`,
+    `Buy/sell pressure ${snapshot.buySellRatio.toFixed(2)}x · 5m MC velocity ${(snapshot.marketCapChange5mPct ?? 0).toFixed(1)}%.`,
+    `Volume/MC ${volumeIntensity.toFixed(2)}x · volume acceleration ${(snapshot.volumeAccelerationPct ?? 0).toFixed(0)}%.`,
+    neighborWeight > 0 ? `${nearest.filter((x) => x.row.outcome === "runner").length}/${nearest.length} nearest labeled cases are runners after distance weighting.` : `No mature labeled-neighbor set yet; heuristic evidence carries the score.`,
+  ];
+  const dumperEvidence = [
+    snapshot.buySellRatio < 1 ? `Sell pressure is leading at ${snapshot.buySellRatio.toFixed(2)}x buys/sells.` : `Buy pressure currently exceeds sells.`,
+    `Top-10 ${snapshot.top10Pct.toFixed(1)}% · bundled ${snapshot.bundledPct.toFixed(1)}%.`,
+    `Liquidity/MC ${(liqRatio * 100).toFixed(1)}%; execution feasibility still decides whether the order can actually fill.`,
+  ];
+  const entryPattern: RunnerGenomeGuidance["entryPattern"] = entryScore >= 82 && (snapshot.marketCapChange5mPct ?? 0) >= 8
+    ? "EARLY_BREAKOUT" : entryScore >= 72 && (snapshot.marketCapChange5mPct ?? 0) < 8
+      ? "FIRST_PULLBACK" : entryScore >= 55 ? "MOMENTUM_BUILD" : "OBSERVE";
+
+  return {
+    earlyRunnerZone,
+    entryScore: Number(entryScore.toFixed(1)),
+    dumperRiskScore: Number(dumperRiskScore.toFixed(1)),
+    confidence: Number(confidence.toFixed(1)),
+    sampleSize: model.rows.length,
+    runnerNeighbors: nearest.filter((item) => item.row.outcome === "runner").length,
+    dumperNeighbors: nearest.filter((item) => item.row.outcome === "dumper").length,
+    suggestedTradeUsd,
+    entryPattern,
+    learned: model.rows.length >= 20,
+    runnerEvidence,
+    dumperEvidence,
+    expectedPeakMultiple: Number(expectedPeakMultiple.toFixed(2)),
+    expectedTimeToPeakMinutes: Number(expectedTimeToPeakMinutes.toFixed(0)),
+    typicalRunnerDrawdownPct: Number(typicalRunnerDrawdownPct.toFixed(1)),
+  };
+}
+
+export async function getRunnerExitGuidance(position: ManagedPosition, snapshot: MarketSnapshot): Promise<RunnerExitGenomeGuidance> {
+  const entrySnapshot = position.entryContext?.snapshot ?? snapshot;
+  const entryGenome = position.entryContext?.runnerGenome ?? await getRunnerGenomeGuidance(entrySnapshot);
+  const model = await genomeModel();
+  const profitableExits = model.rows.map((item) => item.row).filter((row) => row.paperClosed && (row.paperPnlUsd ?? 0) > 0);
+  const learnedWinningHoldMinutes = median(profitableExits.map((row) => row.paperHoldMinutes ?? 0).filter((value) => value > 0), entryGenome.expectedTimeToPeakMinutes);
+  const learnedCapturePct = median(profitableExits.map((row) => row.paperProfitCapturePct ?? 0).filter((value) => value > 0), 50);
+  const currentPnlPct = position.entryPrice > 0 ? (snapshot.price / position.entryPrice - 1) * 100 : 0;
+  const entryLiquidity = Math.max(1, entrySnapshot.liquidity);
+  const liquidityChangePct = (snapshot.liquidity / entryLiquidity - 1) * 100;
+  const buyPressure = clampScore(35 + (snapshot.buySellRatio - 0.8) * 32);
+  const acceleration = clampScore(50 + finite(snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct) * 0.22);
+  const trendScore = clampScore(50 + currentPnlPct * 1.2);
+  const continuationScore = clampScore(entryGenome.entryScore * 0.38 + buyPressure * 0.24 + acceleration * 0.18 + trendScore * 0.20);
+  const distributionRiskScore = clampScore(
+    (100 - buyPressure) * 0.34 + (100 - acceleration) * 0.22 +
+    Math.max(0, -liquidityChangePct) * 0.35 + Math.max(0, snapshot.top10Pct - entrySnapshot.top10Pct) * 1.2 +
+    Math.max(0, snapshot.bundledPct - entrySnapshot.bundledPct) * 1.4
+  );
+  const confidence = clampScore(entryGenome.confidence * 0.7 + (entryGenome.sampleSize >= 30 ? 20 : 5));
+  let trailingStopPct = Math.max(8, Math.min(35, entryGenome.typicalRunnerDrawdownPct * 0.72));
+  let maxHoldMultiplier = 1;
+  if (continuationScore >= 78 && distributionRiskScore < 45) { trailingStopPct = Math.max(trailingStopPct, 22); maxHoldMultiplier = 1.55; }
+  else if (continuationScore >= 65 && distributionRiskScore < 60) { trailingStopPct = Math.max(trailingStopPct, 17); maxHoldMultiplier = 1.25; }
+  if (distributionRiskScore >= 70) { trailingStopPct = Math.min(trailingStopPct, 11); maxHoldMultiplier = 0.75; }
+  // Let actual completed trades teach exit timing too. Low historical profit capture
+  // tightens mature winners slightly; strong capture lets continuation breathe.
+  if (profitableExits.length >= 12 && currentPnlPct >= 50) {
+    if (learnedCapturePct < 35) trailingStopPct = Math.min(trailingStopPct, 14);
+    else if (learnedCapturePct >= 65 && continuationScore >= 70) trailingStopPct = Math.max(trailingStopPct, 19);
+    if (learnedWinningHoldMinutes > entryGenome.expectedTimeToPeakMinutes * 1.35) maxHoldMultiplier = Math.max(maxHoldMultiplier, 1.2);
+  }
+  const forceExit = confidence >= 55 && distributionRiskScore >= 90 && snapshot.buySellRatio < 0.65 && currentPnlPct < 8;
+  const action: RunnerExitGenomeGuidance["action"] = forceExit ? "EXIT" : "HOLD";
+  const reason = forceExit
+    ? `Exit Genome sees distribution risk ${distributionRiskScore.toFixed(0)}/100 with weak buy pressure; learned runner continuation has failed.`
+    : `Exit Genome continuation ${continuationScore.toFixed(0)}/100 vs distribution risk ${distributionRiskScore.toFixed(0)}/100; adaptive trail ${trailingStopPct.toFixed(1)}%${profitableExits.length ? ` · ${profitableExits.length} profitable exits learned · median capture ${learnedCapturePct.toFixed(0)}%` : ""}.`;
+  return {
+    continuationScore: Number(continuationScore.toFixed(1)),
+    distributionRiskScore: Number(distributionRiskScore.toFixed(1)),
+    confidence: Number(confidence.toFixed(1)),
+    trailingStopPct: Number(trailingStopPct.toFixed(1)),
+    maxHoldMultiplier: Number(maxHoldMultiplier.toFixed(2)),
+    action,
+    reason,
+  };
 }
 
 function oosAccuracy(cases: CoinCaseFile[]) {
@@ -610,9 +870,8 @@ export async function getRunnerResearchSnapshot(args: {
   const oosAccuracyPct = oosAccuracy(cases);
   const findings = signalFindings(cases, oosAccuracyPct);
   const providerCoveragePct = providerCoverage(args.providers);
-  const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
-  const trainingToleranceUsd = Math.max(0.5, trainingTradeUsd * 0.02);
-  const fiftyDollarCases = cases.filter((row) => row.paperTradeOpened && Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= trainingToleranceUsd);
+  const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? process.env.PAPER_TRAINING_TRADE_USD ?? 50));
+  const fiftyDollarCases = cases.filter((row) => row.paperTradeOpened && (row.paperRequestedUsd ?? 0) + 0.005 >= trainingTradeUsd);
   const fiftyDollarClosed = fiftyDollarCases.filter((row) => row.paperClosed);
   const fiftyDollarWinsRows = fiftyDollarClosed.filter((row) => (row.paperPnlUsd ?? 0) > 0);
   const fiftyDollarLossRows = fiftyDollarClosed.filter((row) => (row.paperPnlUsd ?? 0) < 0);
@@ -634,7 +893,7 @@ export async function getRunnerResearchSnapshot(args: {
     }));
   const freshCoinWins = cases.filter((row) =>
     row.freshWinRecorded &&
-    Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= trainingToleranceUsd
+    (row.paperRequestedUsd ?? 0) + 0.005 >= trainingTradeUsd
   ).length;
   const targetFreshCoinWins = Math.max(1, Number(process.env.RESEARCH_REQUIRED_FRESH_WINS ?? 100));
   const runnerCases = cases.filter((row) => row.outcome === "runner").length;
@@ -646,6 +905,10 @@ export async function getRunnerResearchSnapshot(args: {
   const invalidatedTells = findings.filter((row) => row.status === "invalidated").length;
   const activeHypotheses = findings.filter((row) => row.status === "active").length;
   const runnerCaptures = cases.filter((row) => row.outcome === "runner" && row.paperTradeOpened).length;
+  const runnerRowsForProfile = cases.filter((row) => row.outcome === "runner" && row.observations.length > 0);
+  const medianRunnerPeakMultiple = median(runnerRowsForProfile.map((row) => row.firstMarketCap > 0 ? row.peakMarketCap / row.firstMarketCap : 1), 0);
+  const medianRunnerTimeToPeakMinutes = median(runnerRowsForProfile.map(timeToPeakMinutes), 0);
+  const medianRunnerDrawdownPct = Math.abs(median(runnerRowsForProfile.map((row) => row.maxDrawdownPct), 0));
 
   const requiredCases = Math.max(100, Number(process.env.RESEARCH_REQUIRED_CASES ?? 2_000));
   const requiredLabeled = Math.max(30, Number(process.env.RESEARCH_REQUIRED_LABELED_CASES ?? 300));
@@ -658,7 +921,7 @@ export async function getRunnerResearchSnapshot(args: {
   const requirements: CodeRequirement[] = [
     { id: "cases", label: "Fresh launch case files", current: cases.length.toLocaleString(), target: requiredCases.toLocaleString(), passed: cases.length >= requiredCases },
     { id: "labeled", label: "Runner/dumper labeled cases", current: labeledCases.toLocaleString(), target: requiredLabeled.toLocaleString(), passed: labeledCases >= requiredLabeled },
-    { id: "wins", label: "Successful fresh-coin $50 paper wins", current: freshCoinWins.toLocaleString(), target: targetFreshCoinWins.toLocaleString(), passed: freshCoinWins >= targetFreshCoinWins },
+    { id: "wins", label: "Successful fresh-coin $50+ paper wins", current: freshCoinWins.toLocaleString(), target: targetFreshCoinWins.toLocaleString(), passed: freshCoinWins >= targetFreshCoinWins },
     { id: "accuracy", label: "Out-of-sample Runner Genome accuracy", current: `${oosAccuracyPct.toFixed(1)}%`, target: `${requiredAccuracy}%`, passed: oosAccuracyPct >= requiredAccuracy },
     { id: "pf", label: "Paper profit factor", current: stats.profitFactor.toFixed(2), target: requiredProfitFactor.toFixed(2), passed: stats.profitFactor >= requiredProfitFactor && stats.paperTrades >= 30 },
     { id: "expectancy", label: "Paper expectancy", current: `${stats.expectancyPct.toFixed(2)}%`, target: "> 0%", passed: stats.expectancyPct > 0 && stats.paperTrades >= 30 },
@@ -716,6 +979,9 @@ export async function getRunnerResearchSnapshot(args: {
     fiftyDollarWinRatePct: Number(fiftyDollarWinRatePct.toFixed(1)),
     fiftyDollarNetPnlUsd: Number(fiftyDollarNetPnlUsd.toFixed(2)),
     fiftyDollarAvgReturnPct: Number(fiftyDollarAvgReturnPct.toFixed(2)),
+    medianRunnerPeakMultiple: Number(medianRunnerPeakMultiple.toFixed(2)),
+    medianRunnerTimeToPeakMinutes: Number(medianRunnerTimeToPeakMinutes.toFixed(0)),
+    medianRunnerDrawdownPct: Number(medianRunnerDrawdownPct.toFixed(1)),
     recentFiftyDollarTrades,
     activeHypotheses,
     confirmedTells,

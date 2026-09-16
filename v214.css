@@ -926,3 +926,35 @@
 .v224-empty{padding:16px 4px!important}
 @media(max-width:980px){.v224-fifty-metrics{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:700px){.v224-fifty-head{padding:16px;gap:10px}.v224-fifty-head>strong{min-width:58px;height:46px;font-size:18px}.v224-fifty-metrics{grid-template-columns:repeat(2,1fr)}.v224-fifty-table{overflow-x:auto}.v224-fifty-row{min-width:620px}}
+
+
+/* V2.25 — active Entry/Exit Genome panel */
+.v225-genome-engines{margin:16px 0 20px;border:1px solid #dfe2e6;border-radius:22px;background:#fff;overflow:hidden;box-shadow:0 7px 24px rgba(15,23,42,.035)}
+.v225-genome-title{padding:19px 22px 15px;border-bottom:1px solid #eceef1}.v225-genome-title>span{font-size:8px;letter-spacing:.12em;color:#9298a2;font-weight:800}.v225-genome-title h3{margin:5px 0;font-size:20px;color:#101216}.v225-genome-title p{margin:0;max-width:850px;color:#727984;font-size:11px;line-height:1.55}
+.v225-genome-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.v225-genome-grid>div{padding:17px 19px;border-right:1px solid #eceef1}.v225-genome-grid>div:last-child{border-right:0}.v225-genome-grid b{display:block;font-size:8px;letter-spacing:.08em;color:#6f7680}.v225-genome-grid strong{display:block;margin-top:6px;font-size:24px;color:#0c0d0f}.v225-genome-grid small{display:block;color:#959ba4;font-size:8px}.v225-genome-grid p{margin:9px 0 0;color:#6f7680;font-size:10px;line-height:1.45}
+@media(max-width:760px){.v225-genome-grid{grid-template-columns:1fr}.v225-genome-grid>div{border-right:0;border-bottom:1px solid #eceef1}.v225-genome-grid>div:last-child{border-bottom:0}}
+
+
+/* V2.26 — proof that the Council is made of isolated entities */
+.entity-proof{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  gap:10px;
+  align-items:center;
+  margin:10px 0 2px;
+  padding:9px 11px;
+  border:1px solid #e3e6ea;
+  border-radius:12px;
+  background:#fafbfc;
+}
+.entity-proof b{font-size:8px;letter-spacing:.07em;color:#111}
+.entity-proof span{font-size:9px;color:#5f6670}
+.entity-proof small{font-size:8px;color:#8b9199;text-align:right}
+.entity-proof.verified{border-color:#cfe9dd;background:#f7fcf9}
+.entity-proof.verified b{color:#15734f}
+.entity-proof.degraded{border-color:#f0d9b5;background:#fffaf2}
+.entity-proof.degraded b{color:#a16516}
+@media(max-width:700px){
+  .entity-proof{grid-template-columns:1fr}
+  .entity-proof small{text-align:left}
+}
