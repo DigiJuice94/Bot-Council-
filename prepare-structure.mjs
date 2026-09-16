@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { applyFreshChainPatch } from './fresh-chain-patch.mjs';
 import { applyPositionSizingPatch } from './position-sizing-patch.mjs';
 import { applyExitLiquidityPatch } from './exit-liquidity-patch.mjs';
+import { applyTrainingTradeSizePatch } from './training-trade-size-patch.mjs';
 
 const root = process.cwd();
 
@@ -94,5 +95,6 @@ if (!existsSync(resolve(root, 'app/page.tsx')) || !existsSync(resolve(root, 'app
 applyFreshChainPatch(root);
 applyPositionSizingPatch(root);
 applyExitLiquidityPatch(root);
+applyTrainingTradeSizePatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);
