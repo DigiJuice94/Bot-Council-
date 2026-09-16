@@ -1,6 +1,6 @@
 import { buildExecutionPlan } from "./execution";
 import { runWarRoom } from "./engine";
-import { appendPrivateEntityMemory, loadPrivateEntityMemory, recordEntityDecision } from "./agent-entity-store";
+import { loadPrivateEntityMemory, recordEntityDecision } from "./agent-entity-store";
 import type {
   AgentOpinion,
   CouncilEntityId,
@@ -41,31 +41,31 @@ type EntitySpec = {
 const ENTITY_SPECS: EntitySpec[] = [
   {
     id: "launch", name: "Early Runner Scout", shortName: "ERS", color: "#ffb13b",
-    mission: "Find the first credible stage of a fresh runner. Prioritize $10K-$50K market-cap behavior, launch age, market-cap velocity, buy pressure, transaction/volume acceleration and resemblance to previous early runners. Do not demand mature-token conditions.",
+    mission: "Hunt the earliest credible stage of a real runner, especially $10K-$50K market cap.",
   },
   {
     id: "social", name: "Narrative Ignition Scout", shortName: "NIS", color: "#b05cff",
-    mission: "Judge whether attention/narrative is igniting before the price move. Treat missing social data as unknown rather than zero. Separate genuine early ignition from attention that arrived only after the pump.",
+    mission: "Judge whether narrative and attention are igniting early enough to help a run.",
   },
   {
     id: "wallet", name: "Early Flow Analyst", shortName: "EFA", color: "#29e693",
-    mission: "Judge early buyer/holder behavior: buy-to-sell pressure, holder velocity, repeat accumulation, smart-money evidence when actually verified, concentration changes and signs of distribution.",
+    mission: "Judge early buyer, holder and wallet flow for accumulation versus distribution.",
   },
   {
     id: "quant", name: "Runner Pattern Quant", shortName: "RPQ", color: "#28c9ff",
-    mission: "Quantify runner probability from market-cap velocity, volume/MC, liquidity/MC, transaction acceleration, volume acceleration, volatility and Runner Genome similarity. Focus on asymmetry in the first minutes/hours.",
+    mission: "Measure runner structure, acceleration and similarity to the Runner Genome.",
   },
   {
     id: "contract", name: "Fast Safety Gate", shortName: "FSG", color: "#ffd34f",
-    mission: "Independently inspect explicit sellability/scam/authority/concentration evidence. Do not reject merely because a legitimate fresh pool is small. Distinguish verified bad evidence from unavailable evidence.",
+    mission: "Judge explicit token-level safety evidence without punishing a token merely for being early.",
   },
   {
     id: "bear", name: "Dumper Pattern Specialist", shortName: "DPS", color: "#ff5f6d",
-    mission: "Act as a specialist in failed launches. Compare this candidate with dumpers: fake pressure, bundle/concentration risk, distribution, slowing acceleration, one-wallet dependence, liquidity deterioration and late-entry structure.",
+    mission: "Look for the specific fingerprints that historically preceded failed launches and dumps.",
   },
   {
     id: "portfolio", name: "Portfolio Strategist", shortName: "PS", color: "#70a8ff",
-    mission: "Independently decide whether the opportunity deserves a starter, how large the PAPER entry should be, and whether capital should remain available for other fresh runners. $50 is the minimum training entry, not a fixed size. Prefer $50-$150 based on evidence strength.",
+    mission: "Independently decide whether the setup deserves $50, $75, $100, $125 or $150 in PAPER.",
   },
 ];
 
@@ -74,28 +74,17 @@ const CIO_SPEC = {
   name: "Runner CIO",
   shortName: "CIO",
   color: "#111111",
-  mission: "Synthesize the seven locked specialist opinions after they have worked independently and after their meeting rebuttals. Optimize for learning to identify genuine early runners while respecting deterministic hard safety gates. Do not invent a ninth opinion.",
 };
 
-function apiKey() {
-  return process.env.OPENAI_API_KEY?.trim() || "";
-}
-function entityMode() {
-  return (process.env.COUNCIL_ENTITY_MODE ?? "independent-ai").trim().toLowerCase();
-}
-function allowDegraded() {
-  return process.env.COUNCIL_ALLOW_DEGRADED_FALLBACK === "true";
-}
-function agentModel() {
-  return process.env.COUNCIL_AGENT_MODEL?.trim() || "gpt-5.6-luna";
-}
-function cioModel() {
-  return process.env.COUNCIL_CIO_MODEL?.trim() || "gpt-5.6-terra";
-}
-function timeoutMs() {
-  const n = Number(process.env.COUNCIL_AGENT_TIMEOUT_MS ?? 18_000);
-  return Math.max(4_000, Math.min(60_000, Number.isFinite(n) ? n : 18_000));
-}
+type Packet = ReturnType<typeof compactPacket>;
+
+type EntityMemoryLite = {
+  kind: "decision" | "outcome";
+  vote?: "BUY" | "WATCH" | "SKIP";
+  realizedReturnPct?: number;
+  realizedPnlUsd?: number;
+  lesson: string;
+};
 
 function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio: PortfolioRiskContext) {
   const g = base.runnerGenome;
@@ -104,22 +93,22 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
       symbol: snapshot.symbol,
       chain: snapshot.chain,
       address: snapshot.tokenAddress,
-      venue: snapshot.venue,
       marketCap: snapshot.marketCap,
       liquidity: snapshot.liquidity,
       ageMinutes: snapshot.ageMinutes,
       price: snapshot.price,
       priceChange24hPct: snapshot.priceChange24h,
-      marketCapChange5mPct: snapshot.marketCapChange5mPct ?? null,
+      marketCapChange5mPct: snapshot.marketCapChange5mPct ?? 0,
       buySellRatio: snapshot.buySellRatio,
       volume5mUsd: snapshot.volume5m,
       volume24hUsd: snapshot.volume24h,
-      volumeAccelerationPct: snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct ?? null,
+      volumeAccelerationPct: snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct ?? 0,
+      socialVelocityPct: snapshot.socialVelocityPct ?? 0,
       holders: snapshot.holders,
-      holderGrowthPct: snapshot.holderGrowthPct ?? null,
-      holdersPerMinute: snapshot.launchMetrics?.holdersPerMinute ?? null,
-      transactionsPerMinute: snapshot.launchMetrics?.transactionsPerMinute ?? null,
-      uniqueBuyersPerMinute: snapshot.launchMetrics?.uniqueBuyersPerMinute ?? null,
+      holderGrowthPct: snapshot.holderGrowthPct ?? 0,
+      holdersPerMinute: snapshot.launchMetrics?.holdersPerMinute ?? 0,
+      transactionsPerMinute: snapshot.launchMetrics?.transactionsPerMinute ?? 0,
+      uniqueBuyersPerMinute: snapshot.launchMetrics?.uniqueBuyersPerMinute ?? 0,
       smartMoneyBuys: snapshot.smartMoneyBuys,
       smartMoneySells: snapshot.smartMoneySells,
       top10Pct: snapshot.top10Pct,
@@ -131,6 +120,7 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
       buyTaxPct: snapshot.buyTaxPct,
       sellTaxPct: snapshot.sellTaxPct,
       liquidityLocked: snapshot.liquidityLocked,
+      volatility: snapshot.volatility,
       sourceQuality: snapshot.dataProvenance?.quality ?? null,
     },
     runnerGenome: {
@@ -168,283 +158,313 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
   };
 }
 
-function parseJsonObject(text: string) {
-  const cleaned = text.trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "");
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-  if (first < 0 || last <= first) throw new Error("Agent response did not contain a JSON object.");
-  return JSON.parse(cleaned.slice(first, last + 1));
+function voteFromScore(score: number, hardRiskPassed: boolean): "BUY" | "WATCH" | "SKIP" {
+  if (!hardRiskPassed) return "SKIP";
+  if (score >= 64) return "BUY";
+  if (score >= 44) return "WATCH";
+  return "SKIP";
 }
 
-function responseText(data: any) {
-  if (typeof data?.output_text === "string" && data.output_text.trim()) return data.output_text;
-  const chunks: string[] = [];
-  for (const item of data?.output ?? []) {
-    for (const part of item?.content ?? []) {
-      if (part?.type === "output_text" && typeof part.text === "string") chunks.push(part.text);
-    }
-  }
-  return chunks.join("\n").trim();
+function confidenceFromScore(score: number) {
+  return Math.round(clamp(54 + Math.abs(score - 50) * 0.8, 50, 95));
 }
 
-async function callResponsesApi(args: {
-  model: string;
-  agentId: CouncilEntityId;
-  phase: "private" | "meeting" | "cio";
-  system: string;
-  payload: unknown;
-}) {
-  const key = apiKey();
-  if (!key) throw new Error("OPENAI_API_KEY is not configured.");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs());
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: args.model,
-        instructions: args.system,
-        input: JSON.stringify(args.payload),
-        max_output_tokens: args.phase === "cio" ? 900 : 700,
-        store: false,
-        metadata: {
-          application: "bot-war-room",
-          agent_id: args.agentId,
-          phase: args.phase,
-        },
-      }),
-      signal: controller.signal,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`Responses API ${response.status}: ${data?.error?.message ?? response.statusText}`);
-    const text = responseText(data);
-    if (!text) throw new Error("Agent returned no text.");
-    return { json: parseJsonObject(text), responseId: typeof data?.id === "string" ? data.id : undefined };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function normalizeVote(value: unknown): "BUY" | "WATCH" | "SKIP" {
-  const vote = String(value ?? "WATCH").toUpperCase();
-  return vote === "BUY" || vote === "SKIP" ? vote : "WATCH";
-}
-function strings(value: unknown, max = 5) {
-  if (!Array.isArray(value)) return [];
-  return value.map((x) => String(x).trim()).filter(Boolean).slice(0, max);
-}
-function boundedTradeUsd(value: unknown, fallback: number) {
+function boundedTradeUsd(value: number) {
   const min = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
   const max = Math.max(min, Number(process.env.PAPER_TRAINING_MAX_BUY_USD ?? 150));
-  const n = Number(value);
-  return Number(Math.max(min, Math.min(max, Number.isFinite(n) ? n : fallback)).toFixed(2));
+  return Number(Math.max(min, Math.min(max, value)).toFixed(2));
 }
 
-function localFallbackOpinion(spec: EntitySpec, packet: ReturnType<typeof compactPacket>, phase: "private" | "meeting"): IndependentEntityOpinion {
+function memoryCalibration(memory: EntityMemoryLite[]) {
+  let calibration = 0;
+  let observed = 0;
+  for (const row of memory) {
+    if (row.kind !== "outcome" || typeof row.realizedReturnPct !== "number") continue;
+    observed += 1;
+    const supported = row.vote === "BUY" || row.vote === "WATCH";
+    if (row.realizedReturnPct > 10 && supported) calibration += 2.5;
+    else if (row.realizedReturnPct < -10 && supported) calibration -= 2;
+    else if (row.realizedReturnPct < -10 && row.vote === "SKIP") calibration += 1.5;
+    else if (row.realizedReturnPct > 25 && row.vote === "SKIP") calibration -= 2.5;
+  }
+  if (!observed) return 0;
+  return Math.max(-10, Math.min(10, calibration));
+}
+
+function baseEvidence(packet: Packet) {
+  return [
+    `Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${packet.runnerGenome.dumperRiskScore.toFixed(0)}/100.`,
+    `MC $${Math.round(packet.token.marketCap).toLocaleString()} · liquidity $${Math.round(packet.token.liquidity).toLocaleString()} · age ${Math.round(packet.token.ageMinutes)}m.`,
+  ];
+}
+
+async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<IndependentEntityOpinion> {
+  const rawMemory = await loadPrivateEntityMemory(spec.id, 12);
+  const memory: EntityMemoryLite[] = rawMemory.map((row) => ({
+    kind: row.kind,
+    vote: row.vote,
+    realizedReturnPct: row.realizedReturnPct,
+    realizedPnlUsd: row.realizedPnlUsd,
+    lesson: row.lesson,
+  }));
+  const calibration = memoryCalibration(memory);
   const t = packet.token;
   const g = packet.runnerGenome;
-  let score = g.entryScore;
-  if (spec.id === "launch") score = clamp(g.entryScore + (t.marketCap >= 10_000 && t.marketCap <= 50_000 ? 8 : 0) + Math.max(0, t.marketCapChange5mPct ?? 0) * 0.35);
-  if (spec.id === "social") score = clamp(48 + (t.sourceQuality?.socialVelocity ? 15 : 0));
-  if (spec.id === "wallet") score = clamp(50 + (t.buySellRatio - 1) * 18 + Math.max(0, t.holderGrowthPct ?? 0));
-  if (spec.id === "quant") score = clamp(g.entryScore * 0.7 + Math.max(0, t.marketCapChange5mPct ?? 0) * 0.7);
-  if (spec.id === "contract") score = packet.commonAnalytics.hardRiskPassed ? 78 : 5;
-  if (spec.id === "bear") score = clamp(100 - g.dumperRiskScore);
-  if (spec.id === "portfolio") score = clamp(g.entryScore - g.dumperRiskScore * 0.2 + 18);
+  let score = 50;
+  let thesis = "";
+  let evidence: string[] = [];
+  let risks: string[] = [];
+  let suggestedTradeUsd: number | undefined;
 
-  const vote = !packet.commonAnalytics.hardRiskPassed
-    ? "SKIP"
-    : score >= 68 ? "BUY" : score >= 46 ? "WATCH" : "SKIP";
+  if (spec.id === "launch") {
+    const earlyBonus = t.marketCap >= 10_000 && t.marketCap <= 50_000 ? 14 : g.earlyRunnerZone ? 8 : 0;
+    score = clamp(
+      g.entryScore * 0.48 +
+      18 +
+      earlyBonus +
+      Math.max(-10, Math.min(18, t.marketCapChange5mPct * 0.65)) +
+      Math.max(-8, Math.min(12, t.volumeAccelerationPct * 0.08)) +
+      Math.max(-8, Math.min(12, (t.buySellRatio - 1) * 10)) +
+      calibration
+    );
+    thesis = score >= 64
+      ? "This launch is behaving enough like an early runner to deserve a PAPER rep before the move matures."
+      : score >= 44
+        ? "The launch is interesting but the early acceleration is not yet clean enough for a full BUY vote."
+        : "The first-minute structure does not currently resemble the stronger early runners.";
+    evidence = [
+      ...baseEvidence(packet),
+      `5m MC velocity ${t.marketCapChange5mPct.toFixed(1)}% · volume acceleration ${t.volumeAccelerationPct.toFixed(1)}%.`,
+    ];
+  } else if (spec.id === "social") {
+    const hasSocial = Boolean(t.sourceQuality?.socialVelocity);
+    score = clamp(
+      50 +
+      (hasSocial ? Math.max(-14, Math.min(22, t.socialVelocityPct * 0.22)) : 2) +
+      (g.earlyRunnerZone ? 3 : 0) +
+      calibration
+    );
+    thesis = hasSocial
+      ? (score >= 64 ? "Narrative attention is accelerating early enough to support the runner thesis." : "Narrative is present but not yet a decisive ignition signal.")
+      : "Social data is unavailable, so I stay near neutral rather than inventing weakness.";
+    evidence = hasSocial
+      ? [`Verified social velocity ${t.socialVelocityPct.toFixed(1)}%.`, `Runner Genome ${g.entryScore.toFixed(0)}/100.`]
+      : ["No verified social-velocity feed is available; missing data is treated as unknown."];
+  } else if (spec.id === "wallet") {
+    score = clamp(
+      48 +
+      Math.max(-18, Math.min(24, (t.buySellRatio - 1) * 18)) +
+      Math.max(-8, Math.min(12, t.holderGrowthPct * 0.8)) +
+      Math.max(-8, Math.min(12, t.uniqueBuyersPerMinute * 0.9)) +
+      Math.max(-6, Math.min(8, (t.smartMoneyBuys - t.smartMoneySells) * 3)) +
+      calibration
+    );
+    thesis = score >= 64
+      ? "Early flow looks like accumulation rather than immediate distribution."
+      : score >= 44
+        ? "Flow is mixed; buyers are present but wallet/holder acceleration is not fully convincing."
+        : "The early flow resembles weak demand or distribution more than accumulation.";
+    evidence = [
+      `Buy/sell ${t.buySellRatio.toFixed(2)}x · holder growth ${t.holderGrowthPct.toFixed(1)}%.`,
+      `Unique buyers/min ${t.uniqueBuyersPerMinute.toFixed(1)} · smart buys/sells ${t.smartMoneyBuys}/${t.smartMoneySells}.`,
+    ];
+  } else if (spec.id === "quant") {
+    const turnover5m = t.marketCap > 0 ? t.volume5mUsd / t.marketCap : 0;
+    const liqMc = t.marketCap > 0 ? t.liquidity / t.marketCap : 0;
+    score = clamp(
+      g.entryScore * 0.52 +
+      16 +
+      Math.max(-12, Math.min(18, t.marketCapChange5mPct * 0.75)) +
+      Math.max(-8, Math.min(14, t.volumeAccelerationPct * 0.09)) +
+      Math.max(-6, Math.min(12, turnover5m * 28)) +
+      Math.max(-5, Math.min(8, liqMc * 12)) +
+      calibration
+    );
+    thesis = score >= 64
+      ? "The measured launch structure has enough asymmetry and acceleration to justify early PAPER exposure."
+      : score >= 44
+        ? "The numbers show a possible setup, but the runner pattern is not yet statistically clean."
+        : "The quantitative shape is closer to a weak launch than a runner setup.";
+    evidence = [
+      `5m turnover ${(turnover5m * 100).toFixed(1)}% of MC · liquidity/MC ${(liqMc * 100).toFixed(1)}%.`,
+      `Runner neighbors ${g.runnerNeighbors} · dumper neighbors ${g.dumperNeighbors}.`,
+    ];
+  } else if (spec.id === "contract") {
+    const explicitFailures = packet.commonAnalytics.hardBlocks.length;
+    score = explicitFailures ? clamp(12 - explicitFailures * 3) : clamp(
+      76 -
+      Math.max(0, t.top10Pct - 45) * 0.5 -
+      Math.max(0, t.bundledPct - 12) * 0.9 -
+      Math.max(0, t.sellTaxPct - 5) * 1.2 +
+      calibration
+    );
+    thesis = explicitFailures
+      ? "Explicit token-level safety evidence failed; this setup should not be traded."
+      : "No explicit hard token-safety failure is present. Being early or thin is not itself a reason to reject it.";
+    evidence = [
+      `Sellable ${t.sellable ? "yes" : "no"} · honeypot ${t.honeypot ? "yes" : "no"} · top10 ${t.top10Pct.toFixed(1)}% · bundled ${t.bundledPct.toFixed(1)}%.`,
+    ];
+    risks = packet.commonAnalytics.hardBlocks.slice(0, 5);
+  } else if (spec.id === "bear") {
+    const distribution = Math.max(0, (1 - t.buySellRatio) * 24);
+    const concentration = Math.max(0, t.top10Pct - 45) * 0.55 + Math.max(0, t.bundledPct - 12) * 1.0;
+    const fade = Math.max(0, -t.marketCapChange5mPct) * 0.8 + Math.max(0, -t.volumeAccelerationPct) * 0.08;
+    const safety = packet.commonAnalytics.hardBlocks.length * 30;
+    const dumperPressure = clamp(g.dumperRiskScore * 0.55 + distribution + concentration + fade + safety - calibration);
+    score = clamp(100 - dumperPressure);
+    thesis = score >= 64
+      ? "I do not see enough dumper evidence to veto the runner thesis."
+      : score >= 44
+        ? "There are meaningful dumper similarities; I want this treated as a WATCH-quality risk."
+        : "The candidate matches too many failed-launch patterns for me to support an entry.";
+    evidence = [
+      `Dumper Genome risk ${g.dumperRiskScore.toFixed(0)}/100 · top10 ${t.top10Pct.toFixed(1)}% · bundled ${t.bundledPct.toFixed(1)}%.`,
+      `5m MC ${t.marketCapChange5mPct.toFixed(1)}% · buy/sell ${t.buySellRatio.toFixed(2)}x.`,
+    ];
+    risks = g.dumperEvidence.slice(0, 4);
+  } else {
+    score = clamp(
+      g.entryScore * 0.58 +
+      (100 - g.dumperRiskScore) * 0.22 +
+      10 +
+      (g.earlyRunnerZone ? 6 : 0) +
+      calibration
+    );
+    const proposed = score >= 86 ? 150 : score >= 78 ? 125 : score >= 70 ? 100 : score >= 62 ? 75 : 50;
+    suggestedTradeUsd = boundedTradeUsd(proposed);
+    thesis = score >= 64
+      ? `This setup deserves a $${suggestedTradeUsd.toFixed(0)} PAPER starter based on opportunity strength and current evidence.`
+      : "I would keep the PAPER starter at the $50 floor until the evidence improves.";
+    evidence = [
+      ...baseEvidence(packet),
+      `Suggested starter $${suggestedTradeUsd.toFixed(0)} · paper cash $${packet.paperPortfolio.cashUsd.toFixed(2)}.`,
+    ];
+  }
+
+  const vote = voteFromScore(score, packet.commonAnalytics.hardRiskPassed);
   return {
     agentId: spec.id,
     agentName: spec.name,
-    phase,
-    vote,
-    confidence: Math.round(clamp(Math.abs(score - 50) + 50)),
-    score: Math.round(clamp(score)),
-    thesis: `${spec.name} local isolated fallback used because the external entity call was unavailable.`,
-    evidence: [
-      `Runner Genome ${g.entryScore.toFixed(0)}/100 vs dumper risk ${g.dumperRiskScore.toFixed(0)}/100.`,
-      `MC $${Math.round(t.marketCap).toLocaleString()} · buy/sell ${t.buySellRatio.toFixed(2)}x.`,
-    ],
-    risks: packet.commonAnalytics.hardBlocks.slice(0, 3),
-    suggestedTradeUsd: spec.id === "portfolio" ? boundedTradeUsd(g.suggestedTradeUsd, 50) : undefined,
-    changedVote: false,
-    source: "local-fallback",
-    formedAt: now(),
-  };
-}
-
-function normalizeOpinion(spec: EntitySpec, raw: any, phase: "private" | "meeting", responseId?: string, priorVote?: "BUY" | "WATCH" | "SKIP"): IndependentEntityOpinion {
-  const vote = normalizeVote(raw?.vote);
-  const confidence = Math.round(clamp(Number(raw?.confidence ?? 50)));
-  const score = Math.round(clamp(Number(raw?.score ?? confidence)));
-  return {
-    agentId: spec.id,
-    agentName: spec.name,
-    phase,
-    vote,
-    confidence,
-    score,
-    thesis: String(raw?.thesis ?? raw?.summary ?? "No concise thesis returned.").slice(0, 700),
-    evidence: strings(raw?.evidence),
-    risks: strings(raw?.risks),
-    suggestedTradeUsd: spec.id === "portfolio" ? boundedTradeUsd(raw?.suggestedTradeUsd, 50) : undefined,
-    changedVote: phase === "meeting" ? Boolean(raw?.changedVote ?? (priorVote && priorVote !== vote)) : undefined,
-    rebuttal: phase === "meeting" ? String(raw?.rebuttal ?? "").slice(0, 700) || undefined : undefined,
-    source: "openai",
-    responseId,
-    formedAt: now(),
-  };
-}
-
-function privateSystem(spec: EntitySpec) {
-  return [
-    `You are ${spec.name}, one autonomous entity in an eight-entity crypto research council.`,
-    `Your permanent mission: ${spec.mission}`,
-    "PRIVATE PHASE RULES:",
-    "- Work completely alone. You have not seen and must not guess any other entity's opinion.",
-    "- Use only the supplied market evidence, Runner Genome data and YOUR private memory.",
-    "- The shared analytics engine is evidence, not a boss. Form your own vote.",
-    "- The core PAPER research objective is identifying real early runners, especially roughly $10K-$50K market cap, before the large move.",
-    "- Losses are acceptable research outcomes; do not become generically cautious merely to avoid losses.",
-    "- Do not reveal hidden chain-of-thought. Return only a concise thesis, evidence, risks and vote.",
-    'Return ONLY JSON: {"vote":"BUY|WATCH|SKIP","confidence":0-100,"score":0-100,"thesis":"short","evidence":["..."],"risks":["..."],"suggestedTradeUsd":50-150 optional}.',
-  ].join("\n");
-}
-
-function meetingSystem(spec: EntitySpec) {
-  return [
-    `You are still ${spec.name}. Your identity and private memory are unchanged.`,
-    `Your mission remains: ${spec.mission}`,
-    "MEETING PHASE RULES:",
-    "- Your private first opinion is LOCKED and supplied to you.",
-    "- You may now read the other entities' concise locked opinions.",
-    "- Challenge evidence, not personalities. You may keep or change your vote.",
-    "- Do not merge into a generic consensus. Preserve your specialty.",
-    "- Do not reveal hidden chain-of-thought.",
-    'Return ONLY JSON: {"vote":"BUY|WATCH|SKIP","confidence":0-100,"score":0-100,"thesis":"short","evidence":["..."],"risks":["..."],"changedVote":true|false,"rebuttal":"short","suggestedTradeUsd":50-150 optional}.',
-  ].join("\n");
-}
-
-function cioSystem() {
-  return [
-    `You are ${CIO_SPEC.name}, the eighth autonomous entity.`,
-    `Your mission: ${CIO_SPEC.mission}`,
-    "You did NOT create the seven specialist opinions. They were completed in separate entity calls before you received them.",
-    "Use the private-round opinions, meeting-round opinions, objective evidence and deterministic hard-risk result.",
-    "For PAPER early-runner research, optimize for catching genuine early runners and learning from misses/losses—not for minimizing the number of trades.",
-    "A WATCH can still become an active paper-training rep downstream.",
-    "Never override a deterministic hard safety veto.",
-    "Do not reveal hidden chain-of-thought.",
-    'Return ONLY JSON: {"vote":"BUY|WATCH|SKIP","confidence":0-100,"score":0-100,"thesis":"short","evidence":["..."],"risks":["..."],"suggestedTradeUsd":50-150}.',
-  ].join("\n");
-}
-
-async function runOnePrivate(spec: EntitySpec, packet: ReturnType<typeof compactPacket>, legacyHints: string[]) {
-  const privateMemory = await loadPrivateEntityMemory(spec.id, 10);
-  const payload = {
     phase: "private",
-    evidence: packet,
-    privateMemory: privateMemory.map((m) => ({
-      kind: m.kind, symbol: m.symbol, vote: m.vote, confidence: m.confidence,
-      realizedReturnPct: m.realizedReturnPct, lesson: m.lesson,
-    })),
-    legacyMemoryHints: legacyHints,
+    vote,
+    confidence: confidenceFromScore(score),
+    score: Math.round(score),
+    thesis,
+    evidence,
+    risks,
+    suggestedTradeUsd,
+    changedVote: false,
+    source: "local-engine",
+    formedAt: now(),
   };
-
-  try {
-    const { json, responseId } = await callResponsesApi({
-      model: agentModel(), agentId: spec.id, phase: "private", system: privateSystem(spec), payload,
-    });
-    return normalizeOpinion(spec, json, "private", responseId);
-  } catch (error) {
-    if (!allowDegraded()) throw error;
-    return localFallbackOpinion(spec, packet, "private");
-  }
 }
 
-async function runOneMeeting(spec: EntitySpec, packet: ReturnType<typeof compactPacket>, own: IndependentEntityOpinion, peers: IndependentEntityOpinion[]) {
-  const privateMemory = await loadPrivateEntityMemory(spec.id, 6);
-  const payload = {
+async function thinkMeeting(
+  spec: EntitySpec,
+  own: IndependentEntityOpinion,
+  peers: IndependentEntityOpinion[],
+): Promise<IndependentEntityOpinion> {
+  const buy = peers.filter((p) => p.agentId !== spec.id && p.vote === "BUY").length;
+  const watch = peers.filter((p) => p.agentId !== spec.id && p.vote === "WATCH").length;
+  const skip = peers.filter((p) => p.agentId !== spec.id && p.vote === "SKIP").length;
+  let score = own.score;
+
+  // Peer evidence may influence the second-round vote, but each specialty keeps
+  // its own weight and may disagree with consensus.
+  if (spec.id === "contract") {
+    score = own.score; // safety does not get socially voted away
+  } else if (spec.id === "bear") {
+    score = clamp(own.score + buy * 1.2 - skip * 0.8);
+  } else if (spec.id === "portfolio") {
+    score = clamp(own.score + buy * 2.2 + watch * 0.8 - skip * 1.6);
+  } else {
+    score = clamp(own.score + buy * 1.8 + watch * 0.6 - skip * 1.5);
+  }
+
+  const vote = voteFromScore(score, true);
+  const changed = vote !== own.vote;
+  const suggestedTradeUsd = spec.id === "portfolio"
+    ? boundedTradeUsd(
+        vote === "BUY"
+          ? (buy >= 5 ? 150 : buy >= 4 ? 125 : buy >= 3 ? 100 : 75)
+          : 50,
+      )
+    : own.suggestedTradeUsd;
+
+  return {
+    ...own,
     phase: "meeting",
-    evidence: packet,
-    ownLockedPrivateOpinion: own,
-    peerLockedOpinions: peers.filter((p) => p.agentId !== spec.id).map((p) => ({
-      agentId: p.agentId, agentName: p.agentName, vote: p.vote, confidence: p.confidence,
-      thesis: p.thesis, evidence: p.evidence, risks: p.risks, suggestedTradeUsd: p.suggestedTradeUsd,
-    })),
-    privateMemory: privateMemory.map((m) => ({ kind: m.kind, symbol: m.symbol, lesson: m.lesson })),
+    vote,
+    score: Math.round(score),
+    confidence: confidenceFromScore(score),
+    suggestedTradeUsd,
+    changedVote: changed,
+    rebuttal: changed
+      ? `After seeing the locked peer reads, I changed ${own.vote} → ${vote}. Peer split: ${buy} BUY / ${watch} WATCH / ${skip} SKIP.`
+      : `I held ${own.vote}. Peer split: ${buy} BUY / ${watch} WATCH / ${skip} SKIP; my specialty evidence still supports my original direction.`,
+    source: "local-engine",
+    formedAt: now(),
   };
-  try {
-    const { json, responseId } = await callResponsesApi({
-      model: agentModel(), agentId: spec.id, phase: "meeting", system: meetingSystem(spec), payload,
-    });
-    return normalizeOpinion(spec, json, "meeting", responseId, own.vote);
-  } catch (error) {
-    if (!allowDegraded()) throw error;
-    const fallback = localFallbackOpinion(spec, packet, "meeting");
-    return { ...fallback, vote: own.vote, confidence: own.confidence, score: own.score, thesis: own.thesis, evidence: own.evidence, risks: own.risks, suggestedTradeUsd: own.suggestedTradeUsd };
-  }
 }
 
-async function runCio(packet: ReturnType<typeof compactPacket>, initial: IndependentEntityOpinion[], meeting: IndependentEntityOpinion[]) {
-  const privateMemory = await loadPrivateEntityMemory("cio", 10);
-  const payload = {
-    phase: "cio",
-    evidence: packet,
-    lockedPrivateRound: initial,
-    lockedMeetingRound: meeting,
-    privateCioMemory: privateMemory.map((m) => ({ kind: m.kind, symbol: m.symbol, lesson: m.lesson })),
+async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Promise<IndependentEntityOpinion> {
+  const weights: Record<string, number> = {
+    launch: 1.35,
+    social: 0.75,
+    wallet: 1.15,
+    quant: 1.35,
+    contract: 1.55,
+    bear: 1.25,
+    portfolio: 1.00,
   };
 
-  try {
-    const { json, responseId } = await callResponsesApi({
-      model: cioModel(), agentId: "cio", phase: "cio", system: cioSystem(), payload,
-    });
-    const vote = normalizeVote(json?.vote);
-    return {
-      agentId: "cio" as const,
-      agentName: CIO_SPEC.name,
-      phase: "cio" as const,
-      vote,
-      confidence: Math.round(clamp(Number(json?.confidence ?? 50))),
-      score: Math.round(clamp(Number(json?.score ?? json?.confidence ?? 50))),
-      thesis: String(json?.thesis ?? "CIO synthesis complete.").slice(0, 700),
-      evidence: strings(json?.evidence),
-      risks: strings(json?.risks),
-      suggestedTradeUsd: boundedTradeUsd(json?.suggestedTradeUsd, packet.runnerGenome.suggestedTradeUsd),
-      source: "openai" as const,
-      responseId,
-      formedAt: now(),
-    };
-  } catch (error) {
-    if (!allowDegraded()) throw error;
-    const buy = meeting.filter((o) => o.vote === "BUY").length;
-    const watch = meeting.filter((o) => o.vote === "WATCH").length;
-    const skip = meeting.length - buy - watch;
-    const vote: "BUY" | "WATCH" | "SKIP" = buy >= 4 ? "BUY" : buy + watch >= 4 ? "WATCH" : "SKIP";
-    return {
-      agentId: "cio" as const,
-      agentName: CIO_SPEC.name,
-      phase: "cio" as const,
-      vote,
-      confidence: Math.round(clamp(55 + Math.abs(buy - skip) * 5)),
-      score: Math.round(clamp(packet.runnerGenome.entryScore)),
-      thesis: `Local degraded CIO fallback: ${buy} BUY, ${watch} WATCH, ${skip} SKIP after the seven isolated entity reads.`,
-      evidence: [`Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100`, `${buy}/7 meeting entities voted BUY.`],
-      risks: packet.commonAnalytics.hardBlocks,
-      suggestedTradeUsd: boundedTradeUsd(packet.runnerGenome.suggestedTradeUsd, 50),
-      source: "local-fallback" as const,
-      formedAt: now(),
-    };
+  let weightedSupport = 0;
+  let totalWeight = 0;
+  for (const opinion of meeting) {
+    const w = weights[opinion.agentId] ?? 1;
+    totalWeight += w;
+    const direction = opinion.vote === "BUY" ? 1 : opinion.vote === "WATCH" ? 0.55 : 0;
+    weightedSupport += w * direction * (0.55 + opinion.confidence / 220);
   }
+
+  const normalized = totalWeight > 0 ? weightedSupport / totalWeight : 0;
+  const genomeBoost = (packet.runnerGenome.entryScore - packet.runnerGenome.dumperRiskScore * 0.35) / 100;
+  const composite = clamp(normalized * 72 + genomeBoost * 28);
+
+  const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK";
+  const vote: "BUY" | "WATCH" | "SKIP" = hardBlocked
+    ? "SKIP"
+    : composite >= 57 ? "BUY"
+      : composite >= 38 ? "WATCH"
+        : "SKIP";
+
+  const portfolioOpinion = meeting.find((o) => o.agentId === "portfolio");
+  const suggestedTradeUsd = boundedTradeUsd(
+    portfolioOpinion?.suggestedTradeUsd ?? packet.runnerGenome.suggestedTradeUsd ?? 50,
+  );
+  const buy = meeting.filter((o) => o.vote === "BUY").length;
+  const watch = meeting.filter((o) => o.vote === "WATCH").length;
+  const skip = meeting.length - buy - watch;
+
+  return {
+    agentId: "cio",
+    agentName: CIO_SPEC.name,
+    phase: "cio",
+    vote,
+    confidence: hardBlocked ? 0 : Math.round(clamp(52 + Math.abs(composite - 48) * 0.9, 50, 94)),
+    score: Math.round(composite),
+    thesis: hardBlocked
+      ? `The specialist meeting completed, but explicit token-level safety/execution evidence blocked the trade.`
+      : `Seven independent local entities finished their private reads and meeting. Final split: ${buy} BUY / ${watch} WATCH / ${skip} SKIP. I synthesize that as ${vote}.`,
+    evidence: [
+      `Council composite ${composite.toFixed(0)}/100.`,
+      `Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${packet.runnerGenome.dumperRiskScore.toFixed(0)}/100.`,
+    ],
+    risks: packet.commonAnalytics.hardBlocks.slice(0, 5),
+    suggestedTradeUsd,
+    source: "local-engine",
+    formedAt: now(),
+  };
 }
 
 function toAgentOpinion(opinion: IndependentEntityOpinion, color: string, shortName: string): AgentOpinion {
@@ -464,42 +484,41 @@ function toAgentOpinion(opinion: IndependentEntityOpinion, color: string, shortN
 
 export async function runIndependentCouncil(snapshot: MarketSnapshot, options: CouncilOptions = {}): Promise<WarRoomResult> {
   const mode = options.mode ?? "paper";
-  const configuredMode = entityMode();
-  if (configuredMode !== "local-fallback" && !apiKey()) {
-    throw new Error("Independent Council requires OPENAI_API_KEY in Railway Variables. No single-brain fallback will be silently used.");
-  }
 
-  // The legacy engine remains a common analytics/risk calculator only.
-  // Its synthetic role opinions are discarded below and never decide this council.
+  // Shared analytics calculate objective measurements only. Their old synthetic
+  // role opinions are discarded; seven separate local entities form the Council.
   const base = runWarRoom(snapshot, options);
   const portfolio = options.portfolio!;
   const packet = compactPacket(snapshot, base, portfolio);
-  const sessionId = `IC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  const sessionId = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
   const privateRoundStartedAt = now();
 
-  const initialOpinions = configuredMode === "local-fallback"
-    ? ENTITY_SPECS.map((spec) => localFallbackOpinion(spec, packet, "private"))
-    : await Promise.all(ENTITY_SPECS.map((spec) => runOnePrivate(spec, packet, options.memoryHints?.[spec.id as ResearchAgentId] ?? [])));
+  // All seven private reads execute independently before any peer output exists.
+  const initialOpinions = await Promise.all(ENTITY_SPECS.map((spec) => thinkPrivate(spec, packet)));
 
   const meetingRoundStartedAt = now();
   const meetingOpinions = process.env.COUNCIL_DEBATE_ROUND === "false"
-    ? initialOpinions.map((opinion) => ({ ...opinion, phase: "meeting" as const, changedVote: false, rebuttal: "Meeting round disabled by configuration." }))
-    : configuredMode === "local-fallback"
-      ? initialOpinions.map((opinion) => ({ ...opinion, phase: "meeting" as const, changedVote: false, rebuttal: "Isolated local fallback retained its private vote." }))
-      : await Promise.all(ENTITY_SPECS.map((spec) => {
-          const own = initialOpinions.find((o) => o.agentId === spec.id)!;
-          return runOneMeeting(spec, packet, own, initialOpinions);
-        }));
+    ? initialOpinions.map((opinion) => ({
+        ...opinion,
+        phase: "meeting" as const,
+        changedVote: false,
+        rebuttal: "Meeting round disabled; private vote retained.",
+      }))
+    : await Promise.all(
+        ENTITY_SPECS.map((spec) => {
+          const own = initialOpinions.find((opinion) => opinion.agentId === spec.id)!;
+          return thinkMeeting(spec, own, initialOpinions);
+        }),
+      );
 
-  const cioOpinion = configuredMode === "local-fallback"
-    ? await runCio(packet, initialOpinions, meetingOpinions)
-    : await runCio(packet, initialOpinions, meetingOpinions);
+  const cioOpinion = await thinkCio(packet, meetingOpinions);
 
   const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK";
   const finalDecision = deterministicBlocked ? "SKIP" : cioOpinion.vote;
   const suggestedTradeUsd = boundedTradeUsd(
-    meetingOpinions.find((o) => o.agentId === "portfolio")?.suggestedTradeUsd ?? cioOpinion.suggestedTradeUsd,
-    base.runnerGenome.suggestedTradeUsd,
+    meetingOpinions.find((o) => o.agentId === "portfolio")?.suggestedTradeUsd
+      ?? cioOpinion.suggestedTradeUsd
+      ?? base.runnerGenome.suggestedTradeUsd,
   );
   const runnerGenome = { ...base.runnerGenome, suggestedTradeUsd };
 
@@ -507,6 +526,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   const buySupport = meetingOpinions.filter((o) => o.vote === "BUY").length;
   const watchSupport = meetingOpinions.filter((o) => o.vote === "WATCH").length;
   const researchSupport = buySupport + watchSupport;
+
   const councilProcess = {
     ...base.councilProcess,
     researchSupport,
@@ -515,10 +535,10 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     alignedBots,
     totalBots: 8 as const,
     reasons: [
-      `Seven specialist entities completed locked private opinions before seeing peers.`,
+      "Seven local specialist entities completed private reads before peer reveal.",
       `${buySupport}/7 meeting entities voted BUY · ${watchSupport}/7 WATCH · ${7 - buySupport - watchSupport}/7 SKIP.`,
-      `Runner CIO independently synthesized the locked meeting at ${cioOpinion.confidence}% confidence.`,
-      `Deterministic Executor is outside the Council and reported ${base.councilProcess.executorVote}.`,
+      `Runner CIO separately synthesized the completed meeting at ${cioOpinion.confidence}% confidence.`,
+      "No OpenAI/ChatGPT API call is used anywhere in this Council runtime.",
     ],
   };
 
@@ -555,9 +575,9 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
 
   const independentCouncil: IndependentCouncilTrace = {
     sessionId,
-    mode: configuredMode === "local-fallback" ? "isolated-local-fallback" : "independent-ai",
-    agentModel: configuredMode === "local-fallback" ? "local-isolated" : agentModel(),
-    cioModel: configuredMode === "local-fallback" ? "local-isolated" : cioModel(),
+    mode: "independent-local",
+    agentModel: "local-specialist-engine",
+    cioModel: "local-runner-cio",
     privateRoundStartedAt,
     meetingRoundStartedAt,
     completedAt: now(),
@@ -571,9 +591,9 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     symbol: snapshot.symbol,
     chain: snapshot.chain,
     opinions: [...meetingOpinions, cioOpinion],
-  }).catch((error) => console.error("[independent-council] memory write", error));
+  }).catch((error: unknown) => console.error("[independent-local-council] memory write", error));
 
-  const filteredAudit = base.auditTrail.filter((line) =>
+  const filteredAudit = base.auditTrail.filter((line: string) =>
     !line.startsWith("PRE-MEETING") &&
     !line.startsWith("COUNCIL ") &&
     !line.startsWith("COUNCIL QUORUM") &&
@@ -582,15 +602,16 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     !line.startsWith("CIO FINAL") &&
     !line.startsWith("Executor:")
   );
+
   const auditTrail = [
     ...filteredAudit,
-    `INDEPENDENT COUNCIL · ${independentCouncil.mode} · session ${sessionId}`,
-    `PRIVATE ROUND · 7/7 specialist entities locked opinions before peer reveal`,
-    ...initialOpinions.map((o) => `PRIVATE ${o.agentName} · ${o.vote} · ${o.confidence}% · ${o.thesis}`),
-    `MEETING ROUND · seven entities received locked peer summaries only after private opinions were complete`,
-    ...meetingOpinions.map((o) => `MEETING ${o.agentName} · ${o.vote} · ${o.confidence}%${o.changedVote ? " · VOTE CHANGED" : ""} · ${o.rebuttal ?? o.thesis}`),
+    `INDEPENDENT LOCAL COUNCIL · session ${sessionId}`,
+    "PRIVATE ROUND · 7/7 specialist entities locked opinions before peer reveal",
+    ...initialOpinions.map((o: IndependentEntityOpinion) => `PRIVATE ${o.agentName} · ${o.vote} · ${o.confidence}% · ${o.thesis}`),
+    "MEETING ROUND · peer summaries revealed only after all seven private reads completed",
+    ...meetingOpinions.map((o: IndependentEntityOpinion) => `MEETING ${o.agentName} · ${o.vote} · ${o.confidence}%${o.changedVote ? " · VOTE CHANGED" : ""} · ${o.rebuttal ?? o.thesis}`),
     `RUNNER CIO · ${cioOpinion.vote} · ${cioOpinion.confidence}% · ${cioOpinion.thesis}`,
-    `DETERMINISTIC EXECUTOR · ${base.councilProcess.executorVote}${deterministicBlocked ? " · final safety override to SKIP" : ""}`,
+    `DETERMINISTIC EXECUTOR · ${base.councilProcess.executorVote}${deterministicBlocked ? " · token-level safety/execution override to SKIP" : ""}`,
     `CIO FINAL · ${finalDecision} · suggested paper size $${suggestedTradeUsd.toFixed(2)}`,
   ];
 
@@ -603,7 +624,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     decision: finalDecision,
     consensus: researchSupport,
     conviction: deterministicBlocked ? 0 : cioOpinion.confidence,
-    councilConviction: Math.round(meetingOpinions.reduce((sum, o) => sum + o.confidence, 0) / Math.max(1, meetingOpinions.length)),
+    councilConviction: Math.round(meetingOpinions.reduce((sum: number, o: IndependentEntityOpinion) => sum + o.confidence, 0) / Math.max(1, meetingOpinions.length)),
     execution,
     independentCouncil,
     auditTrail,

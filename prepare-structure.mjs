@@ -8,6 +8,7 @@ import { applyTokenDisplayPatch } from './token-display-patch.mjs';
 import { applyEarlyRunnerCorePatch } from './early-runner-core-patch.mjs';
 import { applyIndependentCouncilPatch } from './independent-council-patch.mjs';
 import { applyPaperNoKillSwitchPatch } from './paper-no-killswitch-patch.mjs';
+import { applyV227ResiliencePatch } from './v227-resilience-patch.mjs';
 
 const root = process.cwd();
 
@@ -106,5 +107,6 @@ applyTokenDisplayPatch(root);
 applyEarlyRunnerCorePatch(root);
 applyIndependentCouncilPatch(root);
 applyPaperNoKillSwitchPatch(root);
+applyV227ResiliencePatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);

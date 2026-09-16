@@ -308,8 +308,8 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: {
         <div className="spark-wrap" aria-hidden="true"><svg viewBox="0 0 120 42" preserveAspectRatio="none"><polyline points={spark} /></svg></div>
       </div>
       <p className="decision-thesis">{thesis}</p>
-      {result.independentCouncil && <div className={`entity-proof ${result.independentCouncil.mode === "independent-ai" ? "verified" : "degraded"}`}>
-        <b>{result.independentCouncil.mode === "independent-ai" ? "8 INDEPENDENT ENTITIES" : "ISOLATED LOCAL FALLBACK"}</b>
+      {result.independentCouncil && <div className={`entity-proof ${result.independentCouncil.mode === "isolated-local-fallback" ? "degraded" : "verified"}`}>
+        <b>{result.independentCouncil.mode === "independent-local" ? "8 INDEPENDENT LOCAL ENTITIES · $0 API" : result.independentCouncil.mode === "independent-ai" ? "8 INDEPENDENT ENTITIES" : "ISOLATED LOCAL FALLBACK"}</b>
         <span>7 private reads → peer reveal/meeting → separate Runner CIO</span>
         <small>{result.independentCouncil.agentModel} · CIO {result.independentCouncil.cioModel}</small>
       </div>}
@@ -657,7 +657,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.26</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.27</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>

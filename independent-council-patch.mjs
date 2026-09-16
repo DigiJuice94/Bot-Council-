@@ -55,14 +55,14 @@ export type IndependentEntityOpinion = {
   suggestedTradeUsd?: number;
   changedVote?: boolean;
   rebuttal?: string;
-  source: "openai" | "local-fallback";
+  source: "openai" | "local-engine" | "local-fallback";
   responseId?: string;
   formedAt: string;
 };
 
 export type IndependentCouncilTrace = {
   sessionId: string;
-  mode: "independent-ai" | "isolated-local-fallback";
+  mode: "independent-ai" | "independent-local" | "isolated-local-fallback";
   agentModel: string;
   cioModel: string;
   privateRoundStartedAt: string;
