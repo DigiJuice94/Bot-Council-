@@ -1,6 +1,6 @@
 {
-  "version": "2.28.1",
-  "name": "Profit First + Learning-Safe Paper Wallet Reset",
+  "version": "2.28.2",
+  "name": "Profit First + Paper Reset Build Fix",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -200,7 +200,8 @@
     "reset_preserves_runner_genome": true,
     "reset_preserves_filing_cabinet": true,
     "reset_preserves_entity_memories": true,
-    "reset_preserves_all_time_portfolio_history": true
+    "reset_preserves_all_time_portfolio_history": true,
+    "paper_reset_structural_wallet_strip_insert": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -284,7 +285,8 @@
     "V2.28_TEST_REPORT.md",
     "route (8).ts",
     "v2281-paper-reset-patch.mjs",
-    "V2.28.1_UPDATE_NOTES.md"
+    "V2.28.1_UPDATE_NOTES.md",
+    "V2.28.2_BUILD_FIX.md"
   ],
   "validation": {
     "node_patch_syntax": "pass",

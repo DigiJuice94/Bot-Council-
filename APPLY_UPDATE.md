@@ -1,7 +1,8 @@
-# Apply Bot War Room V2.28.1
+# Apply Bot War Room V2.28.2
 
-Replace V2.28 with this cumulative one-folder release and redeploy Railway.
+Replace V2.28.1 with this cumulative one-folder release and redeploy Railway.
 
-After deployment, use **RESET PAPER WALLET** in the paper wallet strip.
+This fixes the exact build error:
+`Could not find anchor: reset button in paper wallet strip`
 
-It resets the PAPER bankroll/open positions only. Learning and all-time history are preserved.
+No new variables are required.

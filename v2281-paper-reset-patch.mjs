@@ -173,20 +173,24 @@ ${anchor}`;
       text = replaceRequired(text, anchor, resetFn, "paper reset function");
     }
 
-    const walletClose = `          <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
-        </div>`;
     if (!text.includes("RESET PAPER WALLET")) {
-      text = replaceRequired(
-        text,
-        walletClose,
-        `          <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
+      // V2.28 already adds All-time high to this strip, so never exact-match
+      // the stat contents. Insert structurally inside paper-wallet-strip.
+      const stripStart = text.indexOf('<div className="paper-wallet-strip">');
+      if (stripStart < 0) fail("Could not find paper wallet strip");
+      const stripEnd = text.indexOf("</div>", stripStart);
+      if (stripEnd < 0) fail("Could not find paper wallet strip closing tag");
+
+      const buttonMarkup = `
           <button className="paper-reset-button" onClick={() => void resetPaperWallet()} disabled={resettingPaperWallet}>
             {resettingPaperWallet ? "RESETTING…" : "RESET PAPER WALLET"}
-          </button>
-        </div>
-        {paperResetMessage && <p className="paper-reset-message">{paperResetMessage}</p>}`,
-        "reset button in paper wallet strip",
-      );
+          </button>`;
+      text = text.slice(0, stripEnd) + buttonMarkup + "\n        " + text.slice(stripEnd);
+
+      const closeAfterInsert = stripEnd + buttonMarkup.length + "\n        ".length + "</div>".length;
+      text = text.slice(0, closeAfterInsert)
+        + '\n        {paperResetMessage && <p className="paper-reset-message">{paperResetMessage}</p>}'
+        + text.slice(closeAfterInsert);
     }
 
     text = text.replaceAll("Bot War Room V2.28", "Bot War Room V2.28.1");
