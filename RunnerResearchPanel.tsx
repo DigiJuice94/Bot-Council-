@@ -17,6 +17,14 @@ type Research = {
   freshCoinWins: number;
   targetFreshCoinWins: number;
   runnerCaptures: number;
+  fiftyDollarTrades: number;
+  fiftyDollarOpen: number;
+  fiftyDollarWins: number;
+  fiftyDollarLosses: number;
+  fiftyDollarWinRatePct: number;
+  fiftyDollarNetPnlUsd: number;
+  fiftyDollarAvgReturnPct: number;
+  recentFiftyDollarTrades: Array<{ symbol: string; chain: string; outcome: string; status: "OPEN" | "WIN" | "LOSS" | "FLAT"; pnlUsd?: number; returnPct?: number; entryAt?: string }>;
   activeHypotheses: number;
   confirmedTells: number;
   invalidatedTells: number;
@@ -116,6 +124,36 @@ export default function RunnerResearchPanel() {
         <div><strong>{r?.activeHypotheses ?? 0}</strong><span>active hypotheses</span></div>
         <div><strong>{r?.confirmedTells ?? 0}</strong><span>confirmed tells</span></div>
       </div>
+
+      <article className="v224-fifty-training">
+        <div className="v224-fifty-head">
+          <div>
+            <span>FILING CABINET · LIVE TRAINING SCOREBOARD</span>
+            <h3>Winning with $50 Trades</h3>
+            <p>The Council chooses the opportunity. Every approved paper entry is a fixed $50 rep. Wins and losses both stay in the cabinet so the bots can learn and adjust.</p>
+          </div>
+          <strong>$50</strong>
+        </div>
+        <div className="v224-fifty-metrics">
+          <div><small>Trades taken</small><b>{r?.fiftyDollarTrades ?? 0}</b></div>
+          <div><small>Open now</small><b>{r?.fiftyDollarOpen ?? 0}</b></div>
+          <div><small>Wins</small><b className="positive">{r?.fiftyDollarWins ?? 0}</b></div>
+          <div><small>Losses</small><b className="negative">{r?.fiftyDollarLosses ?? 0}</b></div>
+          <div><small>Win rate</small><b>{(r?.fiftyDollarWinRatePct ?? 0).toFixed(1)}%</b></div>
+          <div><small>Net P/L</small><b className={(r?.fiftyDollarNetPnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{(r?.fiftyDollarNetPnlUsd ?? 0) >= 0 ? "+" : "-"}${Math.abs(r?.fiftyDollarNetPnlUsd ?? 0).toFixed(2)}</b></div>
+          <div><small>Avg return</small><b className={(r?.fiftyDollarAvgReturnPct ?? 0) >= 0 ? "positive" : "negative"}>{(r?.fiftyDollarAvgReturnPct ?? 0) >= 0 ? "+" : ""}{(r?.fiftyDollarAvgReturnPct ?? 0).toFixed(2)}%</b></div>
+        </div>
+        <div className="v224-fifty-table">
+          <div className="v224-fifty-row head"><span>Coin</span><span>Case</span><span>Trade</span><span>P/L</span><span>Return</span></div>
+          {(r?.recentFiftyDollarTrades ?? []).length ? r!.recentFiftyDollarTrades.map((row, index) => <div className="v224-fifty-row" key={`${row.chain}-${row.symbol}-${row.entryAt ?? index}`}>
+            <b>${row.symbol}<small>{row.chain}</small></b>
+            <span>{row.outcome}</span>
+            <em className={`v224-${row.status.toLowerCase()}`}>{row.status}</em>
+            <strong className={(row.pnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{row.status === "OPEN" ? "—" : `${(row.pnlUsd ?? 0) >= 0 ? "+" : "-"}$${Math.abs(row.pnlUsd ?? 0).toFixed(2)}`}</strong>
+            <span>{row.status === "OPEN" || row.returnPct === undefined ? "—" : `${row.returnPct >= 0 ? "+" : ""}${row.returnPct.toFixed(1)}%`}</span>
+          </div>) : <p className="v214-muted v224-empty">The first fixed $50 paper trades will appear here.</p>}
+        </div>
+      </article>
 
       <div className="v214-three-col">
         <article className="v214-box">

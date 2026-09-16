@@ -124,6 +124,22 @@ export type RunnerResearchSnapshot = {
   freshCoinWins: number;
   targetFreshCoinWins: number;
   runnerCaptures: number;
+  fiftyDollarTrades: number;
+  fiftyDollarOpen: number;
+  fiftyDollarWins: number;
+  fiftyDollarLosses: number;
+  fiftyDollarWinRatePct: number;
+  fiftyDollarNetPnlUsd: number;
+  fiftyDollarAvgReturnPct: number;
+  recentFiftyDollarTrades: Array<{
+    symbol: string;
+    chain: string;
+    outcome: ResearchOutcome;
+    status: "OPEN" | "WIN" | "LOSS" | "FLAT";
+    pnlUsd?: number;
+    returnPct?: number;
+    entryAt?: string;
+  }>;
   activeHypotheses: number;
   confirmedTells: number;
   invalidatedTells: number;
@@ -442,7 +458,10 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
       row.paperPnlUsd = position.realizedPnlUsd;
       row.paperReturnPct = position.pnlPct;
       classifyCase(row);
+      const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
+      const meaningfulTrainingTrade = Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= Math.max(0.5, trainingTradeUsd * 0.02);
       if (!row.freshWinRecorded &&
+          meaningfulTrainingTrade &&
           (row.paperEntryMarketCap ?? row.firstMarketCap) <= maxFreshMc &&
           (row.paperEntryAgeMinutes ?? row.observations[0]?.ageMinutes ?? Infinity) <= maxFreshAge &&
           position.pnlPct >= minWinReturnPct && position.realizedPnlUsd > 0) {
@@ -591,7 +610,32 @@ export async function getRunnerResearchSnapshot(args: {
   const oosAccuracyPct = oosAccuracy(cases);
   const findings = signalFindings(cases, oosAccuracyPct);
   const providerCoveragePct = providerCoverage(args.providers);
-  const freshCoinWins = new Set(meta.freshWinTokens).size;
+  const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
+  const trainingToleranceUsd = Math.max(0.5, trainingTradeUsd * 0.02);
+  const fiftyDollarCases = cases.filter((row) => row.paperTradeOpened && Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= trainingToleranceUsd);
+  const fiftyDollarClosed = fiftyDollarCases.filter((row) => row.paperClosed);
+  const fiftyDollarWinsRows = fiftyDollarClosed.filter((row) => (row.paperPnlUsd ?? 0) > 0);
+  const fiftyDollarLossRows = fiftyDollarClosed.filter((row) => (row.paperPnlUsd ?? 0) < 0);
+  const fiftyDollarOpen = fiftyDollarCases.filter((row) => !row.paperClosed).length;
+  const fiftyDollarNetPnlUsd = fiftyDollarClosed.reduce((sum, row) => sum + (row.paperPnlUsd ?? 0), 0);
+  const fiftyDollarAvgReturnPct = avg(fiftyDollarClosed.map((row) => row.paperReturnPct ?? 0));
+  const fiftyDollarWinRatePct = fiftyDollarClosed.length ? fiftyDollarWinsRows.length / fiftyDollarClosed.length * 100 : 0;
+  const recentFiftyDollarTrades = [...fiftyDollarCases]
+    .sort((a, b) => (b.paperEntryAt ?? b.firstSeenAt).localeCompare(a.paperEntryAt ?? a.firstSeenAt))
+    .slice(0, 8)
+    .map((row) => ({
+      symbol: row.symbol,
+      chain: row.chain,
+      outcome: row.outcome,
+      status: !row.paperClosed ? "OPEN" as const : (row.paperPnlUsd ?? 0) > 0 ? "WIN" as const : (row.paperPnlUsd ?? 0) < 0 ? "LOSS" as const : "FLAT" as const,
+      pnlUsd: row.paperPnlUsd,
+      returnPct: row.paperReturnPct,
+      entryAt: row.paperEntryAt,
+    }));
+  const freshCoinWins = cases.filter((row) =>
+    row.freshWinRecorded &&
+    Math.abs((row.paperRequestedUsd ?? 0) - trainingTradeUsd) <= trainingToleranceUsd
+  ).length;
   const targetFreshCoinWins = Math.max(1, Number(process.env.RESEARCH_REQUIRED_FRESH_WINS ?? 100));
   const runnerCases = cases.filter((row) => row.outcome === "runner").length;
   const dumperCases = cases.filter((row) => row.outcome === "dumper").length;
@@ -614,7 +658,7 @@ export async function getRunnerResearchSnapshot(args: {
   const requirements: CodeRequirement[] = [
     { id: "cases", label: "Fresh launch case files", current: cases.length.toLocaleString(), target: requiredCases.toLocaleString(), passed: cases.length >= requiredCases },
     { id: "labeled", label: "Runner/dumper labeled cases", current: labeledCases.toLocaleString(), target: requiredLabeled.toLocaleString(), passed: labeledCases >= requiredLabeled },
-    { id: "wins", label: "Successful fresh-coin paper wins", current: freshCoinWins.toLocaleString(), target: targetFreshCoinWins.toLocaleString(), passed: freshCoinWins >= targetFreshCoinWins },
+    { id: "wins", label: "Successful fresh-coin $50 paper wins", current: freshCoinWins.toLocaleString(), target: targetFreshCoinWins.toLocaleString(), passed: freshCoinWins >= targetFreshCoinWins },
     { id: "accuracy", label: "Out-of-sample Runner Genome accuracy", current: `${oosAccuracyPct.toFixed(1)}%`, target: `${requiredAccuracy}%`, passed: oosAccuracyPct >= requiredAccuracy },
     { id: "pf", label: "Paper profit factor", current: stats.profitFactor.toFixed(2), target: requiredProfitFactor.toFixed(2), passed: stats.profitFactor >= requiredProfitFactor && stats.paperTrades >= 30 },
     { id: "expectancy", label: "Paper expectancy", current: `${stats.expectancyPct.toFixed(2)}%`, target: "> 0%", passed: stats.expectancyPct > 0 && stats.paperTrades >= 30 },
@@ -665,6 +709,14 @@ export async function getRunnerResearchSnapshot(args: {
     freshCoinWins,
     targetFreshCoinWins,
     runnerCaptures,
+    fiftyDollarTrades: fiftyDollarCases.length,
+    fiftyDollarOpen,
+    fiftyDollarWins: fiftyDollarWinsRows.length,
+    fiftyDollarLosses: fiftyDollarLossRows.length,
+    fiftyDollarWinRatePct: Number(fiftyDollarWinRatePct.toFixed(1)),
+    fiftyDollarNetPnlUsd: Number(fiftyDollarNetPnlUsd.toFixed(2)),
+    fiftyDollarAvgReturnPct: Number(fiftyDollarAvgReturnPct.toFixed(2)),
+    recentFiftyDollarTrades,
     activeHypotheses,
     confirmedTells,
     invalidatedTells,

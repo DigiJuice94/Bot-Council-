@@ -902,3 +902,27 @@
 .trade-pnl small{font-size:9px;font-weight:800;color:inherit}
 .allocation-row>.token-avatar{width:20px;height:20px;flex-basis:20px;border-color:#333}
 .allocation-row>.token-avatar b{font-size:7px}
+
+
+/* V2.24 — Winning with $50 Trades */
+.v224-fifty-training{margin:16px 0 20px;border:1px solid #dfe2e6;border-radius:22px;background:#fff;overflow:hidden;box-shadow:0 7px 24px rgba(15,23,42,.035)}
+.v224-fifty-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:20px 22px;border-bottom:1px solid #eceef1}
+.v224-fifty-head span{font-size:8px;letter-spacing:.12em;color:#9298a2;font-weight:800}
+.v224-fifty-head h3{margin:5px 0;font-size:20px;color:#101216}
+.v224-fifty-head p{margin:0;max-width:760px;color:#727984;font-size:11px;line-height:1.55}
+.v224-fifty-head>strong{display:grid;place-items:center;min-width:72px;height:54px;border-radius:15px;background:#0b0b0b;color:#fff;font-size:22px}
+.v224-fifty-metrics{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid #eceef1}
+.v224-fifty-metrics>div{padding:14px 15px;border-right:1px solid #eceef1}
+.v224-fifty-metrics>div:last-child{border-right:0}
+.v224-fifty-metrics small{display:block;color:#969ca5;font-size:8px;text-transform:uppercase;letter-spacing:.06em}
+.v224-fifty-metrics b{display:block;margin-top:5px;font-size:16px;color:#101216}
+.v224-fifty-table{padding:8px 18px 14px}
+.v224-fifty-row{display:grid;grid-template-columns:1.35fr .8fr .65fr .75fr .7fr;gap:14px;align-items:center;min-height:42px;border-bottom:1px solid #eef0f2;font-size:10px}
+.v224-fifty-row:last-child{border-bottom:0}
+.v224-fifty-row.head{min-height:30px;color:#969ca5;font-size:8px;text-transform:uppercase;letter-spacing:.05em}
+.v224-fifty-row b{color:#111}.v224-fifty-row b small{display:block;color:#969ca5;font-size:8px;font-weight:500;margin-top:2px}
+.v224-fifty-row em{justify-self:start;border-radius:999px;padding:5px 8px;font-style:normal;font-size:8px;font-weight:800;background:#f3f4f5;color:#555}
+.v224-fifty-row em.v224-win{background:#edf9f3;color:#16845d}.v224-fifty-row em.v224-loss{background:#fff0ef;color:#d74e49}.v224-fifty-row em.v224-open{background:#eef5ff;color:#3276d5}
+.v224-empty{padding:16px 4px!important}
+@media(max-width:980px){.v224-fifty-metrics{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:700px){.v224-fifty-head{padding:16px;gap:10px}.v224-fifty-head>strong{min-width:58px;height:46px;font-size:18px}.v224-fifty-metrics{grid-template-columns:repeat(2,1fr)}.v224-fifty-table{overflow-x:auto}.v224-fifty-row{min-width:620px}}

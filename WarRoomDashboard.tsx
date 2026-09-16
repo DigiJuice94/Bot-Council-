@@ -832,6 +832,9 @@ export default function WarRoomDashboard() {
           <div className="trade-row trade-head"><span>Token / CA</span><span>Chain</span><span>Buy Size</span><span>Entry</span><span>Mark / Exit</span><span>Status</span><span>P/L</span><span>Time</span></div>
           {positions.length ? positions.slice(0, 16).map((position) => {
             const pnlUsd = positionPnlUsd(position);
+            const grossBuyUsd = recentFills
+              .filter((fill) => fill.positionId === position.id && fill.side === "BUY")
+              .reduce((sum, fill) => sum + fill.requestedUsd, 0);
             return <div className="trade-row" key={position.id}>
               <div className="trade-token-cell">
                 <TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact />
@@ -846,7 +849,7 @@ export default function WarRoomDashboard() {
                 </div>
               </div>
               <span>{position.chain}</span>
-              <strong className="trade-buy-size">${(position.entryNotionalUsd ?? 0).toFixed(2)}</strong>
+              <strong className="trade-buy-size">${(grossBuyUsd || position.entryNotionalUsd || 0).toFixed(2)}</strong>
               <span>{price(position.entryPrice)}</span>
               <span>{price(position.markPrice)}</span>
               <span><em className={`status-${position.status}`}>{position.status === "closed" ? "Closed" : position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></span>
