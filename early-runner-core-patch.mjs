@@ -459,7 +459,7 @@ export type CouncilProcess = {`,
       const contextAt = executeAt >= 0 ? text.indexOf('  const context = entryContext(result, portfolio);', executeAt + executeHeader.length) : -1;
       if (executeAt < 0 || contextAt < 0) fail("Could not find structural boundary: dynamic $50+ Runner Genome sizing");
       const insertionAt = executeAt + executeHeader.length;
-      text = text.slice(0, insertionAt) + "\\n" + newDynamic + "\\n\\n" + text.slice(contextAt);
+      text = text.slice(0, insertionAt) + "\n" + newDynamic + "\n\n" + text.slice(contextAt);
     }
 
     text = replaceRequired(
@@ -498,9 +498,9 @@ export type CouncilProcess = {`,
     if (!text.includes("Do not re-run old Alpha/quorum filters.")) {
       const exploreHeader = 'function explorationRequest(result: WarRoomResult, portfolio: PortfolioRiskContext): ExecutionRequest | null {';
       const exploreAt = text.indexOf(exploreHeader);
-      const exploreReturnAt = exploreAt >= 0 ? text.indexOf('  return {\\n    mode: "paper",', exploreAt + exploreHeader.length) : -1;
+      const exploreReturnAt = exploreAt >= 0 ? text.indexOf('  return {\n    mode: "paper",', exploreAt + exploreHeader.length) : -1;
       if (exploreAt < 0 || exploreReturnAt < 0) fail("Could not find structural boundary: WATCH becomes active training opportunity");
-      text = text.slice(0, exploreAt) + newExplore + "\\n" + text.slice(exploreReturnAt);
+      text = text.slice(0, exploreAt) + newExplore + "\n" + text.slice(exploreReturnAt);
     }
     text = replaceRequired(text, '    maxSlippageBps: 135,', '    maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : 135,', "WATCH early-runner slippage");
 
@@ -569,7 +569,7 @@ export type CouncilProcess = {`,
       const scaleStart = text.indexOf('  const initialNotional = Math.max(0.01, position.initialNotionalUsd ?? position.entryNotionalUsd);');
       const scaleFillAt = scaleStart >= 0 ? text.indexOf('  const fill = await executePaper(', scaleStart) : -1;
       if (scaleStart < 0 || scaleFillAt < 0) fail("Could not find structural boundary: dynamic winner adds");
-      text = text.slice(0, scaleStart) + newScale + "\\n\\n" + text.slice(scaleFillAt);
+      text = text.slice(0, scaleStart) + newScale + "\n\n" + text.slice(scaleFillAt);
     }
 
     text = replaceRequired(
