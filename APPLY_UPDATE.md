@@ -1,12 +1,13 @@
-# Apply Bot War Room V2.17
+# Apply Bot War Room V2.18.1
 
-This is cumulative on top of V2.16.
+This is V2.18 plus a Railway build rescue.
 
-Upload/replace the included files in the repository root. Railway keeps the same build command:
+## Important
+Replace the repository-root `package.json` with the one in this folder.
+The current repo package.json belongs to a different Express project and does not
+contain an npm `build` script.
+
+Then upload/replace the remaining V2.18.1 files as usual and redeploy Railway.
+
+Expected build command:
 `node prepare-structure.mjs && next build`
-
-`prepare-structure.mjs` now applies:
-1. V2.15 seven-chain fresh-pool patch
-2. V2.17 dynamic paper-position sizing patch
-
-No new environment variables are required.

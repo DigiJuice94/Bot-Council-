@@ -100,6 +100,8 @@ function chatInitials(bot: string) {
   return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase();
 }
 
+const CHAT_REVEAL_MS = 1150;
+
 function DecisionCard({ result, replaying, dataMode, currentChain }: {
   result: WarRoomResult | null;
   replaying: boolean;
@@ -202,10 +204,16 @@ export default function WarRoomDashboard() {
   const [replayResult, setReplayResult] = useState<WarRoomResult | null>(null);
   const [activeTurn, setActiveTurn] = useState(-1);
   const [scanBubble, setScanBubble] = useState<{ agentId: AgentOpinion["id"]; message: string; round: CouncilTurn["round"] } | null>(null);
+  const [renderedChat, setRenderedChat] = useState<ChatRow[]>([]);
+  const [chatQueue, setChatQueue] = useState<ChatRow[]>([]);
+  const [chatLive, setChatLive] = useState(true);
+  const [chatInitialized, setChatInitialized] = useState(false);
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
+  const chatSeenIdsRef = useRef<Set<string>>(new Set());
+  const suppressChatPauseRef = useRef(false);
   const result = status?.latestResult ?? null;
 
   useEffect(() => {
@@ -282,25 +290,77 @@ export default function WarRoomDashboard() {
   const roomBots = replayResult?.agents ?? result?.agents ?? fallbackBots;
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   const chat = status?.chat ?? [];
-  const chronologicalChat = useMemo(() => [...chat.slice(0, 80)].reverse(), [chat]);
   const positions = status?.positions ?? [];
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
   const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
 
+  // First load shows a small recent window so the page does not explode in height.
+  // After that, every newly-arriving server message is queued and revealed one at a time.
   useEffect(() => {
+    if (!chat.length) return;
+    const ordered = [...chat].reverse();
+
+    if (!chatInitialized) {
+      const recent = ordered.slice(-6);
+      setRenderedChat(recent);
+      chatSeenIdsRef.current = new Set(chat.map((row) => row.id));
+      setChatInitialized(true);
+      return;
+    }
+
+    const fresh = ordered.filter((row) => !chatSeenIdsRef.current.has(row.id));
+    if (!fresh.length) return;
+    for (const row of fresh) chatSeenIdsRef.current.add(row.id);
+    setChatQueue((current) => [...current, ...fresh].slice(-120));
+  }, [chat, chatInitialized]);
+
+  // Drain the live queue at a deliberate conversational pace.
+  useEffect(() => {
+    if (!chatLive || !chatQueue.length) return;
+    const timer = window.setTimeout(() => {
+      const next = chatQueue[0];
+      setChatQueue((current) => current.slice(1));
+      setRenderedChat((current) => [...current, next].slice(-60));
+    }, CHAT_REVEAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [chatLive, chatQueue]);
+
+  // Only follow the bottom while LIVE is enabled.
+  useEffect(() => {
+    if (!chatLive) return;
     const feed = chatFeedRef.current;
     if (!feed) return;
+    suppressChatPauseRef.current = true;
     const id = window.requestAnimationFrame(() => {
       feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+      window.setTimeout(() => { suppressChatPauseRef.current = false; }, 500);
     });
     return () => window.cancelAnimationFrame(id);
-  }, [chat.length, displayedTurn?.message]);
+  }, [renderedChat.length, chatLive]);
+
+  const handleChatScroll = () => {
+    const feed = chatFeedRef.current;
+    if (!feed || suppressChatPauseRef.current || !chatLive) return;
+    const distanceFromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+    if (distanceFromBottom > 90) setChatLive(false);
+  };
+
+  const resumeLiveChat = () => {
+    setChatLive(true);
+    const feed = chatFeedRef.current;
+    if (!feed) return;
+    suppressChatPauseRef.current = true;
+    window.requestAnimationFrame(() => {
+      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+      window.setTimeout(() => { suppressChatPauseRef.current = false; }, 500);
+    });
+  };
 
   return (
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.17</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.18</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -329,13 +389,18 @@ export default function WarRoomDashboard() {
 
       <section id="chat" className="log-panel page-panel group-chat-panel">
         <div className="wide-panel-head group-chat-head">
-          <div><h2>◯ Council Group Chat</h2><p>Live messages in the exact order the War Room said them</p></div>
-          <div className="group-chat-head-actions"><span className="group-chat-order">OLDEST ↑ NEWEST</span><span className="live-chip"><i /> LIVE</span></div>
+          <div><h2>◯ Council Group Chat</h2><p>Messages arrive one at a time in the exact order the War Room said them</p></div>
+          <div className="group-chat-head-actions">
+            <span className="group-chat-order">OLDEST ↑ NEWEST</span>
+            {chatLive
+              ? <span className="live-chip"><i /> LIVE</span>
+              : <button className="chat-paused-chip" onClick={resumeLiveChat}><i /> PAUSED{chatQueue.length ? ` · ${chatQueue.length} NEW` : ""}</button>}
+          </div>
         </div>
-        <div className="group-chat-feed" ref={chatFeedRef} aria-live="polite">
-          {chronologicalChat.length ? chronologicalChat.map((row, index) => {
+        <div className="group-chat-feed" ref={chatFeedRef} onScroll={handleChatScroll} aria-live={chatLive ? "polite" : "off"}>
+          {renderedChat.length ? renderedChat.map((row, index) => {
             const tone = chatTone(row.bot, row.kind);
-            const previous = chronologicalChat[index - 1];
+            const previous = renderedChat[index - 1];
             const grouped = Boolean(previous && previous.bot === row.bot && previous.kind === row.kind);
             return (
               <div className={`group-message tone-${tone} ${grouped ? "grouped" : ""}`} key={row.id}>
@@ -347,7 +412,7 @@ export default function WarRoomDashboard() {
               </div>
             );
           }) : <div className="group-chat-empty"><span>•••</span><p>The Council is booting. Messages will appear here in speaking order.</p></div>}
-          {displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
+          {chatLive && displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
             <div className="group-avatar" aria-hidden="true">{chatInitials(liveSpeaker?.name ?? "Council")}</div>
             <div className="group-message-body">
               <div className="group-message-meta"><b>{liveSpeaker?.name ?? "Council"}</b><span>speaking now</span></div>
@@ -355,7 +420,15 @@ export default function WarRoomDashboard() {
             </div>
           </div>}
         </div>
-        <div className="group-chat-footer"><span><i /> Live auto-scroll</span><small>Every bubble keeps the exact message timestamp down to the second.</small></div>
+        <div className={`group-chat-footer ${chatLive ? "" : "paused"}`}>
+          {chatLive
+            ? <span><i /> Live auto-scroll · one message every {(CHAT_REVEAL_MS / 1000).toFixed(1)}s</span>
+            : <span><i /> Live chat paused while you read earlier messages{chatQueue.length ? ` · ${chatQueue.length} waiting` : ""}</span>}
+          <div className="chat-footer-actions">
+            <small>Scroll up at any time to pause the live feed.</small>
+            {!chatLive && <button onClick={resumeLiveChat}>Resume Live</button>}
+          </div>
+        </div>
       </section>
 
       <section id="trades" className="log-panel page-panel">
