@@ -643,3 +643,227 @@
 .legend-entry{background:#8a8a8a!important}
 .legend-stop{background:#5f5f5f!important}
 .legend-target{background:#bcbcbc!important}
+
+
+/* V2.21 — portfolio trade markers + right-side holdings allocation */
+.portfolio-market-layout{
+  display:grid;
+  grid-template-columns:minmax(0,4fr) minmax(235px,1fr);
+  gap:14px;
+  align-items:stretch;
+}
+.portfolio-market-layout .main-market-card{
+  min-width:0;
+  margin:0!important;
+}
+.allocation-card{
+  min-width:0;
+  border:1px solid #222;
+  border-radius:20px;
+  background:#050505;
+  color:#fff;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+.allocation-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  padding:18px 17px 12px;
+  border-bottom:1px solid #202020;
+}
+.allocation-head small{
+  display:block;
+  color:#777;
+  font-size:8px;
+  letter-spacing:.11em;
+}
+.allocation-head h3{
+  margin:4px 0 0;
+  font-size:15px;
+}
+.allocation-head>span{
+  border:1px solid #303030;
+  border-radius:999px;
+  color:#bdbdbd;
+  padding:6px 8px;
+  font-size:8px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.allocation-donut-wrap{
+  display:grid;
+  place-items:center;
+  padding:20px 14px 12px;
+}
+.allocation-donut{
+  width:min(170px,80%);
+  aspect-ratio:1;
+  border-radius:50%;
+  padding:18px;
+  box-shadow:0 0 0 1px #292929,0 12px 28px rgba(0,0,0,.28);
+}
+.allocation-donut-hole{
+  width:100%;
+  height:100%;
+  border-radius:50%;
+  background:#080808;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  box-shadow:inset 0 0 0 1px #242424;
+}
+.allocation-donut-hole small{
+  color:#747474;
+  font-size:7px;
+  letter-spacing:.11em;
+}
+.allocation-donut-hole b{
+  margin-top:4px;
+  font-size:15px;
+}
+.allocation-donut-hole span{
+  margin-top:4px;
+  color:#969696;
+  font-size:8px;
+}
+.allocation-legend{
+  flex:1;
+  min-height:0;
+  max-height:310px;
+  overflow:auto;
+  padding:2px 13px 8px;
+}
+.allocation-legend::-webkit-scrollbar{width:6px}
+.allocation-legend::-webkit-scrollbar-thumb{background:#2d2d2d;border-radius:999px}
+.allocation-row{
+  display:grid;
+  grid-template-columns:9px minmax(0,1fr) auto;
+  gap:8px;
+  align-items:center;
+  padding:8px 3px;
+  border-top:1px solid #151515;
+}
+.allocation-row:first-child{border-top:0}
+.allocation-row>i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  border:1px solid #555;
+}
+.allocation-row span{
+  min-width:0;
+}
+.allocation-row span b{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#efefef;
+  font-size:9px;
+}
+.allocation-row span small{
+  display:block;
+  margin-top:2px;
+  color:#777;
+  font-size:8px;
+}
+.allocation-row strong{
+  color:#c8c8c8;
+  font-size:9px;
+}
+.allocation-foot{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:11px 14px;
+  border-top:1px solid #202020;
+  color:#777;
+  font-size:8px;
+}
+.allocation-foot b{
+  font-size:8px;
+  letter-spacing:.04em;
+}
+.allocation-foot .positive,.allocation-foot .negative{
+  color:#fff!important;
+}
+
+.market-trade-events{
+  position:absolute;
+  left:26px;
+  right:82px;
+  top:0;
+  bottom:34px;
+  z-index:12;
+  pointer-events:none;
+}
+.market-trade-marker{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  min-width:31px;
+  padding:4px 5px 3px;
+  border:1px solid #fff;
+  border-radius:7px;
+  background:#050505;
+  color:#fff;
+  text-align:center;
+  line-height:1;
+  box-shadow:0 3px 10px rgba(0,0,0,.38);
+  pointer-events:auto;
+  cursor:help;
+}
+.market-trade-marker:after{
+  content:"";
+  position:absolute;
+  left:50%;
+  width:1px;
+  height:11px;
+  background:#fff;
+  opacity:.65;
+  transform:translateX(-50%);
+}
+.market-trade-marker.buy-event:after{top:100%}
+.market-trade-marker.sell-event:after{bottom:100%}
+.market-trade-marker.sell-event{
+  transform:translate(-50%,calc(-100% - 10px));
+  background:#fff;
+  color:#050505;
+}
+.market-trade-marker b{
+  display:block;
+  font-size:7px;
+  letter-spacing:.04em;
+}
+.market-trade-marker small{
+  display:block;
+  max-width:48px;
+  margin-top:2px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:6px;
+  opacity:.72;
+}
+.legend-buy-event,.legend-sell-event{
+  width:9px!important;
+  height:9px!important;
+  border:1px solid #fff!important;
+  border-radius:3px!important;
+}
+.legend-buy-event{background:#050505!important}
+.legend-sell-event{background:#fff!important}
+
+/* Keep allocation at the right of the graph instead of dropping under it. */
+@media(max-width:900px){
+  .portfolio-market-layout{
+    grid-template-columns:minmax(650px,4fr) 220px;
+    overflow-x:auto;
+    padding-bottom:6px;
+  }
+}

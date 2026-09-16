@@ -186,6 +186,52 @@ function graphTimeLabels(timestamps: number[], range: MainGraphRange, count = 5)
   });
 }
 
+type PortfolioTradeMarker = {
+  id: string;
+  at: number;
+  label: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  fillPrice: number;
+  filledUsd: number;
+  xPct: number;
+  yPct: number;
+  tooltip: string;
+};
+
+function markerLabel(side: "BUY" | "SELL", decisionId: string) {
+  const upper = decisionId.toUpperCase();
+  const add = upper.match(/-(ADD\d+)$/);
+  if (add) return add[1];
+  const tp = upper.match(/-(TP\d+)$/);
+  if (tp) return tp[1];
+  if (upper.endsWith("-EXIT")) return "EXIT";
+  if (upper.includes("STOP")) return "STOP";
+  return side === "BUY" ? "BUY" : "SELL";
+}
+
+function nearestSeriesValue(at: number, times: number[], values: number[], fallback: number) {
+  if (!times.length || !values.length) return fallback;
+  let best = 0;
+  let bestDistance = Math.abs(times[0] - at);
+  for (let index = 1; index < times.length; index += 1) {
+    const distance = Math.abs(times[index] - at);
+    if (distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  }
+  return values[Math.min(best, values.length - 1)] ?? fallback;
+}
+
+function timePct(at: number, times: number[]) {
+  if (!times.length) return 100;
+  const first = times[0];
+  const last = times[times.length - 1];
+  if (last <= first) return 100;
+  return Math.max(0, Math.min(100, ((at - first) / (last - first)) * 100));
+}
+
 function DecisionCard({ result, replaying, dataMode, currentChain }: {
   result: WarRoomResult | null;
   replaying: boolean;
@@ -435,6 +481,66 @@ export default function WarRoomDashboard() {
   const mainGraphXAxis = graphTimeLabels(mainGraphTimes, mainGraphRange, 5);
   const mainGraphPnlPct = selectedGraphPosition?.pnlPct ?? (status?.paperWallet?.totalReturnPct ?? 0);
   const mainGraphPositive = mainGraphPnlPct >= 0;
+
+  const graphRangeStart = mainGraphTimes[0] ?? graphNow;
+  const graphRangeEnd = mainGraphTimes[mainGraphTimes.length - 1] ?? graphNow;
+  const recentFills = status?.paperWallet?.recentFills ?? [];
+  const relevantFills = recentFills
+    .filter((fill) => {
+      const at = new Date(fill.createdAt).getTime();
+      if (!Number.isFinite(at)) return false;
+      if (selectedGraphPosition && fill.positionId !== selectedGraphPosition.id) return false;
+      return at >= graphRangeStart - 60_000 && at <= graphRangeEnd + 60_000;
+    })
+    .slice()
+    .reverse();
+
+  const portfolioTradeMarkers: PortfolioTradeMarker[] = relevantFills.map((fill) => {
+    const at = new Date(fill.createdAt).getTime();
+    const label = markerLabel(fill.side, fill.decisionId);
+    const eventValue = selectedGraphPosition
+      ? fill.fillPrice
+      : nearestSeriesValue(at, mainGraphTimes, mainGraphValues, mainGraphCurrent);
+    const y = relativeY(eventValue, mainGraphScale, 420, 26) / 420 * 100;
+    return {
+      id: fill.id,
+      at,
+      label,
+      symbol: fill.symbol,
+      side: fill.side,
+      fillPrice: fill.fillPrice,
+      filledUsd: fill.filledUsd,
+      xPct: timePct(at, mainGraphTimes),
+      yPct: Math.max(3, Math.min(94, y)),
+      tooltip: `${label} $${fill.symbol} · ${new Date(fill.createdAt).toLocaleTimeString()} · ${compactGraphValue(fill.fillPrice, true)} · $${fill.filledUsd.toFixed(2)}`,
+    };
+  });
+
+  const allocationTotal = Math.max(0.01, (status?.paperWallet?.cashUsd ?? 0) + openPositionValue);
+  const allocationPalette = ["#f4f4f4","#d7d7d7","#bbbbbb","#9f9f9f","#838383","#686868","#505050","#393939","#232323"];
+  const allocationRaw = [
+    { id: "cash", label: "Cash", value: Math.max(0, status?.paperWallet?.cashUsd ?? 0) },
+    ...openPositions
+      .map((position) => ({
+        id: position.id,
+        label: `$${position.symbol}`,
+        value: Math.max(0, (position.remainingQuantity ?? 0) * (position.markPrice ?? 0)),
+      }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value),
+  ];
+  let allocationCursor = 0;
+  const allocationSlices = allocationRaw.map((row, index) => {
+    const pct = row.value / allocationTotal * 100;
+    const start = allocationCursor;
+    const end = allocationCursor + pct;
+    allocationCursor = end;
+    return { ...row, pct, start, end, color: allocationPalette[index % allocationPalette.length] };
+  });
+  const allocationGradient = allocationSlices.length
+    ? `conic-gradient(${allocationSlices.map((slice) => `${slice.color} ${slice.start.toFixed(2)}% ${slice.end.toFixed(2)}%`).join(",")})`
+    : "#222";
+
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
   const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
 
@@ -590,6 +696,7 @@ export default function WarRoomDashboard() {
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
         </div>
 
+        <div className="portfolio-market-layout">
         <div className="main-market-card">
           <div className="main-market-toolbar">
             <div className="market-selector-row">
@@ -625,6 +732,14 @@ export default function WarRoomDashboard() {
             <div className="market-y-axis">{mainGraphYAxis.map((value, index) => <span key={`${value}-${index}`} style={{top:`${(index/(Math.max(1,mainGraphYAxis.length-1)))*100}%`}}>{compactGraphValue(value,true)}</span>)}</div>
             <div className="market-x-axis">{mainGraphXAxis.map((tick, index) => <span key={`${tick.label}-${index}`} style={{left:`${tick.pct}%`}}>{tick.label}</span>)}</div>
             {mainGraphCurrent > 0 && <span className="market-current-badge" style={{top:`${Math.max(3, Math.min(94, relativeY(mainGraphCurrent, mainGraphScale, 420, 26)/420*100))}%`}}>{compactGraphValue(mainGraphCurrent,true)}</span>}
+            <div className="market-trade-events" aria-label="Trade events">
+              {portfolioTradeMarkers.map((marker) => <span
+                key={marker.id}
+                className={`market-trade-marker ${marker.side === "BUY" ? "buy-event" : "sell-event"}`}
+                style={{left:`${marker.xPct}%`,top:`${marker.yPct}%`}}
+                title={marker.tooltip}
+              ><b>{marker.label}</b><small>${marker.symbol}</small></span>)}
+            </div>
             {!mainGraphValues.length && <div className="market-chart-empty">Waiting for live Guardian marks…</div>}
           </div>
 
@@ -632,10 +747,40 @@ export default function WarRoomDashboard() {
             <div className="market-legend">
               <span><i className="legend-live" />LIVE</span>
               <span><i className="legend-entry" />{selectedGraphPosition ? "Entry" : "Starting wallet"}</span>
+              <span><i className="legend-buy-event" />BUY / ADD</span>
+              <span><i className="legend-sell-event" />TP / EXIT</span>
               {selectedGraphPosition && <><span><i className="legend-stop" />Stop</span><span><i className="legend-target" />TP1</span></>}
             </div>
-            <small>{selectedGraphPosition ? `Guardian updates ${selectedGraphPosition.symbol} from live marks. Switch tokens above without creating extra charts.` : "One main chart tracks total wallet equity. Select any open token above to inspect its live price path."}</small>
+            <small>{selectedGraphPosition ? `Guardian updates ${selectedGraphPosition.symbol} from live marks. Trade markers show buys, adds, profit-taking and exits.` : "Portfolio equity with live trade markers. Select any open token above to inspect its price path."}</small>
           </div>
+        </div>
+
+        <aside className="allocation-card" aria-label="Current portfolio allocation">
+          <div className="allocation-head">
+            <div><small>CURRENT HOLDINGS</small><h3>Portfolio Allocation</h3></div>
+            <span>{openPositions.length} OPEN</span>
+          </div>
+          <div className="allocation-donut-wrap">
+            <div className="allocation-donut" style={{background: allocationGradient}}>
+              <div className="allocation-donut-hole">
+                <small>EQUITY</small>
+                <b>${allocationTotal.toFixed(2)}</b>
+                <span>{((openPositionValue / allocationTotal) * 100).toFixed(1)}% invested</span>
+              </div>
+            </div>
+          </div>
+          <div className="allocation-legend">
+            {allocationSlices.map((slice) => <div className="allocation-row" key={slice.id} title={`${slice.label}: $${slice.value.toFixed(2)} · ${slice.pct.toFixed(2)}%`}>
+              <i style={{background:slice.color}} />
+              <span><b>{slice.label}</b><small>${slice.value.toFixed(2)}</small></span>
+              <strong>{slice.pct.toFixed(1)}%</strong>
+            </div>)}
+          </div>
+          <div className="allocation-foot">
+            <span>Cash + live marked positions</span>
+            <b className={reconciliationPass ? "positive" : "negative"}>{reconciliationPass ? "RECONCILED" : "CHECK WALLET"}</b>
+          </div>
+        </aside>
         </div>
       </section>
 
