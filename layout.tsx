@@ -4,7 +4,7 @@ import "./v213.css";
 import "./v214.css";
 
 export const metadata: Metadata = {
-  title: "Bot War Room V2.19 — Live Wallet Charts",
+  title: "Bot War Room V2.20 — Live Market Chart",
   description: "Autonomous multi-chain Runner Genome research council with chronological live group chat, fresh-coin paper trading, Filing Cabinet learning and Code Deciphered graduation.",
 };
 

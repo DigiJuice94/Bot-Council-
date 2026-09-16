@@ -104,6 +104,39 @@ const CHAT_REVEAL_MS = 1150;
 
 type EquityHistoryPoint = { at: number; equity: number; cash: number; openValue: number };
 type PositionHistoryPoint = { at: number; price: number };
+type MainGraphRange = "1m" | "5m" | "15m" | "1h" | "all";
+
+function rangeMs(range: MainGraphRange) {
+  if (range === "1m") return 60_000;
+  if (range === "5m") return 5 * 60_000;
+  if (range === "15m") return 15 * 60_000;
+  if (range === "1h") return 60 * 60_000;
+  return Number.POSITIVE_INFINITY;
+}
+
+function filterHistoryByRange<T extends { at: number }>(rows: T[], range: MainGraphRange) {
+  const ms = rangeMs(range);
+  if (!Number.isFinite(ms)) return rows;
+  const cutoff = Date.now() - ms;
+  return rows.filter((row) => row.at >= cutoff);
+}
+
+function graphLabels(values: number[], count = 6) {
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return [];
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const span = Math.max(1e-12, max - min);
+  return Array.from({ length: count }, (_, i) => max - (span * i) / Math.max(1, count - 1));
+}
+
+function compactGraphValue(value: number, currency = false) {
+  if (!Number.isFinite(value)) return "—";
+  if (currency && Math.abs(value) >= 1) return `$${value.toFixed(2)}`;
+  if (currency && Math.abs(value) >= 0.01) return `$${value.toFixed(4)}`;
+  if (currency) return `$${value.toPrecision(3)}`;
+  return value.toFixed(2);
+}
 
 function svgPolyline(values: number[], width = 1000, height = 220, pad = 16) {
   if (!values.length) return "";
@@ -236,6 +269,8 @@ export default function WarRoomDashboard() {
   const [chatInitialized, setChatInitialized] = useState(false);
   const [equityHistory, setEquityHistory] = useState<EquityHistoryPoint[]>([]);
   const [positionHistory, setPositionHistory] = useState<Record<string, PositionHistoryPoint[]>>({});
+  const [mainGraphSelection, setMainGraphSelection] = useState<string>("portfolio");
+  const [mainGraphRange, setMainGraphRange] = useState<MainGraphRange>("15m");
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
@@ -323,13 +358,13 @@ export default function WarRoomDashboard() {
     const openValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
     setEquityHistory((current) => {
       const next = [...current, { at: now, equity: status.paperWallet.equityUsd, cash: status.paperWallet.cashUsd, openValue }];
-      return next.slice(-240);
+      return next.slice(-2880);
     });
     setPositionHistory((current) => {
       const next = { ...current };
       for (const position of openPositions) {
         const rows = next[position.id] ?? [];
-        next[position.id] = [...rows, { at: now, price: position.markPrice }].slice(-180);
+        next[position.id] = [...rows, { at: now, price: position.markPrice }].slice(-2880);
       }
       return next;
     });
@@ -346,6 +381,25 @@ export default function WarRoomDashboard() {
   const reconciledEquity = (status?.paperWallet?.cashUsd ?? 0) + openPositionValue;
   const reconciliationDelta = status?.paperWallet ? status.paperWallet.equityUsd - reconciledEquity : 0;
   const reconciliationPass = Math.abs(reconciliationDelta) <= 0.10;
+
+  useEffect(() => {
+    if (mainGraphSelection === "portfolio") return;
+    if (!openPositions.some((position) => position.id === mainGraphSelection)) setMainGraphSelection("portfolio");
+  }, [mainGraphSelection, openPositions]);
+
+  const selectedGraphPosition = mainGraphSelection === "portfolio" ? undefined : openPositions.find((position) => position.id === mainGraphSelection);
+  const portfolioGraphRows: EquityHistoryPoint[] = filterHistoryByRange<EquityHistoryPoint>(equityHistory, mainGraphRange);
+  const positionGraphRows: PositionHistoryPoint[] = selectedGraphPosition ? filterHistoryByRange<PositionHistoryPoint>(positionHistory[selectedGraphPosition.id] ?? [], mainGraphRange) : [];
+  const mainGraphValues = selectedGraphPosition ? positionGraphRows.map((point) => point.price) : portfolioGraphRows.map((point) => point.equity);
+  const mainGraphCurrent = selectedGraphPosition ? selectedGraphPosition.markPrice : (status?.paperWallet?.equityUsd ?? 0);
+  const mainGraphEntry = selectedGraphPosition ? selectedGraphPosition.entryPrice : (status?.paperWallet?.startingCashUsd ?? 1000);
+  const mainGraphStop = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 - (selectedGraphPosition.exitStrategy?.stopLossPct ?? 0) / 100) : undefined;
+  const mainGraphTp1 = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 + ((selectedGraphPosition.exitStrategy?.takeProfits?.[0]?.gainPct ?? 0) / 100)) : undefined;
+  const mainGraphHigh = selectedGraphPosition ? selectedGraphPosition.highWaterPrice : undefined;
+  const mainGraphScale = [...mainGraphValues, mainGraphCurrent, mainGraphEntry, ...(mainGraphStop ? [mainGraphStop] : []), ...(mainGraphTp1 ? [mainGraphTp1] : []), ...(mainGraphHigh ? [mainGraphHigh] : [])].filter((value) => Number.isFinite(value) && value > 0);
+  const mainGraphYAxis = graphLabels(mainGraphScale, 6);
+  const mainGraphPnlPct = selectedGraphPosition?.pnlPct ?? (status?.paperWallet?.totalReturnPct ?? 0);
+  const mainGraphPositive = mainGraphPnlPct >= 0;
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "executor"];
   const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
 
@@ -415,7 +469,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.19</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.20</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -501,43 +555,51 @@ export default function WarRoomDashboard() {
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
         </div>
 
-        <div className="wallet-equity-card">
-          <div className="chart-title-row"><div><b>Portfolio Equity</b><small>{equityHistory.length ? `${equityHistory.length} live marks` : "Waiting for marks"}</small></div><strong className={(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "+" : ""}${(status?.paperWallet?.totalPnlUsd ?? 0).toFixed(2)}</strong></div>
-          <div className="live-chart-wrap">
-            <svg className="equity-live-chart" viewBox="0 0 1000 220" preserveAspectRatio="none" aria-label="Live portfolio equity chart">
-              <line x1="0" y1={relativeY(status?.paperWallet?.startingCashUsd ?? 1000, [...equityHistory.map((point) => point.equity), status?.paperWallet?.startingCashUsd ?? 1000])} x2="1000" y2={relativeY(status?.paperWallet?.startingCashUsd ?? 1000, [...equityHistory.map((point) => point.equity), status?.paperWallet?.startingCashUsd ?? 1000])} className="equity-start-line" />
-              <polyline points={svgPolyline(equityHistory.map((point) => point.equity))} className="equity-main-line" />
-            </svg>
-            {!equityHistory.length && <div className="chart-empty">Live wallet marks will draw here as Guardian updates positions.</div>}
+        <div className="main-market-card">
+          <div className="main-market-toolbar">
+            <div className="market-selector-row">
+              <button className={mainGraphSelection === "portfolio" ? "market-selector active" : "market-selector"} onClick={() => setMainGraphSelection("portfolio")}>WALLET</button>
+              {openPositions.slice(0, 8).map((position) => <button key={position.id} className={mainGraphSelection === position.id ? "market-selector active" : "market-selector"} onClick={() => setMainGraphSelection(position.id)}>${position.symbol}</button>)}
+            </div>
+            <div className="market-range-row">
+              {(["1m","5m","15m","1h","all"] as MainGraphRange[]).map((range) => <button key={range} className={mainGraphRange === range ? "active" : ""} onClick={() => setMainGraphRange(range)}>{range === "all" ? "ALL" : range.toUpperCase()}</button>)}
+            </div>
           </div>
-          <div className="chart-legend"><span><i className="legend-equity" />Equity</span><span><i className="legend-start" />Starting wallet</span><small>Refreshes from the same wallet + Guardian data powering the account totals above.</small></div>
-        </div>
 
-        <div className="position-live-grid">
-          {openPositions.length ? openPositions.slice(0, 8).map((position) => {
-            const history = positionHistory[position.id] ?? [];
-            const marks = history.map((point) => point.price);
-            const entry = position.entryPrice;
-            const high = position.highWaterPrice ?? Math.max(entry, position.markPrice);
-            const stop = entry * (1 - (position.exitStrategy?.stopLossPct ?? 0) / 100);
-            const trail = high * (1 - (position.exitStrategy?.trailingStopPct ?? 0) / 100);
-            const tp1 = entry * (1 + ((position.exitStrategy?.takeProfits?.[0]?.gainPct ?? 0) / 100));
-            const scale = [...marks, entry, high, stop, trail, tp1].filter((value) => Number.isFinite(value) && value > 0);
-            return <article className="position-live-card" key={position.id}>
-              <div className="position-live-title"><div><b>${position.symbol}</b><small>{position.chain} · {position.winnerState ?? "building"}</small></div><strong className={position.pnlPct >= 0 ? "positive" : "negative"}>{position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%</strong></div>
-              <div className="position-chart-wrap">
-                <svg viewBox="0 0 500 150" preserveAspectRatio="none" aria-label={`Live chart for ${position.symbol}`}>
-                  <line x1="0" y1={relativeY(entry, scale, 150, 12)} x2="500" y2={relativeY(entry, scale, 150, 12)} className="position-entry-line" />
-                  <line x1="0" y1={relativeY(stop, scale, 150, 12)} x2="500" y2={relativeY(stop, scale, 150, 12)} className="position-stop-line" />
-                  <line x1="0" y1={relativeY(tp1, scale, 150, 12)} x2="500" y2={relativeY(tp1, scale, 150, 12)} className="position-target-line" />
-                  <polyline points={svgPolyline(marks, 500, 150, 12)} className={position.pnlPct >= 0 ? "position-price-line positive-line" : "position-price-line negative-line"} />
-                </svg>
-                {!history.length && <div className="chart-empty small">Waiting for next live mark…</div>}
-              </div>
-              <div className="position-metrics"><span><small>Entry</small><b>{price(entry)}</b></span><span><small>Now</small><b>{price(position.markPrice)}</b></span><span><small>High</small><b>{price(high)}</b></span><span><small>Stop</small><b>{price(stop)}</b></span></div>
-              <div className="position-chart-legend"><span className="entry-key">Entry</span><span className="stop-key">Stop</span><span className="target-key">TP1</span><span>{ago(position.openedAt)}</span></div>
-            </article>;
-          }) : <div className="wallet-no-positions">No open positions. Live position charts will appear immediately after the next paper BUY.</div>}
+          <div className="market-headline">
+            <div>
+              <small>{selectedGraphPosition ? `${selectedGraphPosition.chain} · ${selectedGraphPosition.winnerState ?? "building"}` : "PAPER WALLET · LIVE EQUITY"}</small>
+              <h3>{selectedGraphPosition ? `$${selectedGraphPosition.symbol}` : "Portfolio Equity"}</h3>
+            </div>
+            <div className="market-headline-stats">
+              <span><small>{selectedGraphPosition ? "PRICE" : "EQUITY"}</small><b>{compactGraphValue(mainGraphCurrent, true)}</b></span>
+              <span><small>P/L</small><b className={mainGraphPositive ? "positive" : "negative"}>{mainGraphPnlPct >= 0 ? "+" : ""}{mainGraphPnlPct.toFixed(2)}%</b></span>
+              <span><small>{selectedGraphPosition ? "ENTRY" : "START"}</small><b>{compactGraphValue(mainGraphEntry, true)}</b></span>
+              <span><small>{selectedGraphPosition ? "HIGH" : "CASH"}</small><b>{compactGraphValue(selectedGraphPosition ? (mainGraphHigh ?? mainGraphCurrent) : (status?.paperWallet?.cashUsd ?? 0), true)}</b></span>
+            </div>
+          </div>
+
+          <div className="fomo-live-chart">
+            <div className="chart-grid-lines" aria-hidden="true">{Array.from({length:6}).map((_,i)=><i key={`h-${i}`} className={`grid-h grid-h-${i}`} />)}{Array.from({length:10}).map((_,i)=><i key={`v-${i}`} className={`grid-v grid-v-${i}`} />)}</div>
+            <svg viewBox="0 0 1000 420" preserveAspectRatio="none" aria-label={selectedGraphPosition ? `Live price chart for ${selectedGraphPosition.symbol}` : "Live portfolio equity chart"}>
+              {mainGraphEntry > 0 && <line x1="0" y1={relativeY(mainGraphEntry, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphEntry, mainGraphScale, 420, 26)} className="market-entry-line" />}
+              {mainGraphStop && <line x1="0" y1={relativeY(mainGraphStop, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphStop, mainGraphScale, 420, 26)} className="market-stop-line" />}
+              {mainGraphTp1 && <line x1="0" y1={relativeY(mainGraphTp1, mainGraphScale, 420, 26)} x2="1000" y2={relativeY(mainGraphTp1, mainGraphScale, 420, 26)} className="market-target-line" />}
+              <polyline points={svgPolyline(mainGraphValues, 1000, 420, 26)} className={mainGraphPositive ? "market-main-line positive-line" : "market-main-line negative-line"} />
+            </svg>
+            <div className="market-y-axis">{mainGraphYAxis.map((value, index) => <span key={`${value}-${index}`} style={{top:`${(index/(Math.max(1,mainGraphYAxis.length-1)))*100}%`}}>{compactGraphValue(value,true)}</span>)}</div>
+            {mainGraphCurrent > 0 && <span className={mainGraphPositive ? "market-current-badge positive" : "market-current-badge negative"} style={{top:`${Math.max(3, Math.min(94, relativeY(mainGraphCurrent, mainGraphScale, 420, 26)/420*100))}%`}}>{compactGraphValue(mainGraphCurrent,true)}</span>}
+            {!mainGraphValues.length && <div className="market-chart-empty">Waiting for live Guardian marks…</div>}
+          </div>
+
+          <div className="market-footer">
+            <div className="market-legend">
+              <span><i className="legend-live" />LIVE</span>
+              <span><i className="legend-entry" />{selectedGraphPosition ? "Entry" : "Starting wallet"}</span>
+              {selectedGraphPosition && <><span><i className="legend-stop" />Stop</span><span><i className="legend-target" />TP1</span></>}
+            </div>
+            <small>{selectedGraphPosition ? `Guardian updates ${selectedGraphPosition.symbol} from live marks. Switch tokens above without creating extra charts.` : "One main chart tracks total wallet equity. Select any open token above to inspect its live price path."}</small>
+          </div>
         </div>
       </section>
 
