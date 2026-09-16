@@ -1,13 +1,9 @@
-# Apply Bot War Room V2.26.1
+# Apply Bot War Room V2.26.2
 
-This replaces V2.26 and fixes the Railway patch-anchor failure shown in the build log.
+Replace V2.26.1 with this cumulative one-folder release and redeploy Railway.
 
-Upload/replace the contents of `Bot-War-Room-V2.26.1-FULL` in the repository root and redeploy Railway.
+This update removes all portfolio/drawdown kill switches from PAPER Runner Lab.
 
-For true independent AI entities, keep/add in Railway Variables:
+Keep `OPENAI_API_KEY` in Railway Variables for the eight independent AI entities.
 
-`OPENAI_API_KEY=...`
-
-Do not paste the key into chat.
-
-The Early Runner Core and independent eight-entity architecture are unchanged; this release hardens the build pipeline.
+No new variable is required.

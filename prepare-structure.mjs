@@ -7,6 +7,7 @@ import { applyTrainingTradeSizePatch } from './training-trade-size-patch.mjs';
 import { applyTokenDisplayPatch } from './token-display-patch.mjs';
 import { applyEarlyRunnerCorePatch } from './early-runner-core-patch.mjs';
 import { applyIndependentCouncilPatch } from './independent-council-patch.mjs';
+import { applyPaperNoKillSwitchPatch } from './paper-no-killswitch-patch.mjs';
 
 const root = process.cwd();
 
@@ -104,5 +105,6 @@ applyTrainingTradeSizePatch(root);
 applyTokenDisplayPatch(root);
 applyEarlyRunnerCorePatch(root);
 applyIndependentCouncilPatch(root);
+applyPaperNoKillSwitchPatch(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);
