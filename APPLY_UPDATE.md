@@ -1,8 +1,9 @@
-# Apply Bot War Room V2.29.2
+# Apply Bot War Room V2.29.3
 
-Replace V2.29.1 with this cumulative one-folder release and redeploy Railway.
+Replace V2.29.2 with this cumulative one-folder release and redeploy Railway.
 
-This fixes the exact build error:
-`Patch produced no change for lib/trajectory-observer.ts`
+This specifically fixes the V8/Next build error:
 
-No new Railway variables are required.
+`JavaScript heap out of memory`
+
+No new Railway variable is required.
