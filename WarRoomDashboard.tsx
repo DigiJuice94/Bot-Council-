@@ -360,6 +360,7 @@ function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
 
 export default function WarRoomDashboard() {
   const [status, setStatus] = useState<AutopilotPayload | null>(null);
+  const [livePositions, setLivePositions] = useState<ManagedPosition[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replayResult, setReplayResult] = useState<WarRoomResult | null>(null);
   const [activeTurn, setActiveTurn] = useState(-1);
@@ -416,7 +417,7 @@ export default function WarRoomDashboard() {
         if (!response.ok || !alive || paperResetInFlightRef.current) return;
         const payload = await response.json() as { positions?: ManagedPosition[] };
         if (!payload.positions) return;
-        setStatus((current) => current ? { ...current, positions: payload.positions! } : current);
+        setLivePositions(payload.positions);
       } catch {
         // The main autopilot poll remains responsible for visible errors.
       }
@@ -503,7 +504,11 @@ export default function WarRoomDashboard() {
 
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   const chat = status?.chat ?? [];
-  const positions = status?.positions ?? [];
+  // Redis hash reads are intentionally unordered. Keep the trade log stable
+  // and newest-first after each lightweight live refresh.
+  const positions = [...(livePositions ?? status?.positions ?? [])].sort((a, b) =>
+    (b.openedAt ?? b.updatedAt ?? "").localeCompare(a.openedAt ?? a.updatedAt ?? "")
+  );
   const openPositions = positions.filter((position) => position.status !== "closed");
   // The server snapshot includes every open PAPER position; the UI list is display-capped.
   const openPositionValue = status?.paperWallet?.openExposureUsd ?? 0;
@@ -850,8 +855,23 @@ export default function WarRoomDashboard() {
         </div>
       </section>
 
+      <section id="active-trades" className="active-trades-panel page-panel">
+        <div className="wide-panel-head"><div><h2>◉ Active Trades</h2><p>Open PAPER positions currently held and monitored by the Exit Strategist.</p></div><span className="quiet-chip">{openPositions.length} holding{openPositions.length === 1 ? "" : "s"}</span></div>
+        <div className="active-trades-grid">
+          {openPositions.length ? openPositions.slice(0, 24).map((position) => {
+            const pnlUsd = positionPnlUsd(position);
+            return <article className="active-trade-card" key={position.id}>
+              <div className="active-trade-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em className={`status-${position.status}`}>{position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></div>
+              <div className="active-trade-values"><span><small>MARK</small><b>{price(position.markPrice)}</b></span><span><small>VALUE</small><b>${(Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0)).toFixed(2)}</b></span><span><small>P/L</small><b className={pnlUsd >= 0 ? "positive" : "negative"}>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</b></span></div>
+              <small className="active-trade-meta">{position.chain} · entry {price(position.entryPrice)} · {ago(position.openedAt)}</small>
+            </article>;
+          }) : <div className="empty-row">No active PAPER trades. New Council-approved entries will appear here.</div>}
+        </div>
+        {openPositions.length > 24 && <small className="active-trades-more">Showing 24 of {openPositions.length} active positions. Portfolio totals include all holdings.</small>}
+      </section>
+
       <section id="trades" className="log-panel page-panel">
-        <div className="wide-panel-head"><div><h2>↗ Trades Log</h2><p>Positions executed and managed automatically by the War Room</p></div><span className="quiet-chip">Guardian owned</span></div>
+        <div className="wide-panel-head"><div><h2>↗ Buys & Closes Log</h2><p>Entries, trims, exits and completed PAPER trades recorded by the War Room</p></div><span className="quiet-chip">Guardian owned</span></div>
         <div className="trades-table enriched-trades-table">
           <div className="trade-row trade-head"><span>Token / CA</span><span>Chain</span><span>Buy Size</span><span>Entry</span><span>Mark / Exit</span><span>Status</span><span>P/L</span><span>Time</span></div>
           {positions.length ? positions.slice(0, 16).map((position) => {
