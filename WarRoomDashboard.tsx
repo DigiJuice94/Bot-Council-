@@ -524,42 +524,12 @@ export default function WarRoomDashboard() {
   const allTimePortfolioHigh = status?.paperWallet?.allTimeHighEquityUsd ?? (equityHistory.length ? Math.max(...equityHistory.map((point) => point.equity)) : (status?.paperWallet?.equityUsd ?? 0));
   const allTimePortfolioDrawdownPct = allTimePortfolioHigh > 0 ? ((allTimePortfolioHigh - (status?.paperWallet?.equityUsd ?? 0)) / allTimePortfolioHigh * 100) : 0;
 
-  const graphRangeStart = mainGraphTimes[0] ?? graphNow;
-  const graphRangeEnd = mainGraphTimes[mainGraphTimes.length - 1] ?? graphNow;
   const recentFills = status?.paperWallet?.recentFills ?? [];
-  const relevantFills = recentFills
-    .filter((fill) => {
-      const at = new Date(fill.createdAt).getTime();
-      if (!Number.isFinite(at)) return false;
-      if (selectedGraphPosition && fill.positionId !== selectedGraphPosition.id) return false;
-      return at >= graphRangeStart - 60_000 && at <= graphRangeEnd + 60_000;
-    })
-    .slice()
-    .reverse();
-
-  const portfolioTradeMarkers: PortfolioTradeMarker[] = relevantFills.map((fill) => {
-    const at = new Date(fill.createdAt).getTime();
-    const label = markerLabel(fill.side, fill.decisionId);
-    const eventValue = selectedGraphPosition
-      ? fill.fillPrice
-      : nearestSeriesValue(at, mainGraphTimes, mainGraphValues, mainGraphCurrent);
-    const y = relativeY(eventValue, mainGraphScale, 420, 26) / 420 * 100;
-    return {
-      id: fill.id,
-      at,
-      label,
-      symbol: fill.symbol,
-      side: fill.side,
-      fillPrice: fill.fillPrice,
-      filledUsd: fill.filledUsd,
-      xPct: timePct(at, mainGraphTimes),
-      yPct: Math.max(3, Math.min(94, y)),
-      tooltip: `${label} $${fill.symbol} · ${new Date(fill.createdAt).toLocaleTimeString()} · ${compactGraphValue(fill.fillPrice, true)} · $${fill.filledUsd.toFixed(2)}`,
-    };
-  });
 
   const allocationTotal = Math.max(0.01, (status?.paperWallet?.cashUsd ?? 0) + openPositionValue);
   const allocationPalette = ["#f4f4f4","#d7d7d7","#bbbbbb","#9f9f9f","#838383","#686868","#505050","#393939","#232323"];
+  const visibleAllocationValue = openPositions.reduce((sum, position) => sum + Math.max(0, (position.remainingQuantity ?? 0) * (position.markPrice ?? 0)), 0);
+  const hiddenAllocationValue = Math.max(0, openPositionValue - visibleAllocationValue);
   const allocationRaw = [
     { id: "cash", label: "Cash", imageUrl: undefined as string | undefined, symbol: "$", value: Math.max(0, status?.paperWallet?.cashUsd ?? 0) },
     ...openPositions
@@ -572,6 +542,7 @@ export default function WarRoomDashboard() {
       }))
       .filter((row) => row.value > 0)
       .sort((a, b) => b.value - a.value),
+    ...(hiddenAllocationValue > 0.005 ? [{ id: "other-paper", label: "Other PAPER positions", imageUrl: undefined as string | undefined, symbol: "…", value: hiddenAllocationValue }] : []),
   ];
   let allocationCursor = 0;
   const allocationSlices = allocationRaw.map((row, index) => {
@@ -816,14 +787,6 @@ export default function WarRoomDashboard() {
             <div className="market-y-axis">{mainGraphYAxis.map((value, index) => <span key={`${value}-${index}`} style={{top:`${(index/(Math.max(1,mainGraphYAxis.length-1)))*100}%`}}>{compactGraphValue(value,true)}</span>)}</div>
             <div className="market-x-axis">{mainGraphXAxis.map((tick, index) => <span key={`${tick.label}-${index}`} style={{left:`${tick.pct}%`}}>{tick.label}</span>)}</div>
             {mainGraphCurrent > 0 && <span className="market-current-badge" style={{top:`${Math.max(3, Math.min(94, relativeY(mainGraphCurrent, mainGraphScale, 420, 26)/420*100))}%`}}>{compactGraphValue(mainGraphCurrent,true)}</span>}
-            <div className="market-trade-events" aria-label="Trade events">
-              {portfolioTradeMarkers.map((marker) => <span
-                key={marker.id}
-                className={`market-trade-marker ${marker.side === "BUY" ? "buy-event" : "sell-event"}`}
-                style={{left:`${marker.xPct}%`,top:`${marker.yPct}%`}}
-                title={marker.tooltip}
-              ><b>{marker.label}</b><small>${marker.symbol}</small></span>)}
-            </div>
             {!mainGraphValues.length && <div className="market-chart-empty">Waiting for live Guardian marks…</div>}
           </div>
 
@@ -831,11 +794,9 @@ export default function WarRoomDashboard() {
             <div className="market-legend">
               <span><i className="legend-live" />LIVE</span>
               <span><i className="legend-entry" />{selectedGraphPosition ? "Entry" : "Starting wallet"}</span>
-              <span><i className="legend-buy-event" />BUY / ADD</span>
-              <span><i className="legend-sell-event" />TP / EXIT</span>
               {selectedGraphPosition && <><span><i className="legend-stop" />Stop</span><span><i className="legend-target" />TP1</span></>}
             </div>
-            <small>{selectedGraphPosition ? `Guardian updates ${selectedGraphPosition.symbol} from live marks. Trade markers show buys, adds, profit-taking and exits.` : "Portfolio equity with live trade markers. Select any open token above to inspect its price path."}</small>
+            <small>{selectedGraphPosition ? `Guardian updates ${selectedGraphPosition.symbol} from live marks.` : "Portfolio equity from live wallet marks. Select any open token above to inspect its price path."}</small>
           </div>
         </div>
 
