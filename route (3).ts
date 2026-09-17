@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
+import { getAutopilotStatus } from "@/lib/autopilot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  ensurePositionGuardianLoop();
-  const report = await refreshPositionGuardian();
-  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
+  const status = await getAutopilotStatus();
+  return NextResponse.json(status, { headers: { "Cache-Control": "no-store" } });
 }

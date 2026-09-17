@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { createCoreExperiment } from "@/lib/experiments";
+import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(createCoreExperiment(["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "Robinhood Chain"]), {
-    headers: { "Cache-Control": "no-store" },
-  });
+  ensurePositionGuardianLoop();
+  const report = await refreshPositionGuardian();
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }
