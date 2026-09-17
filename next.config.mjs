@@ -1,5 +1,6 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+  output: "standalone",
   productionBrowserSourceMaps: false,
   typescript: {
     // Railway was crashing after "Compiled successfully" during

@@ -1,9 +1,9 @@
-# Apply Bot War Room V2.29.3
+# Apply Bot War Room V2.29.4
 
-Replace V2.29.2 with this cumulative one-folder release and redeploy Railway.
+Replace V2.29.3 with this cumulative one-folder release and redeploy Railway.
 
-This specifically fixes the V8/Next build error:
+This fixes the exact Docker build error:
 
-`JavaScript heap out of memory`
+`/app/.next/standalone: not found`
 
-No new Railway variable is required.
+No new Railway variables are required.
