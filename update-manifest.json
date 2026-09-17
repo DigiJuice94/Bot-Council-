@@ -1,6 +1,6 @@
 {
-  "version": "2.29",
-  "name": "Trajectory Observer \u2014 Background Sequence Learning",
+  "version": "2.29.1",
+  "name": "Trajectory Observer \u2014 Railway Type Fix",
   "main_mission": "Study fresh meme launches, learn what separates runners from dumpers, paper trade the developing patterns, preserve every lesson, validate on unseen cases, and graduate only after the Code Deciphered gates pass.",
   "features": {
     "persistent_runner_dumper_case_files": true,
@@ -212,7 +212,9 @@
     "pullback_recovery_learning": true,
     "liquidity_to_mc_trend_learning": true,
     "market_cap_acceleration_learning": true,
-    "buyer_holder_velocity_delta_learning": true
+    "buyer_holder_velocity_delta_learning": true,
+    "runner_genome_fallback_trajectory_defaults": true,
+    "trajectory_outcome_union_narrowed": true
   },
   "files": [
     "WarRoomDashboard.tsx",
@@ -301,7 +303,9 @@
     "trajectory-observer.ts",
     "v229-trajectory-observer-patch.mjs",
     "V2.29_UPDATE_NOTES.md",
-    "V2.29_TEST_REPORT.md"
+    "V2.29_TEST_REPORT.md",
+    "v2291-trajectory-type-fix.mjs",
+    "V2.29.1_BUILD_FIX.md"
   ],
   "validation": {
     "node_patch_syntax": "pass",

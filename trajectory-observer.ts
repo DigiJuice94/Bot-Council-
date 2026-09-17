@@ -387,7 +387,7 @@ export async function distributeTrajectoryOutcomeLesson(row: TrajectoryCaseLike)
     trajectoryPhase: phase,
     trajectoryScore: Number(trajectoryScore.toFixed(1)),
     trajectoryDumperRiskScore: Number(trajectoryDumperRiskScore.toFixed(1)),
-    trajectoryOutcome: row.outcome,
+    trajectoryOutcome: row.outcome === "runner" || row.outcome === "dumper" ? row.outcome : undefined,
     lesson: lesson.slice(0, 1_300),
   })));
 

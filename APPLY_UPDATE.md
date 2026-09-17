@@ -1,11 +1,10 @@
-# Apply Bot War Room V2.29
+# Apply Bot War Room V2.29.1
 
-Replace V2.28.2 with this cumulative one-folder release and redeploy Railway.
+Replace V2.29 with this cumulative one-folder release and redeploy Railway.
 
-No new paid API is required.
+This fixes the exact two TypeScript errors shown after V2.29 compiled:
 
-Optional variable (already defaults to 30 seconds):
+- missing Trajectory Observer fields on the engine RunnerGenome fallback
+- trajectoryOutcome union not narrowed to runner/dumper
 
-`TRAJECTORY_OBSERVER_REVIEW_MS=30000`
-
-The Trajectory Observer is background research only. It does not become a ninth Council voter.
+No new Railway variables are required.

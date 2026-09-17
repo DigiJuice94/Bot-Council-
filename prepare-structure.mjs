@@ -12,6 +12,7 @@ import { applyV227ResiliencePatch } from './v227-resilience-patch.mjs';
 import { applyV228ExitHistoryPatch } from './v228-exit-history-patch.mjs';
 import { applyV2281PaperResetPatch } from './v2281-paper-reset-patch.mjs';
 import { applyV229TrajectoryObserverPatch } from './v229-trajectory-observer-patch.mjs';
+import { applyV2291TrajectoryTypeFix } from './v2291-trajectory-type-fix.mjs';
 
 const root = process.cwd();
 
@@ -117,5 +118,6 @@ applyV227ResiliencePatch(root);
 applyV228ExitHistoryPatch(root);
 applyV2281PaperResetPatch(root);
 applyV229TrajectoryObserverPatch(root);
+applyV2291TrajectoryTypeFix(root);
 
 console.log(`[structure] ready (${restored} file${restored === 1 ? "" : "s"} synced)`);
