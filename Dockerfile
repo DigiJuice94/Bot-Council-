@@ -7,6 +7,13 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN if [ ! -f app/page.tsx ] || [ ! -f app/layout.tsx ] || [ ! -d components ] || [ ! -d lib ] || [ ! -d public ]; then \
+      echo "Restoring V3 source folders from deployment-source.tar.gz"; \
+      tar -xzf deployment-source.tar.gz; \
+    fi \
+    && test -f app/page.tsx \
+    && test -f app/layout.tsx \
+    && test -f app/api/paper-reset/route.ts
 RUN npm run build
 
 FROM node:22-alpine AS runner
