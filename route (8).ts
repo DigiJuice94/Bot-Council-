@@ -9,7 +9,7 @@ export async function POST() {
     return NextResponse.json({
       ok: true,
       ...result,
-      message: `Paper wallet reset to $${result.wallet.startingCashUsd.toFixed(2)}. Learning and all-time history preserved.`,
+      message: `Fresh PAPER run started at $${result.wallet.startingCashUsd.toFixed(2)}. Trade log and portfolio history cleared; learned research preserved.`,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

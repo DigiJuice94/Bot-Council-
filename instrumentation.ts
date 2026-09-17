@@ -4,7 +4,7 @@ export async function register() {
     const { resetPaperWalletPreserveLearning } = await import("./lib/paper-wallet");
     await resetPaperWalletPreserveLearning(
       "Fresh PAPER run requested for always-live chat release",
-      "v3-always-live-chat-20260917",
+      "v3-fresh-fresh-reset-20260917",
     );
   }
 }

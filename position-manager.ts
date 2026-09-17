@@ -470,7 +470,15 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
       if (snapshot) {
         const portfolio = await getPaperPortfolioContext(position.chain);
         const exitGenome = await getRunnerExitGuidance(position, snapshot);
-        next = evaluatePosition(position, snapshot, portfolio, exitGenome);
+        // A previously flagged exit must never become permanently pending. In
+        // particular, emergency exits can be triggered by a sellability or
+        // honeypot failure, so those conditions cannot block the follow-up
+        // paper sell.
+        if (position.status === "exit_pending" && position.mode === "paper") {
+          next = await executeFullExit(position, snapshot);
+        } else {
+          next = evaluatePosition(position, snapshot, portfolio, exitGenome);
+        }
         if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
           if (next.lastAction === "SCALE_IN") {
             next = await executeScaleIn(next, snapshot, portfolio);

@@ -2,13 +2,13 @@
 
 ## Always-live chat and one-time fresh bankroll
 
-This release automatically resets PAPER once at server startup, before runtime loops start. It uses the existing configured starting balance (default $1,000), clears current open PAPER positions without inventing sells, and retains completed trades, fills, learned research and all-time history. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata. This startup migration is intended for a single app replica; stop the previous deployment before starting this release to avoid old workers writing positions during the reset.
+This release automatically starts one fresh PAPER run at server startup, before runtime loops start. It uses the existing configured starting balance (default $1,000), clears the PAPER trade log/positions/fills and starts a new portfolio history marker. Runner Genome, Filing Cabinet, Trajectory Observer and private agent research are retained. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata. This startup migration is intended for a single app replica; stop the previous deployment before starting this release to avoid old workers writing positions during the reset.
 
 Chat has no pause state or pause/resume controls. New messages keep appearing and scrolling follows new messages even after the 60-message display limit. Current specialist names now map to distinct colors. Council seats, voting, entry/exit thresholds and the background-only observer are unchanged.
 
 ## Wallet reset repair
 
-This release changes only the dashboard reset flow and wallet snapshot/reset synchronization. Buying, selling, exit rules and research algorithms are unchanged. Reset restores the configured bankroll, abandons current open PAPER positions without creating synthetic sells, and retains completed positions, fill records, learning, all-time equity history and the previous all-time peak. A reset history marker separates the new bankroll from the earlier run. Trading resumes normally; subsequent fresh buys may spend the new balance.
+This release changes only the dashboard reset flow and wallet snapshot/reset synchronization. Buying, selling, exit rules and research algorithms are unchanged. Reset restores the configured bankroll, clears PAPER positions and trade/portfolio display history without creating synthetic sells, and retains learned research in its separate stores. Trading resumes normally; subsequent fresh buys may spend the new balance.
 
 The dashboard now uses the reset endpoint's returned wallet immediately, rejects pre-reset polling responses, and releases the reset button without waiting for the research-heavy autopilot endpoint. After 20 seconds without a response it reports an unknown outcome and advises refreshing, rather than claiming the reset failed or retrying automatically.
 

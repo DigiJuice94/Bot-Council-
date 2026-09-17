@@ -227,17 +227,18 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
     }
     const { state: current, storage } = await readState();
     const positions = await listManagedPositions();
-    const open = positions.filter((position) => position.mode === "paper" && position.status !== "closed");
+    const paperPositions = positions.filter((position) => position.mode === "paper");
+    const open = paperPositions.filter((position) => position.status !== "closed");
     const openValue = open.reduce(
       (sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice),
       0,
     );
     const preResetEquity = Math.max(0, current.cashUsd + openValue);
 
-    // A manual wallet reset abandons current PAPER positions without turning
-    // those abandoned marks into fake wins/losses. Historical closed trades,
-    // Runner Genome cases, Filing Cabinet data and per-entity memories are untouched.
-    for (const position of open) {
+    // A fresh run clears the PAPER trade log and all PAPER positions. Nothing
+    // is converted into a synthetic win/loss. Research stores are separate
+    // and remain untouched.
+    for (const position of paperPositions) {
       await removeManagedPosition(position.id);
       clearedOpenPositions += 1;
     }
@@ -245,16 +246,6 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
     const startingCashUsd = configuredStartingCash();
     const now = new Date().toISOString();
     const nowMs = Date.parse(now);
-    const previousHigh = Math.max(current.allTimeHighEquityUsd ?? current.startingCashUsd, preResetEquity);
-    const previousLow = Math.min(current.allTimeLowEquityUsd ?? current.startingCashUsd, preResetEquity);
-    const history = current.equityHistory ?? [];
-    const beforePoint = {
-      at: Math.max(0, nowMs - 1),
-      equity: Number(preResetEquity.toFixed(2)),
-      cash: Number(current.cashUsd.toFixed(2)),
-      openValue: Number(openValue.toFixed(2)),
-      event: "mark" as const,
-    };
     const resetPoint = {
       at: nowMs,
       equity: Number(startingCashUsd.toFixed(2)),
@@ -270,18 +261,16 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
       dayKey: dayKey(),
       dayStartEquityUsd: startingCashUsd,
       updatedAt: now,
-      equityHistory: [...history, beforePoint, resetPoint].slice(-MAX_EQUITY_HISTORY),
-      allTimeHighEquityUsd: Number(Math.max(previousHigh, startingCashUsd).toFixed(2)),
-      allTimeHighAt: preResetEquity >= previousHigh
-        ? new Date(Math.max(0, nowMs - 1)).toISOString()
-        : current.allTimeHighAt,
-      allTimeLowEquityUsd: Number(Math.min(previousLow, startingCashUsd).toFixed(2)),
-      allTimeLowAt: preResetEquity <= previousLow
-        ? new Date(Math.max(0, nowMs - 1)).toISOString()
-        : current.allTimeLowAt,
-      // Keep fills/counters/fees as audit history. This is a bankroll reset,
-      // not a learning/history wipe.
-      recentFills: current.recentFills,
+      startedAt: now,
+      equityHistory: [resetPoint],
+      allTimeHighEquityUsd: startingCashUsd,
+      allTimeHighAt: now,
+      allTimeLowEquityUsd: startingCashUsd,
+      allTimeLowAt: now,
+      totalFeesUsd: 0,
+      buyFills: 0,
+      sellFills: 0,
+      recentFills: [],
     };
 
     await writeState(next);
@@ -292,7 +281,7 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
       resets: resetMeta.resets + 1,
       totalInjectedUsd: Number((resetMeta.totalInjectedUsd + startingCashUsd).toFixed(2)),
       lastResetAt: now,
-      lastReason: `${reason}. Restored PAPER bankroll to ${startingCashUsd.toFixed(2)} and cleared ${clearedOpenPositions} open position(s); learning/history preserved.`,
+      lastReason: `${reason}. Started a fresh PAPER run at ${startingCashUsd.toFixed(2)} and cleared ${clearedOpenPositions} PAPER position(s), fills and portfolio history; learned research preserved.`,
       completedFreshStartReleases: onceRelease
         ? [...(resetMeta.completedFreshStartReleases ?? []), onceRelease]
         : resetMeta.completedFreshStartReleases,

@@ -376,6 +376,8 @@ export default function WarRoomDashboard() {
   const [resettingPaperWallet, setResettingPaperWallet] = useState(false);
   const [paperResetMessage, setPaperResetMessage] = useState<string | null>(null);
   const paperResetInFlightRef = useRef(false);
+  const livePositionPollInFlightRef = useRef(false);
+  const autopilotPollInFlightRef = useRef(false);
   const paperResetGenerationRef = useRef(0);
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
@@ -387,7 +389,8 @@ export default function WarRoomDashboard() {
   useEffect(() => {
     let alive = true;
     const poll = async () => {
-      if (paperResetInFlightRef.current) return;
+      if (paperResetInFlightRef.current || autopilotPollInFlightRef.current) return;
+      autopilotPollInFlightRef.current = true;
       const generation = paperResetGenerationRef.current;
       try {
         const response = await fetch("/api/autopilot", { cache: "no-store" });
@@ -399,6 +402,8 @@ export default function WarRoomDashboard() {
       } catch (err) {
         if (!alive) return;
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        autopilotPollInFlightRef.current = false;
       }
     };
     void poll();
@@ -411,7 +416,8 @@ export default function WarRoomDashboard() {
   useEffect(() => {
     let alive = true;
     const pollPositions = async () => {
-      if (paperResetInFlightRef.current) return;
+      if (paperResetInFlightRef.current || livePositionPollInFlightRef.current) return;
+      livePositionPollInFlightRef.current = true;
       try {
         const response = await fetch("/api/positions?light=1", { cache: "no-store" });
         if (!response.ok || !alive || paperResetInFlightRef.current) return;
@@ -420,10 +426,12 @@ export default function WarRoomDashboard() {
         setLivePositions(payload.positions);
       } catch {
         // The main autopilot poll remains responsible for visible errors.
+      } finally {
+        livePositionPollInFlightRef.current = false;
       }
     };
     void pollPositions();
-    const timer = window.setInterval(() => void pollPositions(), 1000);
+    const timer = window.setInterval(() => void pollPositions(), 2000);
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
@@ -629,7 +637,7 @@ export default function WarRoomDashboard() {
   const resetPaperWallet = async () => {
     if (paperResetInFlightRef.current) return;
     const confirmed = window.confirm(
-      "Reset PAPER wallet to its configured starting balance (default $1,000) and clear current open PAPER positions?\n\nRunner Genome, Filing Cabinet, agent memories, closed trade history and all-time portfolio history will NOT be erased."
+      "Start a fresh PAPER run at the configured balance (default $1,000) and clear the PAPER trade log, positions and portfolio history?\n\nRunner Genome, Filing Cabinet, Trajectory Observer research and agent memories will NOT be erased."
     );
     if (!confirmed || resettingPaperWallet) return;
 
