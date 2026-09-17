@@ -560,6 +560,7 @@ export type PaperWalletState = {
 export type PaperWalletSnapshot = PaperWalletState & {
   equityUsd: number;
   openExposureUsd: number;
+  openCostUsd: number;
   unrealizedPnlUsd: number;
   realizedPnlUsd: number;
   totalPnlUsd: number;

@@ -461,7 +461,7 @@ export default function WarRoomDashboard() {
     if (!status?.paperWallet) return;
     const now = Date.now();
     const openPositions = (status.positions ?? []).filter((position) => position.status !== "closed");
-    const openValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
+    const openValue = status.paperWallet.openExposureUsd;
     setEquityHistory((current) => {
       const persisted = status.paperWallet.equityHistory ?? [];
       const live = { at: now, equity: status.paperWallet.equityUsd, cash: status.paperWallet.cashUsd, openValue };
@@ -484,10 +484,11 @@ export default function WarRoomDashboard() {
   const chat = status?.chat ?? [];
   const positions = status?.positions ?? [];
   const openPositions = positions.filter((position) => position.status !== "closed");
-  const openPositionValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
-  const openPositionCost = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.entryPrice ?? 0), 0);
-  const unrealizedPnl = openPositionValue - openPositionCost;
-  const realizedPnl = positions.reduce((sum, position) => sum + (position.realizedPnlUsd ?? 0), 0);
+  // The server snapshot includes every open PAPER position; the UI list is display-capped.
+  const openPositionValue = status?.paperWallet?.openExposureUsd ?? 0;
+  const openPositionCost = status?.paperWallet?.openCostUsd ?? 0;
+  const unrealizedPnl = status?.paperWallet?.unrealizedPnlUsd ?? (openPositionValue - openPositionCost);
+  const realizedPnl = status?.paperWallet?.realizedPnlUsd ?? 0;
   const reconciledEquity = (status?.paperWallet?.cashUsd ?? 0) + openPositionValue;
   const reconciliationDelta = status?.paperWallet ? status.paperWallet.equityUsd - reconciledEquity : 0;
   const reconciliationPass = Math.abs(reconciliationDelta) <= 0.10;

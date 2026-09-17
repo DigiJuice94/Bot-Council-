@@ -156,6 +156,7 @@ async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" 
   const positions = await listManagedPositions();
   const open = positions.filter((position) => position.status !== "closed");
   const openExposureUsd = open.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
+  const openCostUsd = open.reduce((sum, position) => sum + Math.max(0, position.entryNotionalUsd - (position.realizedCostUsd || 0)), 0);
   const unrealizedPnlUsd = open.reduce((sum, position) => {
     const remainingCost = Math.max(0, position.entryNotionalUsd - position.realizedCostUsd);
     return sum + (position.remainingQuantity * position.markPrice - remainingCost);
@@ -178,6 +179,7 @@ async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" 
     ...state,
     equityUsd: Number(equityUsd.toFixed(2)),
     openExposureUsd: Number(openExposureUsd.toFixed(2)),
+    openCostUsd: Number(openCostUsd.toFixed(2)),
     unrealizedPnlUsd: Number(unrealizedPnlUsd.toFixed(2)),
     realizedPnlUsd: Number(realizedPnlUsd.toFixed(2)),
     totalPnlUsd: Number(totalPnlUsd.toFixed(2)),
