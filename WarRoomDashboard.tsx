@@ -405,6 +405,27 @@ export default function WarRoomDashboard() {
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
+  // Keep the Trades Log responsive even while the heavier autopilot payload
+  // is rebuilding research statistics.
+  useEffect(() => {
+    let alive = true;
+    const pollPositions = async () => {
+      if (paperResetInFlightRef.current) return;
+      try {
+        const response = await fetch("/api/positions?light=1", { cache: "no-store" });
+        if (!response.ok || !alive || paperResetInFlightRef.current) return;
+        const payload = await response.json() as { positions?: ManagedPosition[] };
+        if (!payload.positions) return;
+        setStatus((current) => current ? { ...current, positions: payload.positions! } : current);
+      } catch {
+        // The main autopilot poll remains responsible for visible errors.
+      }
+    };
+    void pollPositions();
+    const timer = window.setInterval(() => void pollPositions(), 1000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+
   useEffect(() => {
     if (!result || lastObservedDecisionRef.current === result.decisionId) return;
     lastObservedDecisionRef.current = result.decisionId;
