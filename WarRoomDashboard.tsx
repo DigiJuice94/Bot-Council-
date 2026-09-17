@@ -104,12 +104,15 @@ function chatTone(bot: string, kind: ChatRow["kind"]) {
   const name = bot.toLowerCase();
   if (kind === "system" || name.includes("system")) return "system";
   if (name.includes("cio")) return "cio";
-  if (name.includes("launch")) return "launch";
-  if (name.includes("social")) return "social";
-  if (name.includes("wallet")) return "wallet";
+  if (name.includes("launch") || name.includes("early runner scout")) return "launch";
+  if (name.includes("social") || name.includes("narrative")) return "social";
+  if (name.includes("wallet") || name.includes("early flow")) return "wallet";
   if (name.includes("quant")) return "quant";
-  if (name.includes("contract")) return "contract";
-  if (name.includes("bear")) return "bear";
+  if (name.includes("contract") || name.includes("safety gate")) return "contract";
+  if (name.includes("bear") || name.includes("dumper")) return "bear";
+  if (name.includes("portfolio")) return "portfolio";
+  if (name.includes("exit strategist")) return "exit";
+  if (name.includes("trajectory")) return "observer";
   if (name.includes("executor")) return "executor";
   if (name.includes("guardian")) return "guardian";
   return "neutral";
@@ -363,7 +366,6 @@ export default function WarRoomDashboard() {
   const [scanBubble, setScanBubble] = useState<{ agentId: AgentOpinion["id"]; message: string; round: CouncilTurn["round"] } | null>(null);
   const [renderedChat, setRenderedChat] = useState<ChatRow[]>([]);
   const [chatQueue, setChatQueue] = useState<ChatRow[]>([]);
-  const [chatLive, setChatLive] = useState(true);
   const [chatInitialized, setChatInitialized] = useState(false);
   const [equityHistory, setEquityHistory] = useState<EquityHistoryPoint[]>([]);
   const [positionHistory, setPositionHistory] = useState<Record<string, PositionHistoryPoint[]>>({});
@@ -372,22 +374,25 @@ export default function WarRoomDashboard() {
   const [copiedCa, setCopiedCa] = useState<string | null>(null);
   const [resettingPaperWallet, setResettingPaperWallet] = useState(false);
   const [paperResetMessage, setPaperResetMessage] = useState<string | null>(null);
+  const paperResetInFlightRef = useRef(false);
+  const paperResetGenerationRef = useRef(0);
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
   const chatFeedRef = useRef<HTMLDivElement | null>(null);
   const chatSeenIdsRef = useRef<Set<string>>(new Set());
-  const suppressChatPauseRef = useRef(false);
   const result = status?.latestResult ?? null;
 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
+      if (paperResetInFlightRef.current) return;
+      const generation = paperResetGenerationRef.current;
       try {
         const response = await fetch("/api/autopilot", { cache: "no-store" });
         if (!response.ok) throw new Error(`Autopilot status ${response.status}`);
         const payload = await response.json() as AutopilotPayload;
-        if (!alive) return;
+        if (!alive || generation !== paperResetGenerationRef.current || paperResetInFlightRef.current) return;
         setStatus(payload);
         setError(null);
       } catch (err) {
@@ -604,67 +609,62 @@ export default function WarRoomDashboard() {
 
   // Drain the live queue at a deliberate conversational pace.
   useEffect(() => {
-    if (!chatLive || !chatQueue.length) return;
+    if (!chatQueue.length) return;
     const timer = window.setTimeout(() => {
       const next = chatQueue[0];
       setChatQueue((current) => current.slice(1));
       setRenderedChat((current) => [...current, next].slice(-60));
     }, CHAT_REVEAL_MS);
     return () => window.clearTimeout(timer);
-  }, [chatLive, chatQueue]);
+  }, [chatQueue]);
 
-  // Only follow the bottom while LIVE is enabled.
+  // Always live: scrolling never suspends message delivery.
   useEffect(() => {
-    if (!chatLive) return;
     const feed = chatFeedRef.current;
     if (!feed) return;
-    suppressChatPauseRef.current = true;
     const id = window.requestAnimationFrame(() => {
       feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
-      window.setTimeout(() => { suppressChatPauseRef.current = false; }, 500);
     });
     return () => window.cancelAnimationFrame(id);
-  }, [renderedChat.length, chatLive]);
-
-  const handleChatScroll = () => {
-    const feed = chatFeedRef.current;
-    if (!feed || suppressChatPauseRef.current || !chatLive) return;
-    const distanceFromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
-    if (distanceFromBottom > 90) setChatLive(false);
-  };
-
-  const resumeLiveChat = () => {
-    setChatLive(true);
-    const feed = chatFeedRef.current;
-    if (!feed) return;
-    suppressChatPauseRef.current = true;
-    window.requestAnimationFrame(() => {
-      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
-      window.setTimeout(() => { suppressChatPauseRef.current = false; }, 500);
-    });
-  };
+  }, [renderedChat]);
 
   const resetPaperWallet = async () => {
+    if (paperResetInFlightRef.current) return;
     const confirmed = window.confirm(
-      "Reset PAPER wallet to $1,000 and clear current open PAPER positions?\n\nRunner Genome, Filing Cabinet, agent memories, closed trade history and all-time portfolio history will NOT be erased."
+      "Reset PAPER wallet to its configured starting balance (default $1,000) and clear current open PAPER positions?\n\nRunner Genome, Filing Cabinet, agent memories, closed trade history and all-time portfolio history will NOT be erased."
     );
     if (!confirmed || resettingPaperWallet) return;
 
     setResettingPaperWallet(true);
+    paperResetInFlightRef.current = true;
+    paperResetGenerationRef.current += 1;
     setPaperResetMessage(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await fetch("/api/paper-reset", { method: "POST" });
-      const payload = await response.json() as { ok?: boolean; message?: string; error?: string; clearedOpenPositions?: number };
+      const response = await fetch("/api/paper-reset", { method: "POST", signal: controller.signal, cache: "no-store" });
+      const payload = await response.json() as { ok?: boolean; message?: string; error?: string; clearedOpenPositions?: number; wallet?: PaperWalletSnapshot };
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? `Reset failed (${response.status})`);
-
-      const refreshed = await fetch("/api/autopilot", { cache: "no-store" });
-      if (refreshed.ok) setStatus(await refreshed.json() as AutopilotPayload);
+      if (!payload.wallet) throw new Error("Reset response did not include the wallet. Refresh to check its state.");
+      const wallet = payload.wallet;
+      // The reset response is authoritative. Do not wait for the research-heavy
+      // autopilot endpoint before showing the new bankroll or releasing the button.
+      setStatus((current) => current ? {
+        ...current,
+        paperWallet: wallet,
+        positions: current.positions.filter((position) => position.mode !== "paper" || position.status === "closed"),
+        generatedAt: wallet.updatedAt,
+      } : current);
       setMainGraphSelection("portfolio");
       setPaperResetMessage(payload.message ?? "Paper wallet reset. Learning preserved.");
       window.setTimeout(() => setPaperResetMessage(null), 6000);
     } catch (err) {
-      setPaperResetMessage(err instanceof Error ? err.message : String(err));
+      setPaperResetMessage(controller.signal.aborted
+        ? "Reset response timed out. It may have completed; refresh to check the wallet before retrying."
+        : err instanceof Error ? err.message : String(err));
     } finally {
+      window.clearTimeout(timeout);
+      paperResetInFlightRef.current = false;
       setResettingPaperWallet(false);
     }
   };
@@ -727,12 +727,10 @@ export default function WarRoomDashboard() {
           <div><h2>◯ Council Group Chat</h2><p>Messages arrive one at a time in the exact order the War Room said them</p></div>
           <div className="group-chat-head-actions">
             <span className="group-chat-order">OLDEST ↑ NEWEST</span>
-            {chatLive
-              ? <span className="live-chip"><i /> LIVE</span>
-              : <button className="chat-paused-chip" onClick={resumeLiveChat}><i /> PAUSED{chatQueue.length ? ` · ${chatQueue.length} NEW` : ""}</button>}
+            <span className="live-chip"><i /> LIVE</span>
           </div>
         </div>
-        <div className="group-chat-feed" ref={chatFeedRef} onScroll={handleChatScroll} aria-live={chatLive ? "polite" : "off"}>
+        <div className="group-chat-feed" ref={chatFeedRef} aria-live="polite">
           {renderedChat.length ? renderedChat.map((row, index) => {
             const tone = chatTone(row.bot, row.kind);
             const previous = renderedChat[index - 1];
@@ -747,7 +745,7 @@ export default function WarRoomDashboard() {
               </div>
             );
           }) : <div className="group-chat-empty"><span>•••</span><p>The Council is booting. Messages will appear here in speaking order.</p></div>}
-          {chatLive && displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
+          {displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
             <div className="group-avatar" aria-hidden="true">{chatInitials(liveSpeaker?.name ?? "Council")}</div>
             <div className="group-message-body">
               <div className="group-message-meta"><b>{liveSpeaker?.name ?? "Council"}</b><span>speaking now</span></div>
@@ -755,14 +753,8 @@ export default function WarRoomDashboard() {
             </div>
           </div>}
         </div>
-        <div className={`group-chat-footer ${chatLive ? "" : "paused"}`}>
-          {chatLive
-            ? <span><i /> Live auto-scroll · one message every {(CHAT_REVEAL_MS / 1000).toFixed(1)}s</span>
-            : <span><i /> Live chat paused while you read earlier messages{chatQueue.length ? ` · ${chatQueue.length} waiting` : ""}</span>}
-          <div className="chat-footer-actions">
-            <small>Scroll up at any time to pause the live feed.</small>
-            {!chatLive && <button onClick={resumeLiveChat}>Resume Live</button>}
-          </div>
+        <div className="group-chat-footer">
+          <span><i /> Always live · one message every {(CHAT_REVEAL_MS / 1000).toFixed(1)}s</span>
         </div>
       </section>
 

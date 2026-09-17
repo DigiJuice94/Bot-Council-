@@ -21,6 +21,7 @@ export type PaperWalletResetMeta = {
   totalInjectedUsd: number;
   lastResetAt?: string;
   lastReason?: string;
+  completedFreshStartReleases?: string[];
 };
 
 function configuredStartingCash() {
@@ -188,15 +189,21 @@ async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" 
 }
 
 export async function getPaperWallet(): Promise<PaperWalletSnapshot> {
-  const { state, storage } = await readState();
-  return calculateSnapshot(state, storage);
+  // Snapshot calculation can persist equity history. Queue it with mutations
+  // so a read begun before reset cannot write the old bankroll back afterward.
+  const task = mutationLock.then(async () => {
+    const { state, storage } = await readState();
+    return calculateSnapshot(state, storage);
+  });
+  mutationLock = task.then(() => undefined, () => undefined);
+  return task;
 }
 
 export async function getPaperWalletResetMeta(): Promise<PaperWalletResetMeta> {
   return readResetMeta();
 }
 
-export async function resetPaperWalletPreserveLearning(reason = "Manual dashboard reset"): Promise<{
+export async function resetPaperWalletPreserveLearning(reason = "Manual dashboard reset", onceRelease?: string): Promise<{
   wallet: PaperWalletSnapshot;
   resetMeta: PaperWalletResetMeta;
   clearedOpenPositions: number;
@@ -206,9 +213,19 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
   let clearedOpenPositions = 0;
 
   const task = mutationLock.then(async () => {
+    if (onceRelease && process.env.REDIS_URL && !(await getRedis())) {
+      throw new Error("Cannot perform release wallet reset without the configured Redis connection.");
+    }
+    const existingMeta = await readResetMeta();
+    if (onceRelease && existingMeta.completedFreshStartReleases?.includes(onceRelease)) {
+      const { state, storage } = await readState();
+      wallet = await calculateSnapshot(state, storage);
+      resetMeta = existingMeta;
+      return;
+    }
     const { state: current, storage } = await readState();
     const positions = await listManagedPositions();
-    const open = positions.filter((position) => position.status !== "closed");
+    const open = positions.filter((position) => position.mode === "paper" && position.status !== "closed");
     const openValue = open.reduce(
       (sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice),
       0,
@@ -269,10 +286,14 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
 
     resetMeta = await readResetMeta();
     resetMeta = {
+      ...resetMeta,
       resets: resetMeta.resets + 1,
       totalInjectedUsd: Number((resetMeta.totalInjectedUsd + startingCashUsd).toFixed(2)),
       lastResetAt: now,
       lastReason: `${reason}. Restored PAPER bankroll to ${startingCashUsd.toFixed(2)} and cleared ${clearedOpenPositions} open position(s); learning/history preserved.`,
+      completedFreshStartReleases: onceRelease
+        ? [...(resetMeta.completedFreshStartReleases ?? []), onceRelease]
+        : resetMeta.completedFreshStartReleases,
     };
     await writeResetMeta(resetMeta);
 
@@ -321,6 +342,7 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
       updatedAt: now,
     };
     resetMeta = {
+      ...resetMeta,
       resets: resetMeta.resets + 1,
       totalInjectedUsd: Number((resetMeta.totalInjectedUsd + startingCashUsd).toFixed(2)),
       lastResetAt: now,
