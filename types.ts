@@ -8,6 +8,7 @@ export type Chain =
   | "Base"
   | "BNB Chain"
   | "Monad"
+  | "HyperEVM"
   | "Robinhood Chain";
 
 export type ChainFamily = "solana" | "evm";
@@ -30,7 +31,7 @@ export type DataQuality = {
 
 export type DataProvenance = {
   live: boolean;
-  marketSource: "adapter" | "birdeye" | "dexscreener";
+  marketSource: "adapter" | "birdeye" | "geckoterminal" | "dexscreener";
   securitySource: "birdeye" | "goplus" | "helius" | "multi" | "adapter" | "unavailable";
   fetchedAt: string;
   pairAddress?: string;
@@ -63,6 +64,7 @@ export type LaunchMetrics = {
 export type MarketSnapshot = {
   symbol: string;
   name: string;
+  imageUrl?: string;
   tokenAddress: string;
   chain: Chain;
   chainFamily: ChainFamily;
@@ -150,8 +152,43 @@ export type MemeRegime = {
   reasons: string[];
 };
 
+export type RunnerGenomeGuidance = {
+  earlyRunnerZone: boolean;
+  entryScore: number;
+  dumperRiskScore: number;
+  confidence: number;
+  sampleSize: number;
+  runnerNeighbors: number;
+  dumperNeighbors: number;
+  suggestedTradeUsd: number;
+  entryPattern: "EARLY_BREAKOUT" | "FIRST_PULLBACK" | "MOMENTUM_BUILD" | "OBSERVE";
+  learned: boolean;
+  runnerEvidence: string[];
+  dumperEvidence: string[];
+  expectedPeakMultiple: number;
+  expectedTimeToPeakMinutes: number;
+  typicalRunnerDrawdownPct: number;
+  trajectoryScore: number;
+  trajectoryDumperRiskScore: number;
+  trajectoryConfidence: number;
+  trajectoryPhase: "INSUFFICIENT" | "IGNITION" | "ACCELERATION" | "PULLBACK" | "RECOVERY" | "DISTRIBUTION" | "STALLED";
+  trajectorySampleSize: number;
+  trajectoryChainSampleSize: number;
+  trajectoryEvidence: string[];
+};
+
+export type RunnerExitGenomeGuidance = {
+  continuationScore: number;
+  distributionRiskScore: number;
+  confidence: number;
+  trailingStopPct: number;
+  maxHoldMultiplier: number;
+  action: "HOLD" | "EXIT";
+  reason: string;
+};
+
 export type CouncilProcess = {
-  lane: "standard" | "meme";
+  lane: "standard" | "meme" | "early-runner";
   researchSupport: number;
   requiredResearchSupport: number;
   cioVote: Decision;
@@ -184,10 +221,44 @@ export type AgentId =
   | "quant"
   | "contract"
   | "bear"
+  | "portfolio"
   | "cio"
   | "executor";
 
-export type ResearchAgentId = Exclude<AgentId, "cio" | "executor">;
+export type ResearchAgentId = Exclude<AgentId, "cio" | "executor" | "portfolio">;
+
+export type CouncilEntityId = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "portfolio" | "cio";
+
+export type IndependentEntityOpinion = {
+  agentId: CouncilEntityId;
+  agentName: string;
+  phase: "private" | "meeting" | "cio";
+  vote: "BUY" | "WATCH" | "SKIP";
+  confidence: number;
+  score: number;
+  thesis: string;
+  evidence: string[];
+  risks: string[];
+  suggestedTradeUsd?: number;
+  changedVote?: boolean;
+  rebuttal?: string;
+  source: "openai" | "local-engine" | "local-fallback";
+  responseId?: string;
+  formedAt: string;
+};
+
+export type IndependentCouncilTrace = {
+  sessionId: string;
+  mode: "independent-ai" | "independent-local" | "isolated-local-fallback";
+  agentModel: string;
+  cioModel: string;
+  privateRoundStartedAt: string;
+  meetingRoundStartedAt: string;
+  completedAt: string;
+  initialOpinions: IndependentEntityOpinion[];
+  meetingOpinions: IndependentEntityOpinion[];
+  cioOpinion: IndependentEntityOpinion;
+};
 
 export type AgentOpinion = {
   id: AgentId;
@@ -361,6 +432,8 @@ export type PositionEntryContext = {
   agentWeights: ResearchAgentWeights;
   decision: Decision;
   conviction: number;
+  runnerGenome?: RunnerGenomeGuidance;
+  independentCouncil?: IndependentCouncilTrace;
   riskMaxPositionPct?: number;
   initialAllocationPct?: number;
   portfolioEquityUsd?: number;
@@ -386,6 +459,7 @@ export type ManagedPosition = {
   chain: Chain;
   tokenAddress: string;
   symbol: string;
+  imageUrl?: string;
   strategyId: string;
   decisionId: string;
   mode: TradingMode;
@@ -421,6 +495,10 @@ export type ManagedPosition = {
   maxGrossExposurePct?: number;
   reentryCount?: number;
   breakEvenArmed?: boolean;
+  lastHighWaterAt?: string;
+  peakPnlPct?: number;
+  exitStrategistScore?: number;
+  exitStrategistReason?: string;
   pendingScaleLabel?: string;
   learningRecorded?: boolean;
   exitStrategy: ExitStrategy;
@@ -452,6 +530,14 @@ export type PaperWalletFillRecord = {
   createdAt: string;
 };
 
+export type PaperEquityHistoryPoint = {
+  at: number;
+  equity: number;
+  cash: number;
+  openValue: number;
+  event?: "mark" | "peak" | "low" | "reset";
+};
+
 export type PaperWalletState = {
   version: 1;
   startingCashUsd: number;
@@ -463,6 +549,11 @@ export type PaperWalletState = {
   updatedAt: string;
   dayKey: string;
   dayStartEquityUsd: number;
+  equityHistory?: PaperEquityHistoryPoint[];
+  allTimeHighEquityUsd?: number;
+  allTimeHighAt?: string;
+  allTimeLowEquityUsd?: number;
+  allTimeLowAt?: string;
   recentFills: PaperWalletFillRecord[];
 };
 
@@ -479,7 +570,7 @@ export type PaperWalletSnapshot = PaperWalletState & {
 };
 
 export type ProviderHealth = {
-  name: "birdeye" | "dexscreener" | "goplus" | "helius" | "jupiter" | "redis";
+  name: "birdeye" | "geckoterminal" | "dexscreener" | "goplus" | "helius" | "jupiter" | "redis";
   configured: boolean;
   ok: boolean;
   lastSuccessAt?: string;
@@ -542,6 +633,8 @@ export type WarRoomResult = {
   snapshot: MarketSnapshot;
   regime: MarketRegime;
   memeRegime: MemeRegime;
+  runnerGenome: RunnerGenomeGuidance;
+  independentCouncil?: IndependentCouncilTrace;
   councilProcess: CouncilProcess;
   alpha: AlphaSignal;
   preMeeting: IndependentAgentRead[];

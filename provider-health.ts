@@ -33,6 +33,6 @@ export function markProviderFailure(name: ProviderName, error: unknown) {
 }
 
 export function getProviderHealth(): ProviderHealth[] {
-  const names: ProviderName[] = ["birdeye", "dexscreener", "goplus", "helius", "jupiter", "redis"];
+  const names: ProviderName[] = ["birdeye", "geckoterminal", "dexscreener", "goplus", "helius", "jupiter", "redis"];
   return names.map((name) => ({ ...base(name), configured: configured(name) }));
 }

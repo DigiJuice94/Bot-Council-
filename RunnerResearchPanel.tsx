@@ -48,6 +48,14 @@ type Research = {
   liveTradingArmed: boolean;
   requirements: Requirement[];
   dailyAutopsy: string[];
+  trajectoryObserver?: {
+    sequencesTracked: number;
+    labeledSequences: number;
+    runnerSequences: number;
+    dumperSequences: number;
+    chainModels: number;
+    latestLessons: Array<{ symbol: string; chain: string; outcome: string; message: string }>;
+  };
   generatedAt: string;
 };
 
@@ -155,6 +163,25 @@ export default function RunnerResearchPanel() {
             <strong className={(row.pnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{row.status === "OPEN" ? "—" : `${(row.pnlUsd ?? 0) >= 0 ? "+" : "-"}$${Math.abs(row.pnlUsd ?? 0).toFixed(2)}`}</strong>
             <span>{row.status === "OPEN" || row.returnPct === undefined ? "—" : `${row.returnPct >= 0 ? "+" : ""}${row.returnPct.toFixed(1)}%`}</span>
           </div>) : <p className="v214-muted v224-empty">The first $50+ early-runner paper trades will appear here.</p>}
+        </div>
+      </article>
+
+      <article className="v229-trajectory-observer">
+        <div className="v229-observer-head">
+          <div><span>TRAJECTORY OBSERVER · BACKGROUND ONLY · NO VOTE</span><h3>Study how runners develop — then teach the trading bots.</h3><p>The Observer never buys, sells, votes or vetoes. It follows BUY/WATCH/SKIP coins over time, learns runner/dumper sequences, and sends specialty-specific lessons back into each entity&apos;s private memory.</p></div>
+          <strong>{r?.trajectoryObserver?.sequencesTracked ?? 0}<small>sequences</small></strong>
+        </div>
+        <div className="v229-observer-stats">
+          <div><small>Tracked</small><b>{r?.trajectoryObserver?.sequencesTracked ?? 0}</b></div>
+          <div><small>Labeled</small><b>{r?.trajectoryObserver?.labeledSequences ?? 0}</b></div>
+          <div><small>Runner paths</small><b>{r?.trajectoryObserver?.runnerSequences ?? 0}</b></div>
+          <div><small>Dumper paths</small><b>{r?.trajectoryObserver?.dumperSequences ?? 0}</b></div>
+          <div><small>Chain models</small><b>{r?.trajectoryObserver?.chainModels ?? 0}</b></div>
+          <div><small>Review cadence</small><b>~30s</b></div>
+        </div>
+        <div className="v229-observer-lessons">
+          <b>LATEST TRAJECTORY LESSONS</b>
+          {(r?.trajectoryObserver?.latestLessons ?? []).length ? (r?.trajectoryObserver?.latestLessons ?? []).map((row, index) => <div key={row.chain + "-" + row.symbol + "-" + index}><strong>{"$" + row.symbol}</strong><em>{row.outcome}</em><span>{row.message}</span></div>) : <p>Collecting multi-snapshot sequences now. The Observer waits for real development data before claiming a pattern.</p>}
         </div>
       </article>
 

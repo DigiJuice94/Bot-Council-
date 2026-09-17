@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { createCoreExperiment } from "@/lib/experiments";
+import { getAutopilotStatus } from "@/lib/autopilot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(createCoreExperiment(["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "Robinhood Chain"]), {
-    headers: { "Cache-Control": "no-store" },
-  });
+  const status = await getAutopilotStatus();
+  return NextResponse.json(status, { headers: { "Cache-Control": "no-store" } });
 }

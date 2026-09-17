@@ -145,7 +145,7 @@ async function moralisPumpFunCandidate(): Promise<MarketSnapshot | null> {
     if (seenAt && now - seenAt < MORALIS_COOLDOWN_MS) continue;
     moralisSeen.set(tokenAddress, now);
     const snapshot = await fetchCorePosition(fakePosition("Solana", tokenAddress));
-    if (!snapshot || snapshot.liquidity < 5_000) continue;
+    if (!snapshot || snapshot.liquidity < Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_DISCOVERY_MIN_LIQUIDITY_USD ?? 1_000))) continue;
     const holders = Number(row?.holders);
     if (Number.isFinite(holders) && holders >= 0) {
       snapshot.holders = holders;

@@ -101,6 +101,7 @@ export function nextScaleStep(position: ManagedPosition, snapshot: MarketSnapsho
 
 export function maxGrossExposurePct(position: ManagedPosition): number {
   const initialPct = position.entryContext?.initialAllocationPct;
-  if (typeof initialPct === "number" && initialPct > 0) return Number(Math.min(5, Math.max(initialPct, initialPct * 2.8)).toFixed(3));
-  return position.maxGrossExposurePct ?? 5;
+  const cap = Math.max(5, Math.min(20, Number(process.env.PAPER_WINNER_MAX_GROSS_PCT ?? 15)));
+  if (typeof initialPct === "number" && initialPct > 0) return Number(Math.min(cap, Math.max(initialPct, initialPct * 2.8)).toFixed(3));
+  return position.maxGrossExposurePct ?? cap;
 }

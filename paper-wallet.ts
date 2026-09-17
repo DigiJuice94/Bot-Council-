@@ -1,12 +1,15 @@
 import { createClient } from "redis";
-import { listManagedPositions } from "./position-store";
+import { listManagedPositions, removeManagedPosition } from "./position-store";
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
 const REDIS_KEY = "bot-war-room:paper-wallet:v2-real-market";
 const RESET_META_KEY = "bot-war-room:paper-wallet:v214:reset-meta";
 const DEFAULT_STARTING_CASH_USD = 1_000;
-const MAX_FILL_HISTORY = 250;
+const MAX_FILL_HISTORY = 5_000;
+const MAX_EQUITY_HISTORY = 100_000;
+const EQUITY_HISTORY_INTERVAL_MS = 10 * 60_000;
+const EQUITY_HISTORY_SIGNIFICANT_MOVE_PCT = 0.5;
 
 let redisPromise: Promise<any | null> | null = null;
 let memoryState: PaperWalletState | null = null;
@@ -43,6 +46,11 @@ function freshState(): PaperWalletState {
     updatedAt: now,
     dayKey: dayKey(),
     dayStartEquityUsd: startingCashUsd,
+    equityHistory: [{ at: Date.parse(now), equity: startingCashUsd, cash: startingCashUsd, openValue: 0, event: "mark" }],
+    allTimeHighEquityUsd: startingCashUsd,
+    allTimeHighAt: now,
+    allTimeLowEquityUsd: startingCashUsd,
+    allTimeLowAt: now,
     recentFills: [],
   };
 }
@@ -108,6 +116,40 @@ async function writeResetMeta(meta: PaperWalletResetMeta) {
   if (redis) await redis.set(RESET_META_KEY, JSON.stringify(meta));
 }
 
+function updatePersistentEquityHistory(state: PaperWalletState, equityUsd: number, openExposureUsd: number) {
+  const nowMs = Date.now();
+  const history = state.equityHistory ?? [];
+  const last = history[history.length - 1];
+  const previousHigh = state.allTimeHighEquityUsd ?? state.startingCashUsd;
+  const previousLow = state.allTimeLowEquityUsd ?? state.startingCashUsd;
+  const newHigh = equityUsd > previousHigh + 0.005;
+  const newLow = equityUsd < previousLow - 0.005;
+  const elapsed = last ? nowMs - last.at : Number.POSITIVE_INFINITY;
+  const movePct = last && last.equity > 0 ? Math.abs(equityUsd - last.equity) / last.equity * 100 : 100;
+  const shouldRecord = !last || elapsed >= EQUITY_HISTORY_INTERVAL_MS || movePct >= EQUITY_HISTORY_SIGNIFICANT_MOVE_PCT || newHigh || newLow;
+  if (!shouldRecord) return { state, changed: false };
+
+  const event = newHigh ? "peak" as const : newLow ? "low" as const : "mark" as const;
+  const point = {
+    at: nowMs,
+    equity: Number(equityUsd.toFixed(2)),
+    cash: Number(state.cashUsd.toFixed(2)),
+    openValue: Number(openExposureUsd.toFixed(2)),
+    event,
+  };
+  return {
+    changed: true,
+    state: {
+      ...state,
+      equityHistory: [...history, point].slice(-MAX_EQUITY_HISTORY),
+      allTimeHighEquityUsd: Number(Math.max(previousHigh, equityUsd).toFixed(2)),
+      allTimeHighAt: newHigh ? new Date(nowMs).toISOString() : state.allTimeHighAt,
+      allTimeLowEquityUsd: Number(Math.min(previousLow, equityUsd).toFixed(2)),
+      allTimeLowAt: newLow ? new Date(nowMs).toISOString() : state.allTimeLowAt,
+    },
+  };
+}
+
 async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" | "memory"): Promise<PaperWalletSnapshot> {
   let state = stateInput;
   const positions = await listManagedPositions();
@@ -119,10 +161,14 @@ async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" 
   }, 0);
   const realizedPnlUsd = positions.reduce((sum, position) => sum + (position.realizedPnlUsd || 0), 0);
   const equityUsd = Math.max(0, state.cashUsd + openExposureUsd);
+  const historyUpdate = updatePersistentEquityHistory(state, equityUsd, openExposureUsd);
+  state = historyUpdate.state;
 
   const today = dayKey();
   if (state.dayKey !== today) {
     state = { ...state, dayKey: today, dayStartEquityUsd: equityUsd, updatedAt: new Date().toISOString() };
+    await writeState(state);
+  } else if (historyUpdate.changed) {
     await writeState(state);
   }
 
@@ -150,6 +196,94 @@ export async function getPaperWalletResetMeta(): Promise<PaperWalletResetMeta> {
   return readResetMeta();
 }
 
+export async function resetPaperWalletPreserveLearning(reason = "Manual dashboard reset"): Promise<{
+  wallet: PaperWalletSnapshot;
+  resetMeta: PaperWalletResetMeta;
+  clearedOpenPositions: number;
+}> {
+  let wallet!: PaperWalletSnapshot;
+  let resetMeta!: PaperWalletResetMeta;
+  let clearedOpenPositions = 0;
+
+  const task = mutationLock.then(async () => {
+    const { state: current, storage } = await readState();
+    const positions = await listManagedPositions();
+    const open = positions.filter((position) => position.status !== "closed");
+    const openValue = open.reduce(
+      (sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice),
+      0,
+    );
+    const preResetEquity = Math.max(0, current.cashUsd + openValue);
+
+    // A manual wallet reset abandons current PAPER positions without turning
+    // those abandoned marks into fake wins/losses. Historical closed trades,
+    // Runner Genome cases, Filing Cabinet data and per-entity memories are untouched.
+    for (const position of open) {
+      await removeManagedPosition(position.id);
+      clearedOpenPositions += 1;
+    }
+
+    const startingCashUsd = configuredStartingCash();
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    const previousHigh = Math.max(current.allTimeHighEquityUsd ?? current.startingCashUsd, preResetEquity);
+    const previousLow = Math.min(current.allTimeLowEquityUsd ?? current.startingCashUsd, preResetEquity);
+    const history = current.equityHistory ?? [];
+    const beforePoint = {
+      at: Math.max(0, nowMs - 1),
+      equity: Number(preResetEquity.toFixed(2)),
+      cash: Number(current.cashUsd.toFixed(2)),
+      openValue: Number(openValue.toFixed(2)),
+      event: "mark" as const,
+    };
+    const resetPoint = {
+      at: nowMs,
+      equity: Number(startingCashUsd.toFixed(2)),
+      cash: Number(startingCashUsd.toFixed(2)),
+      openValue: 0,
+      event: "reset" as const,
+    };
+
+    const next: PaperWalletState = {
+      ...current,
+      startingCashUsd,
+      cashUsd: startingCashUsd,
+      dayKey: dayKey(),
+      dayStartEquityUsd: startingCashUsd,
+      updatedAt: now,
+      equityHistory: [...history, beforePoint, resetPoint].slice(-MAX_EQUITY_HISTORY),
+      allTimeHighEquityUsd: Number(Math.max(previousHigh, startingCashUsd).toFixed(2)),
+      allTimeHighAt: preResetEquity >= previousHigh
+        ? new Date(Math.max(0, nowMs - 1)).toISOString()
+        : current.allTimeHighAt,
+      allTimeLowEquityUsd: Number(Math.min(previousLow, startingCashUsd).toFixed(2)),
+      allTimeLowAt: preResetEquity <= previousLow
+        ? new Date(Math.max(0, nowMs - 1)).toISOString()
+        : current.allTimeLowAt,
+      // Keep fills/counters/fees as audit history. This is a bankroll reset,
+      // not a learning/history wipe.
+      recentFills: current.recentFills,
+    };
+
+    await writeState(next);
+
+    resetMeta = await readResetMeta();
+    resetMeta = {
+      resets: resetMeta.resets + 1,
+      totalInjectedUsd: Number((resetMeta.totalInjectedUsd + startingCashUsd).toFixed(2)),
+      lastResetAt: now,
+      lastReason: `${reason}. Restored PAPER bankroll to ${startingCashUsd.toFixed(2)} and cleared ${clearedOpenPositions} open position(s); learning/history preserved.`,
+    };
+    await writeResetMeta(resetMeta);
+
+    wallet = await calculateSnapshot(next, storage);
+  });
+
+  mutationLock = task.catch(() => undefined);
+  await task;
+  return { wallet, resetMeta, clearedOpenPositions };
+}
+
 /**
  * Research must not stop just because an experimental paper bankroll went bust.
  * Refill only when no position is still open, so an empty cash balance caused by
@@ -162,7 +296,8 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
 }> {
   let wallet = await getPaperWallet();
   let resetMeta = await readResetMeta();
-  const threshold = Math.max(0, Number(process.env.PAPER_AUTO_REFILL_THRESHOLD_USD ?? 1));
+  const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
+  const threshold = Math.max(trainingTradeUsd, Number(process.env.PAPER_AUTO_REFILL_THRESHOLD_USD ?? trainingTradeUsd));
   if (process.env.PAPER_AUTO_REFILL_ON_ZERO === "false" || wallet.openPositions > 0 || wallet.equityUsd > threshold) {
     return { wallet, resetPerformed: false, resetMeta };
   }
@@ -216,10 +351,10 @@ export async function getPaperPortfolioContext(chain: Chain): Promise<PortfolioR
     totalExposurePct: wallet.openExposureUsd / equity * 100,
     chainExposurePct: chainExposureUsd / equity * 100,
     strategyExposurePct: wallet.openExposureUsd / equity * 100,
-    maxDailyLossPct: Number(process.env.PAPER_MAX_DAILY_LOSS_PCT ?? 5),
-    maxOpenPositions: Number(process.env.PAPER_MAX_OPEN_POSITIONS ?? 8),
-    maxTotalExposurePct: Number(process.env.PAPER_MAX_TOTAL_EXPOSURE_PCT ?? 35),
-    maxChainExposurePct: Number(process.env.PAPER_MAX_CHAIN_EXPOSURE_PCT ?? 15),
+    maxDailyLossPct: Number(process.env.PAPER_MAX_DAILY_LOSS_PCT ?? 10000),
+    maxOpenPositions: Number(process.env.PAPER_MAX_OPEN_POSITIONS ?? 10000),
+    maxTotalExposurePct: Number(process.env.PAPER_MAX_TOTAL_EXPOSURE_PCT ?? 10000),
+    maxChainExposurePct: Number(process.env.PAPER_MAX_CHAIN_EXPOSURE_PCT ?? 10000),
     liveTradingEnabled: false,
   };
 }

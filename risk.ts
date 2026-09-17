@@ -23,6 +23,8 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const q = m.dataProvenance?.quality;
   const directLive = Boolean(m.dataProvenance?.live && m.dataProvenance.marketSource !== "adapter");
   const paperCanExploreUnknowns = !p.liveTradingEnabled && process.env.PAPER_FAIL_CLOSED_UNKNOWN !== "true";
+  const paperResearchMode = !p.liveTradingEnabled;
+  const earlyRunnerLane = !p.liveTradingEnabled && m.marketCap >= 8_000 && m.marketCap <= 80_000 && m.ageMinutes <= 1_440;
   const unknown = (message: string) => paperCanExploreUnknowns ? warnings.push(`${message}; PAPER mode reduced to exploration sizing`) : hardBlocks.push(message);
 
   if (directLive && q) {
@@ -73,11 +75,26 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
     if (!m.liquidityLocked) warnings.push("Liquidity lock/burn not verified");
   }
 
-  check(m.liquidity >= 15_000, "Executable liquidity above minimum", "Executable liquidity below minimum");
-  check(p.dailyPnlPct > -p.maxDailyLossPct, "Daily loss limit available", "Daily loss kill-switch triggered");
-  check(p.openPositions < p.maxOpenPositions, "Open-position capacity available", "Maximum open positions reached");
-  check(p.totalExposurePct < p.maxTotalExposurePct, "Portfolio exposure below cap", "Maximum portfolio exposure reached");
-  check(p.chainExposurePct < p.maxChainExposurePct, "Chain exposure below cap", "Maximum chain exposure reached");
+  if (earlyRunnerLane) {
+    // Early runners are intentionally tiny. Do not demand mature-token liquidity;
+    // require a real pool, then let order-size/slippage feasibility decide the $50+ paper order.
+    check(m.liquidity >= Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_ABSOLUTE_MIN_LIQUIDITY_USD ?? 1_000)), "Early-runner pool has executable liquidity", "Early-runner pool liquidity is too small to model a real exit");
+    if (m.liquidity < 5_000) warnings.push("Very thin early-runner liquidity; route/slippage model must prove the order executable");
+  } else {
+    check(m.liquidity >= 15_000, "Executable liquidity above minimum", "Executable liquidity below minimum");
+  }
+  if (paperResearchMode) {
+    passedChecks.push("Paper Runner Lab has NO daily-loss kill switch");
+    passedChecks.push("Paper Runner Lab has NO max-open-position kill switch");
+    passedChecks.push("Paper Runner Lab has NO portfolio-exposure kill switch");
+    passedChecks.push("Paper Runner Lab has NO chain-exposure kill switch");
+    passedChecks.push("Actual paper-wallet cash is the only portfolio capital boundary");
+  } else {
+    check(p.dailyPnlPct > -p.maxDailyLossPct, "Live daily loss limit available", "Live daily loss kill-switch triggered");
+    check(p.openPositions < p.maxOpenPositions, "Live open-position capacity available", "Live maximum open positions reached");
+    check(p.totalExposurePct < p.maxTotalExposurePct, "Live portfolio exposure below cap", "Live maximum portfolio exposure reached");
+    check(p.chainExposurePct < p.maxChainExposurePct, "Live chain exposure below cap", "Live maximum chain exposure reached");
+  }
 
   if ((q?.top10 ?? true) && m.top10Pct > 40) warnings.push("Holder concentration is elevated");
   if ((q?.bundled ?? true) && m.bundledPct > 12) warnings.push("Bundle concentration is elevated");
@@ -86,15 +103,36 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   if (m.ageMinutes < 5) warnings.push("Token is under five minutes old");
   if ((q?.taxes ?? true) && (m.buyTaxPct > 5 || m.sellTaxPct > 5)) warnings.push("Token taxes are elevated");
 
-  let maxPositionPct = 2;
-  if (warnings.length >= 1) maxPositionPct = 1.25;
-  if (warnings.length >= 2) maxPositionPct = 0.75;
-  if (warnings.length >= 3) maxPositionPct = 0.5;
-  if (directLive && q && (!q.top10 || !q.bundled || !q.socialVelocity || !q.smartMoney)) maxPositionPct = Math.min(maxPositionPct, 0.5);
-  if (directLive && q && (!q.sellability || !q.honeypot || (m.chainFamily === "solana" && !q.authorities))) maxPositionPct = Math.min(maxPositionPct, 0.25);
-  if (m.liquidity < 50_000) maxPositionPct = Math.min(maxPositionPct, 0.5);
-  maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxTotalExposurePct - p.totalExposurePct));
-  maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxChainExposurePct - p.chainExposurePct));
+  // V2.17: paper research can take materially larger positions so wins/losses
+  // teach the Runner Genome with meaningful portfolio impact. Live remains conservative.
+  const paperMode = !p.liveTradingEnabled;
+  const configuredPaperMax = Math.max(1, Math.min(12, Number(process.env.PAPER_MAX_POSITION_PCT ?? 7.5)));
+  const configuredLiveMax = Math.max(0.25, Math.min(5, Number(process.env.LIVE_MAX_POSITION_PCT ?? 2)));
+  let maxPositionPct = paperMode ? configuredPaperMax : configuredLiveMax;
+
+  if (paperMode) {
+    if (warnings.length >= 1) maxPositionPct = Math.min(maxPositionPct, 5);
+    if (warnings.length >= 2) maxPositionPct = Math.min(maxPositionPct, 3);
+    if (warnings.length >= 3) maxPositionPct = Math.min(maxPositionPct, 1.5);
+    if (directLive && q && (!q.top10 || !q.bundled || !q.socialVelocity || !q.smartMoney)) maxPositionPct = Math.min(maxPositionPct, 2.5);
+    if (directLive && q && (!q.sellability || !q.honeypot || (m.chainFamily === "solana" && !q.authorities))) maxPositionPct = Math.min(maxPositionPct, 1);
+    if (!earlyRunnerLane && m.liquidity < 50_000) maxPositionPct = Math.min(maxPositionPct, 2);
+  } else {
+    if (warnings.length >= 1) maxPositionPct = Math.min(maxPositionPct, 1.25);
+    if (warnings.length >= 2) maxPositionPct = Math.min(maxPositionPct, 0.75);
+    if (warnings.length >= 3) maxPositionPct = Math.min(maxPositionPct, 0.5);
+    if (directLive && q && (!q.top10 || !q.bundled || !q.socialVelocity || !q.smartMoney)) maxPositionPct = Math.min(maxPositionPct, 0.5);
+    if (directLive && q && (!q.sellability || !q.honeypot || (m.chainFamily === "solana" && !q.authorities))) maxPositionPct = Math.min(maxPositionPct, 0.25);
+    if (m.liquidity < 50_000) maxPositionPct = Math.min(maxPositionPct, 0.5);
+  }
+  if (!paperResearchMode) {
+    maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxTotalExposurePct - p.totalExposurePct));
+    maxPositionPct = Math.min(maxPositionPct, Math.max(0, p.maxChainExposurePct - p.chainExposurePct));
+  } else if (!hardBlocks.length) {
+    // Keep execution-plan math non-zero; actual PAPER sizing is replaced downstream
+    // by Runner Genome sizing with a $50 minimum and current wallet cash ceiling.
+    maxPositionPct = Math.max(maxPositionPct, 0.25);
+  }
   if (hardBlocks.length) maxPositionPct = 0;
 
   const riskScore = Math.max(0, Math.min(100, Math.round(100 - warnings.length * 8 - hardBlocks.length * 35 - m.volatility * 10)));

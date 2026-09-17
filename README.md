@@ -1,11 +1,21 @@
-# DTL War Room — Title Logo Fix
+# Bot War Room V3
 
-This build fixes the homepage title image by pointing the hero to the new uploaded transparent title art and forcing a fresh file path to avoid cache issues.
+Clean source-of-truth baseline flattened from the complete V2.29.4 runtime.
 
-## Fix included
-- homepage hero now uses `title-logo-v3.png?v=3`
-- new static route `/title-logo-v3.png`
-- cache disabled for logo files so Railway/browser caching does not keep the old title image
-- three monetization cards remain directly below the hero
+## Validation
 
-Deploy this update over the current build and the hero title should switch to the rough white transparent logo immediately.
+```bash
+npm ci
+npm run typecheck
+npm run build
+```
+
+The Railway Docker deployment uses Next.js standalone output and starts with `node server.js`.
+
+## Persistence
+
+Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-time portfolio history, Runner Genome/Filing Cabinet research, Trajectory Observer research, and private Council entity memories. The Redis key namespaces are unchanged from V2.29.4.
+
+`PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
+
+No OpenAI API key or paid LLM service is used by the local Council.

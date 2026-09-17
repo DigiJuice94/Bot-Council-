@@ -1,13 +1,14 @@
 import { createClient } from "redis";
 import type { ManagedPosition, MarketSnapshot, WarRoomResult } from "./types";
 import { recordIndependentCouncilOutcome } from "./agent-entity-store";
+import { distributeTrajectoryOutcomeLesson, getTrajectoryGuidance, getTrajectoryObserverSnapshot, snapshotToTrajectoryObservation, type TrajectoryObserverSnapshot } from "./trajectory-observer";
 
 const CASES_KEY = "bot-war-room:runner-research:v214:cases";
 const META_KEY = "bot-war-room:runner-research:v214:meta";
 const MAX_CASES = 12_000;
 const MAX_OBSERVATIONS_PER_CASE = 180;
 const MAX_BOT_NOTES_PER_CASE = 96;
-const REVIEW_INTERVAL_MS = 2 * 60_000;
+const REVIEW_INTERVAL_MS = Math.max(15_000, Number(process.env.TRAJECTORY_OBSERVER_REVIEW_MS ?? 30_000));
 const CASE_HORIZON_MS = 24 * 60 * 60_000;
 
 let redisPromise: Promise<any | null> | null = null;
@@ -20,7 +21,7 @@ let genomeModelCache: GenomeModelCache | null = null;
 const GENOME_MODEL_CACHE_MS = 30_000;
 
 export type ResearchOutcome = "open" | "runner" | "dumper" | "neutral";
-export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor";
+export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor" | "observer";
 
 export type ResearchObservation = {
   at: string;
@@ -185,6 +186,7 @@ export type RunnerResearchSnapshot = {
   liveTradingArmed: boolean;
   requirements: CodeRequirement[];
   dailyAutopsy: string[];
+  trajectoryObserver: TrajectoryObserverSnapshot;
   generatedAt: string;
 };
 
@@ -204,6 +206,13 @@ export type RunnerGenomeGuidance = {
   expectedPeakMultiple: number;
   expectedTimeToPeakMinutes: number;
   typicalRunnerDrawdownPct: number;
+  trajectoryScore: number;
+  trajectoryDumperRiskScore: number;
+  trajectoryConfidence: number;
+  trajectoryPhase: "INSUFFICIENT" | "IGNITION" | "ACCELERATION" | "PULLBACK" | "RECOVERY" | "DISTRIBUTION" | "STALLED";
+  trajectorySampleSize: number;
+  trajectoryChainSampleSize: number;
+  trajectoryEvidence: string[];
 };
 
 export type RunnerExitGenomeGuidance = {
@@ -445,6 +454,13 @@ async function upsertObservation(snapshot: MarketSnapshot, result?: WarRoomResul
   classifyCase(row);
   if (priorOutcome !== row.outcome && row.outcome !== "open") {
     row.botNotes = [...row.botNotes, ...outcomeResearchNotes(row)].slice(-MAX_BOT_NOTES_PER_CASE);
+    const trajectoryNotes = await distributeTrajectoryOutcomeLesson(row);
+    if (trajectoryNotes.length) {
+      row.botNotes = [
+        ...row.botNotes,
+        ...trajectoryNotes.map((message) => ({ at: now, agentId: "observer" as const, message })),
+      ].slice(-MAX_BOT_NOTES_PER_CASE);
+    }
   }
   await writeCase(row);
 
@@ -663,6 +679,14 @@ async function genomeModel(): Promise<GenomeModelCache> {
 
 export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise<RunnerGenomeGuidance> {
   const model = await genomeModel();
+  const currentTrajectoryCase = await readCase(caseId(snapshot));
+  const trajectory = getTrajectoryGuidance({
+    chain: snapshot.chain,
+    currentObservations: currentTrajectoryCase?.observations?.length
+      ? [...currentTrajectoryCase.observations, snapshotToTrajectoryObservation(snapshot)]
+      : [snapshotToTrajectoryObservation(snapshot)],
+    trainingCases: model.rows.map((item) => item.row),
+  });
   const features = snapshotFeatures(snapshot);
   const nearest = model.rows
     .map((item) => ({ ...item, distance: vectorDistance(features, item.features) }))
@@ -700,13 +724,20 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     volumeIntensityScore * 0.12 + accelerationScore * 0.12 + participationScore * 0.10 + liquidityScore * 0.07 - concentrationPenalty
   );
   const learnedWeight = Math.min(0.62, model.rows.length / 120 * 0.62);
-  const entryScore = clampScore(heuristic * (1 - learnedWeight) + learnedRunnerPct * learnedWeight);
+  const staticEntryScore = clampScore(heuristic * (1 - learnedWeight) + learnedRunnerPct * learnedWeight);
+  const trajectoryWeight = trajectory.observationsUsed >= 2
+    ? Math.min(0.32, trajectory.confidence / 100 * 0.32)
+    : 0;
+  const entryScore = clampScore(staticEntryScore * (1 - trajectoryWeight) + trajectory.score * trajectoryWeight);
   const safetyDumperPenalty = Math.max(0, snapshot.top10Pct - 60) * 0.8 + Math.max(0, snapshot.bundledPct - 18) * 1.4;
   const flowDumperPenalty = snapshot.buySellRatio < 0.8 ? (0.8 - snapshot.buySellRatio) * 40 : 0;
-  const dumperRiskScore = clampScore((100 - entryScore) * 0.72 + safetyDumperPenalty + flowDumperPenalty);
+  const staticDumperRiskScore = clampScore((100 - entryScore) * 0.72 + safetyDumperPenalty + flowDumperPenalty);
+  const dumperRiskScore = trajectoryWeight > 0
+    ? clampScore(staticDumperRiskScore * (1 - trajectoryWeight * 0.85) + trajectory.dumperRiskScore * (trajectoryWeight * 0.85))
+    : staticDumperRiskScore;
   const evidenceCount = [snapshot.buySellRatio > 0, snapshot.volume24h > 0, snapshot.liquidity > 0, snapshot.holders > 0,
     snapshot.launchMetrics?.holdersPerMinute !== undefined, snapshot.volumeAccelerationPct !== undefined].filter(Boolean).length;
-  const confidence = clampScore(30 + Math.min(45, model.rows.length * 0.45) + evidenceCount * 4);
+  const confidence = clampScore(30 + Math.min(45, model.rows.length * 0.45) + evidenceCount * 4 + trajectory.confidence * 0.18);
 
   let suggestedTradeUsd = 50;
   if (entryScore >= 72 && dumperRiskScore <= 62) suggestedTradeUsd = 75;
@@ -724,6 +755,8 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     `Buy/sell pressure ${snapshot.buySellRatio.toFixed(2)}x · 5m MC velocity ${(snapshot.marketCapChange5mPct ?? 0).toFixed(1)}%.`,
     `Volume/MC ${volumeIntensity.toFixed(2)}x · volume acceleration ${(snapshot.volumeAccelerationPct ?? 0).toFixed(0)}%.`,
     neighborWeight > 0 ? `${nearest.filter((x) => x.row.outcome === "runner").length}/${nearest.length} nearest labeled cases are runners after distance weighting.` : `No mature labeled-neighbor set yet; heuristic evidence carries the score.`,
+    `Trajectory Observer ${trajectory.phase} · sequence score ${trajectory.score.toFixed(0)}/100 · ${trajectory.observationsUsed} observations · confidence ${trajectory.confidence.toFixed(0)}%.`,
+    ...trajectory.evidence.slice(0, 2),
   ];
   const dumperEvidence = [
     snapshot.buySellRatio < 1 ? `Sell pressure is leading at ${snapshot.buySellRatio.toFixed(2)}x buys/sells.` : `Buy pressure currently exceeds sells.`,
@@ -750,6 +783,13 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     expectedPeakMultiple: Number(expectedPeakMultiple.toFixed(2)),
     expectedTimeToPeakMinutes: Number(expectedTimeToPeakMinutes.toFixed(0)),
     typicalRunnerDrawdownPct: Number(typicalRunnerDrawdownPct.toFixed(1)),
+    trajectoryScore: trajectory.score,
+    trajectoryDumperRiskScore: trajectory.dumperRiskScore,
+    trajectoryConfidence: trajectory.confidence,
+    trajectoryPhase: trajectory.phase,
+    trajectorySampleSize: trajectory.sampleSize,
+    trajectoryChainSampleSize: trajectory.chainSampleSize,
+    trajectoryEvidence: trajectory.evidence,
   };
 }
 
@@ -909,6 +949,7 @@ export async function getRunnerResearchSnapshot(args: {
   const medianRunnerPeakMultiple = median(runnerRowsForProfile.map((row) => row.firstMarketCap > 0 ? row.peakMarketCap / row.firstMarketCap : 1), 0);
   const medianRunnerTimeToPeakMinutes = median(runnerRowsForProfile.map(timeToPeakMinutes), 0);
   const medianRunnerDrawdownPct = Math.abs(median(runnerRowsForProfile.map((row) => row.maxDrawdownPct), 0));
+  const trajectoryObserver = getTrajectoryObserverSnapshot(cases);
 
   const requiredCases = Math.max(100, Number(process.env.RESEARCH_REQUIRED_CASES ?? 2_000));
   const requiredLabeled = Math.max(30, Number(process.env.RESEARCH_REQUIRED_LABELED_CASES ?? 300));
@@ -959,7 +1000,7 @@ export async function getRunnerResearchSnapshot(args: {
   }));
 
   return {
-    mission: "Observe → study → hypothesize → paper trade → autopsy → file knowledge → validate → trade proven runner patterns.",
+    mission: "Observe the movie, not just the screenshot → study trajectories → paper trade → autopsy → feed lessons back to each specialist → validate runner patterns.",
     casesStudied: cases.length,
     labeledCases,
     runnerCases,
@@ -1003,6 +1044,7 @@ export async function getRunnerResearchSnapshot(args: {
     liveTradingArmed,
     requirements,
     dailyAutopsy: dailyAutopsy(cases),
+    trajectoryObserver,
     generatedAt: new Date().toISOString(),
   };
 }

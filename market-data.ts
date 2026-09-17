@@ -4,6 +4,8 @@ import type { Chain, DataQuality, HistoricalFrame, ManagedPosition, MarketSnapsh
 const DEX_BASE = "https://api.dexscreener.com";
 const BIRDEYE_BASE = "https://public-api.birdeye.so";
 const GOPLUS_BASE = "https://api.gopluslabs.io/api/v1";
+const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
+const GECKO_CACHE_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 6_500;
 const CANDIDATE_COOLDOWN_MS = 90_000;
 
@@ -13,7 +15,17 @@ const DEX_CHAIN: Record<Chain, string> = {
   Base: "base",
   "BNB Chain": "bsc",
   Monad: "monad",
+  HyperEVM: "hyperevm",
   "Robinhood Chain": "robinhood",
+};
+
+const GECKO_CHAIN: Partial<Record<Chain, string>> = {
+  Solana: "solana",
+  Ethereum: "eth",
+  Base: "base",
+  "BNB Chain": "bsc",
+  Monad: "monad",
+  HyperEVM: "hyperevm",
 };
 
 const BIRDEYE_CHAIN: Partial<Record<Chain, string>> = {
@@ -48,18 +60,19 @@ type DexPair = {
   fdv?: number | null;
   marketCap?: number | null;
   pairCreatedAt?: number | null;
-  info?: { socials?: Array<{ platform?: string; handle?: string }> | null } | null;
+  info?: { imageUrl?: string; socials?: Array<{ platform?: string; handle?: string }> | null } | null;
   boosts?: { active?: number } | null;
 };
 
 type DiscoveryToken = {
   chainId: string;
   tokenAddress: string;
-  source: "birdeye" | "dexscreener";
+  source: "birdeye" | "geckoterminal" | "dexscreener";
   listedAt?: number;
   reportedLiquidity?: number;
   symbol?: string;
   name?: string;
+  imageUrl?: string;
 };
 
 type SecuritySource = "birdeye" | "goplus" | "helius" | "multi" | "unavailable";
@@ -84,12 +97,14 @@ type SecurityResult = {
 
 type MarketDataGlobal = typeof globalThis & {
   __bwrDexDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
+  __bwrGeckoDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
   __bwrSecurityCacheV12?: Map<string, { at: number; value: SecurityResult }>;
   __bwrCandidateSeen?: Map<string, number>;
 };
 
 const globalCache = globalThis as MarketDataGlobal;
 const dexDiscoveryCache = globalCache.__bwrDexDiscoveryCache ??= new Map();
+const geckoDiscoveryCache = globalCache.__bwrGeckoDiscoveryCache ??= new Map();
 const securityCache = globalCache.__bwrSecurityCacheV12 ??= new Map();
 const candidateSeen = globalCache.__bwrCandidateSeen ??= new Map();
 
@@ -158,7 +173,7 @@ function goPlusHeaders() {
   return output;
 }
 
-async function fetchJson<T>(url: string, provider: "birdeye" | "dexscreener" | "goplus" | "helius", options?: RequestInit, softFailure = false): Promise<T | null> {
+async function fetchJson<T>(url: string, provider: "birdeye" | "geckoterminal" | "dexscreener" | "goplus" | "helius", options?: RequestInit, softFailure = false): Promise<T | null> {
   try {
     const response = await fetch(url, {
       ...options,
@@ -207,7 +222,50 @@ function discoveryRow(row: any, chainId: string, source: DiscoveryToken["source"
     reportedLiquidity: firstNumber(row, ["liquidity", "liquidityUsd", "liquidity_usd"]),
     symbol: row?.symbol ? String(row.symbol) : undefined,
     name: row?.name ? String(row.name) : undefined,
+    imageUrl: [row?.imageUrl, row?.image_url, row?.logoURI, row?.logo_uri, row?.logoUrl, row?.logo, row?.icon]
+      .find((value) => typeof value === "string" && /^https?:\/\//i.test(value)) as string | undefined,
   };
+}
+
+async function geckoNewPools(chain: Chain): Promise<DiscoveryToken[]> {
+  const network = GECKO_CHAIN[chain];
+  if (!network) return [];
+  const cached = geckoDiscoveryCache.get(network);
+  if (cached && Date.now() - cached.at < GECKO_CACHE_MS) return cached.tokens;
+
+  const payload = await fetchJson<any>(
+    `${GECKO_BASE}/networks/${network}/new_pools?page=1&include=base_token`,
+    "geckoterminal",
+    { headers: { Accept: "application/json;version=20230203" } }
+  );
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const tokens: DiscoveryToken[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const relId = String(row?.relationships?.base_token?.data?.id ?? "");
+    const prefix = `${network}_`;
+    const tokenAddress = relId.startsWith(prefix) ? relId.slice(prefix.length) : relId.includes("_") ? relId.slice(relId.indexOf("_") + 1) : relId;
+    if (tokenAddress.length < 8) continue;
+    const key = tokenAddress.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const attrs = row?.attributes ?? {};
+    const created = Date.parse(String(attrs.pool_created_at ?? ""));
+    tokens.push({
+      chainId: DEX_CHAIN[chain],
+      tokenAddress,
+      source: "geckoterminal",
+      listedAt: Number.isFinite(created) ? created : undefined,
+      reportedLiquidity: optionalNum(attrs.reserve_in_usd),
+      symbol: undefined,
+      name: String(attrs.name ?? "").slice(0, 80) || undefined,
+      imageUrl: typeof attrs.image_url === "string" && /^https?:\/\//i.test(attrs.image_url) ? attrs.image_url : undefined,
+    });
+  }
+
+  geckoDiscoveryCache.set(network, { at: Date.now(), tokens: tokens.slice(0, 30) });
+  return tokens.slice(0, 30);
 }
 
 async function birdeyeNewListings(chain: Chain): Promise<DiscoveryToken[]> {
@@ -245,10 +303,20 @@ async function dexDiscoveryTokens(chain: Chain): Promise<DiscoveryToken[]> {
 }
 
 async function discoveryTokens(chain: Chain): Promise<DiscoveryToken[]> {
-  const fromBirdeye = await birdeyeNewListings(chain);
-  if (fromBirdeye.length) return fromBirdeye;
-  // Public DEX discovery remains a real-data fallback, especially for Robinhood Chain.
-  return dexDiscoveryTokens(chain);
+  // V2.25: merge all fresh-listing sources instead of stopping at the first provider.
+  // This is critical for $10K-$50K runners because one provider may see a pool before another.
+  const [fromBirdeye, fromGecko, fromDex] = await Promise.all([
+    birdeyeNewListings(chain), geckoNewPools(chain), dexDiscoveryTokens(chain),
+  ]);
+  const merged: DiscoveryToken[] = [];
+  const seen = new Set<string>();
+  for (const token of [...fromBirdeye, ...fromGecko, ...fromDex]) {
+    const key = token.tokenAddress.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(token);
+  }
+  return merged.sort((a, b) => (b.listedAt ?? 0) - (a.listedAt ?? 0)).slice(0, 60);
 }
 
 async function dexPairsForAddresses(chain: Chain, addresses: string[]): Promise<DexPair[]> {
@@ -270,13 +338,22 @@ function txBucket(pair: DexPair, bucket: string): DexTxBucket { return pair.txns
 function volumeBucket(pair: DexPair, bucket: string) { return num(pair.volume?.[bucket]); }
 function priceChangeBucket(pair: DexPair, bucket: string) { return num(pair.priceChange?.[bucket]); }
 function candidateScore(pair: DexPair) {
-  const liq = Math.log10(Math.max(1, num(pair.liquidity?.usd)));
-  const volume = Math.log10(Math.max(1, volumeBucket(pair, "h1") || volumeBucket(pair, "h24")));
+  const liquidity = Math.max(1, num(pair.liquidity?.usd));
+  const liq = Math.log10(liquidity);
+  const volume1h = volumeBucket(pair, "h1") || volumeBucket(pair, "h24");
+  const volume = Math.log10(Math.max(1, volume1h));
   const tx = txBucket(pair, "h1");
+  const m5 = txBucket(pair, "m5");
+  const buys = num(m5.buys, num(tx.buys));
+  const sells = num(m5.sells, num(tx.sells));
   const activity = Math.log10(Math.max(1, num(tx.buys) + num(tx.sells)));
+  const pressure = sells > 0 ? Math.max(0, Math.min(3, buys / sells)) : buys > 0 ? 2.5 : 1;
   const ageMinutes = pair.pairCreatedAt ? Math.max(1, (Date.now() - num(pair.pairCreatedAt)) / 60_000) : 1440;
-  const freshness = ageMinutes <= 60 ? 4 : ageMinutes <= 360 ? 2.5 : ageMinutes <= 1440 ? 1 : 0;
-  return liq * 1.5 + volume * 1.35 + activity + freshness;
+  const freshness = ageMinutes <= 30 ? 7 : ageMinutes <= 120 ? 5 : ageMinutes <= 360 ? 2.5 : ageMinutes <= 1440 ? 1 : 0;
+  const mc = num(pair.marketCap, num(pair.fdv, 0));
+  const earlyRunnerBonus = mc >= 10_000 && mc <= 50_000 ? 9 : mc >= 8_000 && mc <= 80_000 ? 6 : mc > 0 && mc <= 150_000 ? 2 : 0;
+  const turnover = mc > 0 ? Math.min(5, volume1h / mc) : 0;
+  return liq * 0.8 + volume * 1.1 + activity * 1.15 + freshness + earlyRunnerBonus + pressure * 1.7 + turnover * 1.8;
 }
 
 function sumTop10(holders: any): { value?: number; verified: boolean } {
@@ -579,7 +656,7 @@ function inferredAssetClass(pair: DexPair, chain: Chain, ageMinutes: number, mar
   return "unknown";
 }
 
-function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener"): MarketSnapshot | null {
+function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener", fallbackImageUrl?: string): MarketSnapshot | null {
   const price = num(pair.priceUsd, 0);
   const liquidity = num(pair.liquidity?.usd, 0);
   const tokenAddress = String(pair.baseToken?.address ?? "");
@@ -606,6 +683,9 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
   return {
     symbol: String(pair.baseToken?.symbol ?? "UNKNOWN").replace(/^\$/, "").slice(0, 20),
     name: String(pair.baseToken?.name ?? pair.baseToken?.symbol ?? "Unknown token").slice(0, 80),
+    imageUrl: typeof pair.info?.imageUrl === "string" && /^https?:\/\//i.test(pair.info.imageUrl)
+      ? pair.info.imageUrl
+      : fallbackImageUrl,
     tokenAddress, chain, chainFamily: chain === "Solana" ? "solana" : "evm", venue: `DEX Screener · ${pair.dexId ?? "DEX"}`,
     price, priceChange24h: priceChangeBucket(pair, "h24"), marketCap, liquidity, volume5m, volume24h, holders, ageMinutes, buySellRatio,
     smartMoneyBuys: 0, smartMoneySells: 0, socialVelocityPct: 0, top10Pct, bundledPct, devRugHistory: 0,
@@ -627,7 +707,7 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
       securitySource: security.source,
       fetchedAt: new Date().toISOString(), pairAddress: pair.pairAddress, quality: q,
       notes: [
-        `${discoverySource === "birdeye" ? "Birdeye New Listing" : "DEX Screener live discovery"} found this real candidate; DEX Screener supplies live pair price/liquidity/volume/transactions.`,
+        `${discoverySource === "birdeye" ? "Birdeye New Listing" : discoverySource === "geckoterminal" ? "GeckoTerminal New Pool" : "DEX Screener live discovery"} found this real candidate; DEX Screener supplies live pair price/liquidity/volume/transactions.`,
         ...security.notes,
         q.sellability && q.honeypot ? "Sellability/honeypot evidence is verified." : "Sellability/honeypot evidence is incomplete; deterministic risk fails closed.",
         q.authorities || chain !== "Solana" ? "Authority evidence is available where applicable." : "Solana mint/freeze authority evidence is incomplete; deterministic risk fails closed.",
@@ -658,13 +738,13 @@ async function directLiveCandidate(chain: Chain): Promise<MarketSnapshot | null>
   ranked.sort((a, b) => candidateScore(b) - candidateScore(a));
 
   // Return one real candidate per cycle so the council can evaluate broadly instead of replaying one token forever.
-  for (const pair of ranked.slice(0, 10)) {
+  for (const pair of ranked.slice(0, 24)) {
     const address = String(pair.baseToken?.address ?? "");
-    if (!address || num(pair.priceUsd) <= 0 || num(pair.liquidity?.usd) < 5_000) continue;
+    if (!address || num(pair.priceUsd) <= 0 || num(pair.liquidity?.usd) < Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_DISCOVERY_MIN_LIQUIDITY_USD ?? 1_000))) continue;
     const token = tokenByAddress.get(address.toLowerCase());
     if (token) markSeen(token);
     const security = await fetchSecurity(chain, address);
-    const snapshot = snapshotFromPair(chain, pair, security, token?.source ?? "dexscreener");
+    const snapshot = snapshotFromPair(chain, pair, security, token?.source ?? "dexscreener", token?.imageUrl);
     if (snapshot) return snapshot;
   }
   return null;
@@ -691,7 +771,7 @@ export async function fetchLivePositionSnapshot(position: ManagedPosition): Prom
   const pair = chooseBestPair(pairs, position.tokenAddress);
   if (!pair) return null;
   const security = await fetchSecurity(position.chain, position.tokenAddress);
-  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener");
+  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener", position.imageUrl);
 }
 
 export async function fetchLiveCandidate(chain: Chain): Promise<MarketSnapshot | null> {

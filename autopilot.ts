@@ -1,6 +1,6 @@
 import { buildCouncilDiscussion } from "./debate";
 import { executePaper } from "./execution";
-import { runWarRoom } from "./engine";
+import { runIndependentCouncil } from "./agent-entity-runtime";
 import { resolveAdaptiveWeights, relevantMemoryHints } from "./learning-store";
 import { fetchLiveCandidate, fetchLiveTokenSnapshot, getWaterfallProviderHealth } from "./provider-waterfall";
 import { liveMarketDataMode } from "./market-data";
@@ -9,13 +9,13 @@ import { assessPaperEntryEligibility, ensurePositionGuardianLoop, registerPaperP
 import { listManagedPositions } from "./position-store";
 import { loadLatestProfitability } from "./profitability-store";
 import { getProviderHealth } from "./provider-health";
-import { getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
+import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
-const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "Robinhood Chain"];
+const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
 const MAX_CHAT_ROWS = 120;
 const MAX_DECISIONS = 60;
@@ -62,6 +62,7 @@ export type AutopilotStatus = {
   dataMode: "adapter" | "birdeye" | "dexscreener";
   intervalMs: number;
   scanningChains: Chain[];
+  chainStats: Record<Chain, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>;
   currentChain: Chain;
   lastScanAt?: string;
   nextScanAt?: string;
@@ -104,6 +105,7 @@ function initialState(): AutopilotStatus {
     dataMode: liveMarketDataMode(),
     intervalMs: intervalMs(),
     scanningChains: CHAINS,
+    chainStats: Object.fromEntries(CHAINS.map((chain) => [chain, { scans: 0, candidates: 0 }])) as Record<Chain, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>,
     currentChain: CHAINS[0],
     scanCount: 0,
     candidateCount: 0,
@@ -160,7 +162,9 @@ function explicitSecurityFailure(result: WarRoomResult) {
   if (q?.top10 && snapshot.top10Pct > 80) return "Top 10 holders exceed 80%";
   if (q?.bundled && snapshot.bundledPct > 25) return "Bundled supply exceeds 25%";
   if (snapshot.chainFamily === "solana" && q?.authorities && (snapshot.mintAuthority || snapshot.freezeAuthority)) return "Solana mint/freeze authority remains active";
-  if (snapshot.liquidity < 15_000) return "Executable liquidity below minimum";
+  const earlyRunner = snapshot.marketCap >= 8_000 && snapshot.marketCap <= 80_000 && snapshot.ageMinutes <= 1_440;
+  const minimumLiquidity = earlyRunner ? Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_ABSOLUTE_MIN_LIQUIDITY_USD ?? 1_000)) : 15_000;
+  if (snapshot.liquidity < minimumLiquidity) return `Executable liquidity below ${earlyRunner ? "early-runner" : "standard"} minimum`;
   return undefined;
 }
 
@@ -188,10 +192,32 @@ async function eligibilityWithPaperUnknownOverride(result: WarRoomResult, reques
 }
 
 async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskContext, request: ExecutionRequest, exploration: boolean) {
-  const context = entryContext(result, portfolio);
-  if (exploration) {
-    context.initialAllocationPct = portfolio.equityUsd > 0 ? request.notionalUsd / portfolio.equityUsd * 100 : 0;
+  // $50 is the floor, not the ceiling. Once Council sees an opportunity, the
+  // active Runner Genome controls paper size from learned runner/dumper similarity.
+  if (request.mode === "paper" && request.side === "BUY") {
+    const minimumBuyUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
+    const maximumBuyUsd = Math.max(minimumBuyUsd, Number(process.env.PAPER_TRAINING_MAX_BUY_USD ?? 150));
+    if (portfolio.cashUsd + 0.005 < minimumBuyUsd) {
+      const reason = `Paper wallet has $${portfolio.cashUsd.toFixed(2)} cash; waiting for an exit before the next $${minimumBuyUsd.toFixed(2)}+ training entry.`;
+      recordRejection(reason);
+      addChat("Executor", `${exploration ? "EARLY-RUNNER PROBE" : "EARLY-RUNNER BUY"} waiting for cash on $${result.snapshot.symbol}: ${reason}`, "execution");
+      return false;
+    }
+    const genomeTarget = Math.max(minimumBuyUsd, result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd);
+    const targetUsd = exploration ? Math.min(genomeTarget, Number(process.env.PAPER_WATCH_MAX_BUY_USD ?? 100)) : genomeTarget;
+    const notionalUsd = Math.min(maximumBuyUsd, targetUsd, portfolio.cashUsd);
+    request = {
+      ...request,
+      notionalUsd: Number(Math.max(minimumBuyUsd, notionalUsd).toFixed(2)),
+      maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Math.max(request.maxSlippageBps, Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600)) : request.maxSlippageBps,
+    };
+    addChat("Executor", `${exploration ? "EARLY-RUNNER PROBE" : "EARLY-RUNNER BUY"} $${result.snapshot.symbol}: $${request.notionalUsd.toFixed(2)} · Genome ${result.runnerGenome?.entryScore.toFixed(0) ?? "—"}/100 · dumper risk $${result.runnerGenome?.dumperRiskScore.toFixed(0) ?? "—"}/100. Win or lose, file the outcome and update the model.`, "execution");
   }
+
+  const context = entryContext(result, portfolio);
+  context.runnerGenome = result.runnerGenome;
+  context.independentCouncil = result.independentCouncil;
+  context.initialAllocationPct = portfolio.equityUsd > 0 ? request.notionalUsd / portfolio.equityUsd * 100 : 0;
   const eligibility = await eligibilityWithPaperUnknownOverride(result, request, context);
   if (!eligibility.allowed) {
     recordRejection(eligibility.reason);
@@ -248,15 +274,11 @@ function explorationRequest(result: WarRoomResult, portfolio: PortfolioRiskConte
   if (result.decision !== "WATCH" || !result.risk.passed) return null;
   if (result.councilProcess.executorVote === "BLOCK") return null;
   if (explicitSecurityFailure(result)) return null;
-  const minConviction = Number(process.env.PAPER_EXPLORATION_MIN_CONVICTION ?? 58);
-  const minAlpha = Number(process.env.PAPER_EXPLORATION_MIN_ALPHA ?? 48);
-  const requiredSupport = Math.max(3, result.councilProcess.requiredResearchSupport - 1);
-  if (result.conviction < minConviction || result.alpha.score < minAlpha || result.councilProcess.researchSupport < requiredSupport) return null;
-  if (result.snapshot.liquidity < 20_000) return null;
-
-  const maxPct = Math.max(0.1, Math.min(1, Number(process.env.PAPER_EXPLORATION_MAX_PCT ?? 0.5)));
-  const notionalUsd = Number(Math.min(portfolio.cashUsd, Math.max(2, portfolio.equityUsd * maxPct / 100)).toFixed(2));
-  if (notionalUsd <= 0) return null;
+  // WATCH means the Council sees an opportunity but wants more proof. In PAPER mode
+  // that is exactly the type of rep the Filing Cabinet needs. Do not re-run old Alpha/quorum filters.
+  const minimumBuyUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
+  if (portfolio.cashUsd + 0.005 < minimumBuyUsd) return null;
+  const notionalUsd = Number(Math.max(minimumBuyUsd, Math.min(result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd, Number(process.env.PAPER_WATCH_MAX_BUY_USD ?? 100))).toFixed(2));
   return {
     mode: "paper",
     chain: result.snapshot.chain,
@@ -264,7 +286,7 @@ function explorationRequest(result: WarRoomResult, portfolio: PortfolioRiskConte
     symbol: result.snapshot.symbol,
     side: "BUY",
     notionalUsd,
-    maxSlippageBps: 135,
+    maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : 135,
     strategyId: `${result.experiment.id}-exploration`,
     decisionId: `${result.decisionId}-PROBE`,
   };
@@ -316,6 +338,9 @@ async function scanOneChain(chain: Chain) {
   current.nextScanAt = new Date(Date.now() + current.intervalMs).toISOString();
   current.dataMode = liveMarketDataMode();
   current.scanCount += 1;
+  const chainStat = current.chainStats[chain] ??= { scans: 0, candidates: 0 };
+  chainStat.scans += 1;
+  chainStat.lastScanAt = current.lastScanAt;
 
   const bankroll = await ensurePaperWalletResearchFunds();
   if (bankroll.resetPerformed) {
@@ -330,16 +355,19 @@ async function scanOneChain(chain: Chain) {
   }
   current.candidateCount += 1;
   current.funnel.candidates += 1;
+  current.chainStats[chain].candidates += 1;
+  current.chainStats[chain].lastCandidateAt = new Date().toISOString();
 
   const regime = classifyMarketRegime(snapshot);
-  const [learning, memoryHints, profitability, portfolio] = await Promise.all([
+  const [learning, memoryHints, profitability, portfolio, runnerGenome] = await Promise.all([
     resolveAdaptiveWeights(regime, snapshot),
     relevantMemoryHints(snapshot, regime.id),
     loadLatestProfitability(),
     getPaperPortfolioContext(snapshot.chain),
+    getRunnerGenomeGuidance(snapshot),
   ]);
 
-  const result = runWarRoom(snapshot, {
+  const result = await runIndependentCouncil(snapshot, {
     mode: "paper",
     regime,
     agentWeights: learning.weights,
@@ -347,7 +375,12 @@ async function scanOneChain(chain: Chain) {
     memoryHints,
     profitability,
     portfolio,
+    runnerGenome,
   });
+
+  if (!result.independentCouncil) {
+    throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
+  }
 
   await observeCouncilResult(result);
   current.latestResult = result;
@@ -364,7 +397,7 @@ async function scanOneChain(chain: Chain) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `$${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 roles aligned/ready. Wallet equity $${portfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {
@@ -374,7 +407,7 @@ async function scanOneChain(chain: Chain) {
   } else if (result.decision === "WATCH") {
     const probe = explorationRequest(result, portfolio);
     if (probe) executed = await executeRequest(result, portfolio, probe, true);
-    else recordRejection("WATCH did not reach paper-exploration threshold");
+    else recordRejection("WATCH opportunity could not execute because a hard safety/cash condition blocked the paper rep");
   } else {
     recordRejection(result.risk.hardBlocks[0] ?? "Council/alpha threshold produced SKIP");
   }
@@ -391,8 +424,17 @@ export async function runAutonomousTick() {
     await scanOneChain(chain);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    state().lastError = message;
-    addChat("System", `Autonomous cycle error: ${message}`, "system");
+    const current = state();
+    const nowMs = Date.now();
+    const sameMessage = globalState.__botWarRoomLastErrorMessageV227 === message;
+    const lastAt = globalState.__botWarRoomLastErrorAtV227 ?? 0;
+    current.lastError = message;
+    // Never flood the Council chat with the same infrastructure error every scan.
+    if (!sameMessage || nowMs - lastAt >= 60_000) {
+      addChat("System", `Autonomous cycle error: ${message}`, "system");
+      globalState.__botWarRoomLastErrorMessageV227 = message;
+      globalState.__botWarRoomLastErrorAtV227 = nowMs;
+    }
     console.error("[autopilot] cycle failed", error);
   } finally {
     globalState.__botWarRoomAutopilotBusyV14 = false;
@@ -409,7 +451,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V2.14 Runner Genome research council started. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, bankroll auto-refills after research bankruptcy, and Code Deciphered progress is tracked continuously.`, "system");
+  addChat("System", `V2.27 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, bankroll auto-refills after research bankruptcy, and Code Deciphered progress is tracked continuously.`, "system");
 }
 
 export async function getAutopilotStatus() {

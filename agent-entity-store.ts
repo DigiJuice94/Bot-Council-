@@ -8,7 +8,7 @@ const MAX_MEMORY = 60;
 export type EntityMemoryRecord = {
   id: string;
   agentId: CouncilEntityId;
-  kind: "decision" | "outcome";
+  kind: "decision" | "outcome" | "trajectory";
   createdAt: string;
   symbol: string;
   chain: string;
@@ -21,6 +21,10 @@ export type EntityMemoryRecord = {
   maxFavorableExcursionPct?: number;
   maxAdverseExcursionPct?: number;
   profitCapturePct?: number;
+  trajectoryPhase?: string;
+  trajectoryScore?: number;
+  trajectoryDumperRiskScore?: number;
+  trajectoryOutcome?: "runner" | "dumper";
   lesson: string;
 };
 

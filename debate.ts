@@ -22,6 +22,39 @@ function reply(speaker: AgentOpinion, target: AgentOpinion, extra?: string) {
 }
 
 export function buildCouncilDiscussion(result: WarRoomResult): CouncilTurn[] {
+  if (result.independentCouncil) {
+    const trace = result.independentCouncil;
+    const opening: CouncilTurn[] = trace.initialOpinions.map((opinion, index) => ({
+      id: `private-${index}-${opinion.agentId}`,
+      agentId: opinion.agentId,
+      round: "opening",
+      message: `PRIVATE READ LOCKED · ${opinion.vote} · ${opinion.confidence}% confidence. ${opinion.thesis}${opinion.evidence.length ? ` Evidence: ${opinion.evidence.slice(0, 2).join(" · ")}` : ""}`,
+    }));
+    const meeting: CouncilTurn[] = trace.meetingOpinions.map((opinion, index) => ({
+      id: `meeting-${index}-${opinion.agentId}`,
+      agentId: opinion.agentId,
+      round: "rebuttal",
+      message: `${opinion.changedVote ? "VOTE CHANGED" : "VOTE HELD"} · ${opinion.vote} · ${opinion.confidence}%. ${opinion.rebuttal ?? opinion.thesis}`,
+    }));
+    return [
+      ...opening,
+      ...meeting,
+      {
+        id: "independent-cio",
+        agentId: "cio",
+        round: "decision",
+        message: `I received seven locked private reads and their meeting responses; I did not generate them. My synthesis is ${trace.cioOpinion.vote} at ${trace.cioOpinion.confidence}% confidence. ${trace.cioOpinion.thesis}`,
+      },
+      {
+        id: "deterministic-executor",
+        agentId: "executor",
+        round: "execution",
+        respondsTo: "cio",
+        message: `Deterministic Executor is outside the eight-entity Council. It only applies route/accounting/hard-safety rules after the CIO decision. Feasibility: ${result.councilProcess.executorVote}.`,
+      },
+    ];
+  }
+
   const byId = new Map(result.agents.map((agent) => [agent.id, agent]));
   const launch = byId.get("launch");
   const social = byId.get("social");
@@ -81,14 +114,14 @@ export function buildCouncilDiscussion(result: WarRoomResult): CouncilTurn[] {
       agentId: contract.id,
       round: "opening",
       respondsTo: quant.id,
-      message: reply(contract, quant, "My contract verdict is independent of the bullish story. A good narrative cannot overrule safety."),
+      message: reply(contract, quant, "My contract verdict is independent of the bullish story. A runner thesis cannot overrule a specific hard safety failure."),
     },
     {
       id: "open-bear",
       agentId: bear.id,
       round: "opening",
       respondsTo: strongestBull.id,
-      message: `My downside thesis was formed before the meeting. Market context is ${result.regime.label}, while token context is ${result.memeRegime.label}. I'm challenging ${strongestBull.name}'s ${strongestBull.score}% case and the supporting evidence. ${bear.summary} ${bear.detail}`,
+      message: `My dumper-pattern thesis was formed before the meeting. Market context is ${result.regime.label}, while token context is ${result.memeRegime.label}. I'm challenging ${strongestBull.name}'s ${strongestBull.score}% case and the supporting evidence. ${bear.summary} ${bear.detail}`,
     },
     {
       id: "rebut-launch",
@@ -116,7 +149,7 @@ export function buildCouncilDiscussion(result: WarRoomResult): CouncilTurn[] {
       agentId: quant.id,
       round: "rebuttal",
       respondsTo: strongestSafetyVoice.id,
-      message: reply(quant, strongestSafetyVoice, "I only want the trade if the numbers still work after the risk challenge."),
+      message: reply(quant, strongestSafetyVoice, "I want the entry only if live runner-pattern data still works after the dumper challenge."),
     },
     {
       id: "rebut-contract",
@@ -141,7 +174,7 @@ export function buildCouncilDiscussion(result: WarRoomResult): CouncilTurn[] {
       agentId: cio.id,
       round: "decision",
       respondsTo: bear.id,
-      message: `I've heard all six isolated research reads and the rebuttals. Research support is ${result.councilProcess.researchSupport}/6, Alpha evidence is ${result.alpha.score}/100, and council conviction is ${result.councilConviction}%. My synthesis is ${result.councilProcess.cioVote} at ${result.conviction}%. ${cio.summary} ${cio.detail}`,
+      message: `I've heard all six isolated reads and the rebuttals. Runner Genome is ${result.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${result.runnerGenome.dumperRiskScore.toFixed(0)}/100 from ${result.runnerGenome.sampleSize} labeled cases. Research support is ${result.councilProcess.researchSupport}/6 and council conviction is ${result.councilConviction}%. My synthesis is ${result.councilProcess.cioVote} at ${result.conviction}%. ${cio.summary} ${cio.detail}`,
     },
     {
       id: "exit-quant",

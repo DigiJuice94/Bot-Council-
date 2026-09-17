@@ -45,19 +45,37 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   if (request.mode !== "paper") throw new Error("Paper executor only accepts paper requests");
   getChainConfig(request.chain);
 
-  const liquidityModelBps = Math.max(8, Math.round((request.notionalUsd / Math.max(snapshot.liquidity, 1)) * 10_000 * 0.65 + snapshot.volatility * 18));
+  // Linear impact could exceed 100% on thin pools and permanently trap paper exits.
+  // Use a bounded constant-product-style impact curve instead: small trades behave
+  // similarly to the old model, while very large trades asymptotically approach 65%.
+  const tradeToLiquidity = request.notionalUsd / Math.max(snapshot.liquidity, 1);
+  const liquidityModelBps = Math.max(8, Math.round((tradeToLiquidity / (1 + tradeToLiquidity)) * 6_500 + snapshot.volatility * 18));
   const route = await verifyPaperRoute(request, snapshot);
   if (request.chain === "Solana" && request.side === "BUY" && route.verified && !route.available) {
     throw new Error(`Paper BUY rejected: live Jupiter route check failed. ${route.reason}`);
   }
   const routeBps = route.estimatedSlippageBps ?? 0;
   const observedSlippageBps = Math.max(liquidityModelBps, routeBps);
-  if (observedSlippageBps > request.maxSlippageBps) {
+  const forcedPaperExit = request.mode === "paper" && request.side === "SELL" && request.decisionId.endsWith("-EXIT");
+
+  // Entries and ordinary trims still respect their slippage ceiling.
+  // A Guardian emergency/full exit must never become permanently stuck because the
+  // market is already illiquid. In paper mode we instead record a distressed fill
+  // with the modeled loss, capped below 100% so proceeds can never become negative.
+  if (observedSlippageBps > request.maxSlippageBps && !forcedPaperExit) {
     throw new Error(`Paper ${request.side} rejected: estimated live-route/liquidity impact ${observedSlippageBps} bps exceeds ${request.maxSlippageBps} bps limit.`);
   }
-  const simulatedSlippageBps = Math.min(request.maxSlippageBps, observedSlippageBps);
+
+  const simulatedSlippageBps = forcedPaperExit
+    ? Math.min(9_000, observedSlippageBps)
+    : Math.min(request.maxSlippageBps, observedSlippageBps);
   const priceImpact = request.side === "BUY" ? 1 + simulatedSlippageBps / 10_000 : 1 - simulatedSlippageBps / 10_000;
   const feeRate = snapshot.chainFamily === "solana" ? 0.0015 : 0.0025;
+  const grossFilledUsd = request.side === "SELL"
+    ? request.notionalUsd * Math.max(0.01, 1 - simulatedSlippageBps / 10_000)
+    : request.notionalUsd;
+  const feeUsd = grossFilledUsd * feeRate;
+  const distressed = forcedPaperExit && observedSlippageBps > request.maxSlippageBps;
 
   return {
     id: `PF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
@@ -65,13 +83,15 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
     symbol: request.symbol,
     side: request.side,
     requestedUsd: request.notionalUsd,
-    filledUsd: Number((request.notionalUsd * (1 - feeRate)).toFixed(4)),
+    filledUsd: Number((grossFilledUsd - feeUsd).toFixed(4)),
     fillPrice: snapshot.price * priceImpact,
     slippageBps: simulatedSlippageBps,
-    feeUsd: Number((request.notionalUsd * feeRate).toFixed(4)),
+    feeUsd: Number(feeUsd.toFixed(4)),
     routeVerified: route.verified && route.available,
     routeProvider: route.provider,
-    routeNote: route.reason,
+    routeNote: distressed
+      ? `DISTRESSED PAPER EXIT: normal limit ${request.maxSlippageBps} bps was exceeded; Guardian forced liquidation at modeled ${simulatedSlippageBps} bps impact instead of leaving the position trapped. Source estimate: ${observedSlippageBps} bps. ${route.reason}`
+      : route.reason,
     createdAt: new Date().toISOString(),
   };
 }

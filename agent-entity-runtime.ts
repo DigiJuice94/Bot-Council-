@@ -79,10 +79,15 @@ const CIO_SPEC = {
 type Packet = ReturnType<typeof compactPacket>;
 
 type EntityMemoryLite = {
-  kind: "decision" | "outcome";
+  kind: "decision" | "outcome" | "trajectory";
   vote?: "BUY" | "WATCH" | "SKIP";
   realizedReturnPct?: number;
   realizedPnlUsd?: number;
+  trajectoryPhase?: string;
+  trajectoryScore?: number;
+  trajectoryDumperRiskScore?: number;
+  trajectoryOutcome?: "runner" | "dumper";
+  chain?: string;
   lesson: string;
 };
 
@@ -136,6 +141,13 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
       expectedPeakMultiple: g.expectedPeakMultiple,
       expectedTimeToPeakMinutes: g.expectedTimeToPeakMinutes,
       typicalRunnerDrawdownPct: g.typicalRunnerDrawdownPct,
+      trajectoryScore: g.trajectoryScore,
+      trajectoryDumperRiskScore: g.trajectoryDumperRiskScore,
+      trajectoryConfidence: g.trajectoryConfidence,
+      trajectoryPhase: g.trajectoryPhase,
+      trajectorySampleSize: g.trajectorySampleSize,
+      trajectoryChainSampleSize: g.trajectoryChainSampleSize,
+      trajectoryEvidence: g.trajectoryEvidence,
       runnerEvidence: g.runnerEvidence,
       dumperEvidence: g.dumperEvidence,
     },
@@ -191,9 +203,23 @@ function memoryCalibration(memory: EntityMemoryLite[]) {
   return Math.max(-10, Math.min(10, calibration));
 }
 
+function trajectoryMemoryCalibration(memory: EntityMemoryLite[], phase: string, chain: string) {
+  let bias = 0;
+  let matched = 0;
+  for (const row of memory) {
+    if (row.kind !== "trajectory" || row.trajectoryPhase !== phase || !row.trajectoryOutcome) continue;
+    matched += 1;
+    const chainWeight = row.chain === chain ? 1 : 0.55;
+    bias += (row.trajectoryOutcome === "runner" ? 2.4 : -2.4) * chainWeight;
+  }
+  if (!matched) return 0;
+  return Math.max(-8, Math.min(8, bias));
+}
+
 function baseEvidence(packet: Packet) {
   return [
     `Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${packet.runnerGenome.dumperRiskScore.toFixed(0)}/100.`,
+    `Trajectory Observer ${packet.runnerGenome.trajectoryPhase}: ${packet.runnerGenome.trajectoryScore.toFixed(0)}/100 vs trajectory dumper risk ${packet.runnerGenome.trajectoryDumperRiskScore.toFixed(0)}/100 (${packet.runnerGenome.trajectoryConfidence.toFixed(0)}% confidence).`,
     `MC $${Math.round(packet.token.marketCap).toLocaleString()} · liquidity $${Math.round(packet.token.liquidity).toLocaleString()} · age ${Math.round(packet.token.ageMinutes)}m.`,
   ];
 }
@@ -203,13 +229,19 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
   const memory: EntityMemoryLite[] = rawMemory.map((row) => ({
     kind: row.kind,
     vote: row.vote,
+    chain: row.chain,
     realizedReturnPct: row.realizedReturnPct,
     realizedPnlUsd: row.realizedPnlUsd,
+    trajectoryPhase: row.trajectoryPhase,
+    trajectoryScore: row.trajectoryScore,
+    trajectoryDumperRiskScore: row.trajectoryDumperRiskScore,
+    trajectoryOutcome: row.trajectoryOutcome,
     lesson: row.lesson,
   }));
   const calibration = memoryCalibration(memory);
   const t = packet.token;
   const g = packet.runnerGenome;
+  const trajectoryMemoryBias = trajectoryMemoryCalibration(memory, g.trajectoryPhase, t.chain);
   let score = 50;
   let thesis = "";
   let evidence: string[] = [];
@@ -225,7 +257,8 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
       Math.max(-10, Math.min(18, t.marketCapChange5mPct * 0.65)) +
       Math.max(-8, Math.min(12, t.volumeAccelerationPct * 0.08)) +
       Math.max(-8, Math.min(12, (t.buySellRatio - 1) * 10)) +
-      calibration
+      (g.trajectoryScore - 50) * 0.20 +
+      calibration + trajectoryMemoryBias
     );
     thesis = score >= 64
       ? "This launch is behaving enough like an early runner to deserve a PAPER rep before the move matures."
@@ -257,7 +290,8 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
       Math.max(-8, Math.min(12, t.holderGrowthPct * 0.8)) +
       Math.max(-8, Math.min(12, t.uniqueBuyersPerMinute * 0.9)) +
       Math.max(-6, Math.min(8, (t.smartMoneyBuys - t.smartMoneySells) * 3)) +
-      calibration
+      (g.trajectoryScore - 50) * 0.12 +
+      calibration + trajectoryMemoryBias
     );
     thesis = score >= 64
       ? "Early flow looks like accumulation rather than immediate distribution."
@@ -278,7 +312,8 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
       Math.max(-8, Math.min(14, t.volumeAccelerationPct * 0.09)) +
       Math.max(-6, Math.min(12, turnover5m * 28)) +
       Math.max(-5, Math.min(8, liqMc * 12)) +
-      calibration
+      (g.trajectoryScore - 50) * 0.28 +
+      calibration + trajectoryMemoryBias
     );
     thesis = score >= 64
       ? "The measured launch structure has enough asymmetry and acceleration to justify early PAPER exposure."
@@ -310,7 +345,7 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
     const concentration = Math.max(0, t.top10Pct - 45) * 0.55 + Math.max(0, t.bundledPct - 12) * 1.0;
     const fade = Math.max(0, -t.marketCapChange5mPct) * 0.8 + Math.max(0, -t.volumeAccelerationPct) * 0.08;
     const safety = packet.commonAnalytics.hardBlocks.length * 30;
-    const dumperPressure = clamp(g.dumperRiskScore * 0.55 + distribution + concentration + fade + safety - calibration);
+    const dumperPressure = clamp(g.dumperRiskScore * 0.46 + g.trajectoryDumperRiskScore * 0.18 + distribution + concentration + fade + safety - calibration - trajectoryMemoryBias);
     score = clamp(100 - dumperPressure);
     thesis = score >= 64
       ? "I do not see enough dumper evidence to veto the runner thesis."
@@ -328,7 +363,9 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
       (100 - g.dumperRiskScore) * 0.22 +
       10 +
       (g.earlyRunnerZone ? 6 : 0) +
-      calibration
+      (g.trajectoryScore - 50) * 0.16 -
+      Math.max(0, g.trajectoryDumperRiskScore - 60) * 0.08 +
+      calibration + trajectoryMemoryBias
     );
     const proposed = score >= 86 ? 150 : score >= 78 ? 125 : score >= 70 ? 100 : score >= 62 ? 75 : 50;
     suggestedTradeUsd = boundedTradeUsd(proposed);
@@ -428,7 +465,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
   }
 
   const normalized = totalWeight > 0 ? weightedSupport / totalWeight : 0;
-  const genomeBoost = (packet.runnerGenome.entryScore - packet.runnerGenome.dumperRiskScore * 0.35) / 100;
+  const genomeBoost = (packet.runnerGenome.entryScore * 0.72 + packet.runnerGenome.trajectoryScore * 0.28 - packet.runnerGenome.dumperRiskScore * 0.25 - packet.runnerGenome.trajectoryDumperRiskScore * 0.10) / 100;
   const composite = clamp(normalized * 72 + genomeBoost * 28);
 
   const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK";
@@ -539,6 +576,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
       `${buySupport}/7 meeting entities voted BUY · ${watchSupport}/7 WATCH · ${7 - buySupport - watchSupport}/7 SKIP.`,
       `Runner CIO separately synthesized the completed meeting at ${cioOpinion.confidence}% confidence.`,
       "No OpenAI/ChatGPT API call is used anywhere in this Council runtime.",
+      "Trajectory Observer is background research only: it supplies sequence evidence and private lessons but has no Council vote.",
     ],
   };
 

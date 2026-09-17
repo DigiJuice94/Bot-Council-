@@ -6,7 +6,9 @@ import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
 import { listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
-import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, WarRoomResult } from "./types";
+import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
+import { getRunnerExitGuidance } from "./runner-research";
+import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
@@ -29,9 +31,14 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     winnerState: position.winnerState ?? "building",
     scaleIns: position.scaleIns ?? [],
     lastConfirmationScore: safe(position.lastConfirmationScore),
-    maxGrossExposurePct: safe(position.maxGrossExposurePct, 5),
+    maxGrossExposurePct: safe(position.maxGrossExposurePct, Math.max(5, Math.min(20, Number(process.env.PAPER_WINNER_MAX_GROSS_PCT ?? 15)))),
     reentryCount: Math.max(0, Math.round(safe(position.reentryCount))),
     breakEvenArmed: Boolean(position.breakEvenArmed),
+    exitStrategy: profitFirstExitStrategy(position.exitStrategy),
+    lastHighWaterAt: position.lastHighWaterAt ?? position.openedAt,
+    peakPnlPct: safe(position.peakPnlPct, position.maxFavorableExcursionPct),
+    exitStrategistScore: safe(position.exitStrategistScore),
+    exitStrategistReason: position.exitStrategistReason ?? "",
   };
 }
 
@@ -50,7 +57,7 @@ function paperRequest(position: ManagedPosition, side: "BUY" | "SELL", notionalU
     symbol: position.symbol,
     side,
     notionalUsd: Math.max(0, notionalUsd),
-    maxSlippageBps: side === "BUY" ? 135 : 175,
+    maxSlippageBps: side === "BUY" ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : suffix === "EXIT" ? 9000 : Number(process.env.PAPER_PROFIT_TAKE_MAX_SLIPPAGE_BPS ?? 2000),
     strategyId: position.strategyId,
     decisionId: `${position.decisionId}-${suffix}`,
   };
@@ -124,12 +131,14 @@ export async function registerPaperPosition(args: {
   const now = new Date().toISOString();
   const quantity = fill.filledUsd / Math.max(fill.fillPrice, 0.0000000001);
   const initialAllocationPct = entryContext?.initialAllocationPct;
-  const maxExposure = typeof initialAllocationPct === "number" && initialAllocationPct > 0 ? Math.min(5, initialAllocationPct * 2.8) : 5;
+  const winnerCap = Math.max(5, Math.min(20, Number(process.env.PAPER_WINNER_MAX_GROSS_PCT ?? 15)));
+  const maxExposure = typeof initialAllocationPct === "number" && initialAllocationPct > 0 ? Math.min(winnerCap, initialAllocationPct * 2.8) : winnerCap;
   const position: ManagedPosition = {
     id: `POS-${fill.id}`,
     chain: fill.chain,
     tokenAddress: request.tokenAddress,
     symbol: fill.symbol,
+    imageUrl: snapshot.imageUrl,
     strategyId: request.strategyId,
     decisionId: request.decisionId,
     mode: request.mode,
@@ -164,7 +173,11 @@ export async function registerPaperPosition(args: {
     maxGrossExposurePct: Number(maxExposure.toFixed(3)),
     reentryCount: args.reentryCount ?? 0,
     breakEvenArmed: false,
-    exitStrategy,
+    lastHighWaterAt: now,
+    peakPnlPct: Math.max(0, ((snapshot.price - fill.fillPrice) / Math.max(fill.fillPrice, 1e-12)) * 100),
+    exitStrategistScore: 50,
+    exitStrategistReason: "Exit Strategist armed on entry.",
+    exitStrategy: profitFirstExitStrategy(exitStrategy),
     entryContext,
   };
   await saveManagedPosition(position);
@@ -191,12 +204,14 @@ function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot, portf
   });
 }
 
-export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext): ManagedPosition {
+export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext, exitGenome?: RunnerExitGenomeGuidance): ManagedPosition {
   const position = normalizedPosition(positionInput);
   const now = new Date().toISOString();
   const mark = snapshot.price;
   const highWater = Math.max(position.highWaterPrice, mark);
   const lowWater = Math.min(position.lowWaterPrice, mark);
+  const madeNewHigh = mark > position.highWaterPrice * 1.0005;
+  const lastHighWaterAt = madeNewHigh ? now : (position.lastHighWaterAt ?? position.openedAt);
   const rawMovePct = position.entryPrice > 0 ? ((mark - position.entryPrice) / position.entryPrice) * 100 : 0;
   const currentPnl = markToMarketPnlPct(position, mark);
   const drawdownFromHigh = highWater > 0 ? ((highWater - mark) / highWater) * 100 : 0;
@@ -205,6 +220,11 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const confirmation = confirmationScore(position, snapshot, fresh);
   const winnerState = determineWinnerState(position, rawMovePct, confirmation);
   const controls = effectiveGuardianControls(position, winnerState);
+  const exitStrategist = evaluateExitStrategist({ position, snapshot, portfolio, exitGenome });
+  const genomeTrailingStopPct = exitGenome ? Math.max(6, Math.min(40, exitGenome.trailingStopPct)) : controls.trailingStopPct;
+  const genomeMaxHoldMinutes = exitGenome ? Math.max(15, controls.maxHoldMinutes * exitGenome.maxHoldMultiplier) : controls.maxHoldMinutes;
+  const activeTrailingStopPct = Math.min(genomeTrailingStopPct, exitStrategist.trailingStopPct);
+  const activeMaxHoldMinutes = Math.min(genomeMaxHoldMinutes, exitStrategist.maxHoldMinutes);
   const highWaterGainPct = position.entryPrice > 0 ? ((highWater - position.entryPrice) / position.entryPrice) * 100 : 0;
   const firstTarget = position.exitStrategy.takeProfits[0]?.gainPct ?? 18;
   const breakEvenArmed = Boolean(position.breakEvenArmed || ((winnerState !== "building") && (position.takenProfitLabels.includes("TP1") || highWaterGainPct >= firstTarget)));
@@ -212,18 +232,21 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
 
   const stopTriggered = rawMovePct <= -position.exitStrategy.stopLossPct;
   const breakEvenTriggered = breakEvenArmed && rawMovePct <= breakEvenFloorPct;
-  const trailTriggered = rawMovePct > 0 && drawdownFromHigh >= controls.trailingStopPct;
+  const trailTriggered = rawMovePct > 0 && drawdownFromHigh >= activeTrailingStopPct;
   const liquidityTriggered = snapshot.liquidity < position.exitStrategy.liquidityFloorUsd;
   const securityTriggered = !snapshot.sellable || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25;
   const authorityTriggered = snapshot.chainFamily === "solana" && (snapshot.mintAuthority || snapshot.freezeAuthority);
-  const timeTriggered = heldMinutes >= controls.maxHoldMinutes;
+  const timeTriggered = heldMinutes >= activeMaxHoldMinutes;
   const tp = nextTakeProfit(position, rawMovePct);
   const scaleStep = nextScaleStep(position, snapshot, fresh, confirmation);
 
   let lastAction: PositionAction = "HOLD";
   let status = position.status;
   let pendingScaleLabel: string | undefined;
-  let lastReason = `${winnerState.toUpperCase()} · confirmation ${confirmation.toFixed(0)}/100 · portfolio PnL ${currentPnl.toFixed(1)}% · high-water drawdown ${drawdownFromHigh.toFixed(1)}%.`;
+  let lastReason = `${winnerState.toUpperCase()} · confirmation ${confirmation.toFixed(0)}/100 · portfolio PnL ${currentPnl.toFixed(1)}% · high-water drawdown ${drawdownFromHigh.toFixed(1)}%. ${exitGenome ? exitGenome.reason : ""}`;
+
+  const genomeExitTriggered = exitGenome?.action === "EXIT";
+  const strategistExitTriggered = exitStrategist.action === "EXIT";
 
   if (securityTriggered || authorityTriggered || liquidityTriggered) {
     lastAction = "EXIT";
@@ -231,6 +254,14 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     lastReason = securityTriggered || authorityTriggered
       ? "Emergency exit: contract/security condition changed."
       : `Emergency exit: liquidity fell below $${Math.round(position.exitStrategy.liquidityFloorUsd).toLocaleString()} floor.`;
+  } else if (strategistExitTriggered) {
+    lastAction = "EXIT";
+    status = "exit_pending";
+    lastReason = exitStrategist.reason || "Exit Strategist requested capital/profit protection exit.";
+  } else if (genomeExitTriggered) {
+    lastAction = "EXIT";
+    status = "exit_pending";
+    lastReason = exitGenome?.reason ?? "Exit Genome invalidated runner continuation.";
   } else if (stopTriggered) {
     lastAction = "EXIT";
     status = "exit_pending";
@@ -264,6 +295,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   return {
     ...position,
     status,
+    imageUrl: snapshot.imageUrl ?? position.imageUrl,
     markPrice: mark,
     highWaterPrice: highWater,
     lowWaterPrice: lowWater,
@@ -274,6 +306,10 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     winnerState,
     lastConfirmationScore: confirmation,
     breakEvenArmed,
+    lastHighWaterAt,
+    peakPnlPct: Number(Math.max(position.peakPnlPct ?? 0, rawMovePct).toFixed(3)),
+    exitStrategistScore: exitStrategist.score,
+    exitStrategistReason: exitStrategist.reason,
     pendingScaleLabel,
     updatedAt: now,
     lastMarketDataAt: now,
@@ -296,10 +332,20 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
 
   const initialNotional = Math.max(0.01, position.initialNotionalUsd ?? position.entryNotionalUsd);
   const capPct = maxGrossExposurePct(position);
-  const capUsd = Math.max(0, portfolio.equityUsd * capPct / 100);
-  const exposureRoomUsd = Math.max(0, capUsd - position.entryNotionalUsd);
-  const requestedUsd = Math.min(initialNotional * step.addMultipleOfInitial, exposureRoomUsd, Math.max(0, portfolio.cashUsd));
-  if (requestedUsd < 0.01) return { ...position, pendingScaleLabel: undefined, lastAction: "HOLD", lastReason: `Scale-in skipped: ${capPct.toFixed(2)}% gross exposure cap or available paper cash is already reached.` };
+  const minimumAddUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
+  const maxAddUsd = Math.max(minimumAddUsd, Number(process.env.PAPER_WINNER_MAX_ADD_USD ?? 100));
+  const entryGenomeScore = position.entryContext?.runnerGenome?.entryScore ?? 60;
+  const genomeAddTarget = entryGenomeScore >= 88 ? 100 : entryGenomeScore >= 78 ? 75 : minimumAddUsd;
+  const exposureRoomUsd = Math.max(0, portfolio.equityUsd * capPct / 100 - position.entryNotionalUsd);
+  const requestedUsd = Math.min(maxAddUsd, Math.max(minimumAddUsd, genomeAddTarget), exposureRoomUsd, Math.max(0, portfolio.cashUsd));
+  if (requestedUsd + 0.005 < minimumAddUsd) {
+    return {
+      ...position,
+      pendingScaleLabel: undefined,
+      lastAction: "HOLD",
+      lastReason: `Winner add remains valid, but only $${portfolio.cashUsd.toFixed(2)} paper cash is available. Waiting for $${minimumAddUsd.toFixed(2)}+ cash.`,
+    };
+  }
 
   const fill = await executePaper(paperRequest(position, "BUY", requestedUsd, step.label), snapshot);
   await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-${step.label}`, tokenAddress: position.tokenAddress, positionId: position.id });
@@ -423,7 +469,8 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
       snapshot = await fetchLivePositionSnapshot(position);
       if (snapshot) {
         const portfolio = await getPaperPortfolioContext(position.chain);
-        next = evaluatePosition(position, snapshot, portfolio);
+        const exitGenome = await getRunnerExitGuidance(position, snapshot);
+        next = evaluatePosition(position, snapshot, portfolio, exitGenome);
         if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
           if (next.lastAction === "SCALE_IN") {
             next = await executeScaleIn(next, snapshot, portfolio);

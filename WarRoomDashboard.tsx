@@ -370,6 +370,8 @@ export default function WarRoomDashboard() {
   const [mainGraphSelection, setMainGraphSelection] = useState<string>("portfolio");
   const [mainGraphRange, setMainGraphRange] = useState<MainGraphRange>("15m");
   const [copiedCa, setCopiedCa] = useState<string | null>(null);
+  const [resettingPaperWallet, setResettingPaperWallet] = useState(false);
+  const [paperResetMessage, setPaperResetMessage] = useState<string | null>(null);
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
@@ -456,8 +458,12 @@ export default function WarRoomDashboard() {
     const openPositions = (status.positions ?? []).filter((position) => position.status !== "closed");
     const openValue = openPositions.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0), 0);
     setEquityHistory((current) => {
-      const next = [...current, { at: now, equity: status.paperWallet.equityUsd, cash: status.paperWallet.cashUsd, openValue }];
-      return next.slice(-2880);
+      const persisted = status.paperWallet.equityHistory ?? [];
+      const live = { at: now, equity: status.paperWallet.equityUsd, cash: status.paperWallet.cashUsd, openValue };
+      const merged = [...persisted, ...current, live];
+      const byTimestamp = new Map<number, EquityHistoryPoint>();
+      for (const point of merged) byTimestamp.set(point.at, point);
+      return [...byTimestamp.values()].sort((a, b) => a.at - b.at).slice(-100_000);
     });
     setPositionHistory((current) => {
       const next = { ...current };
@@ -503,12 +509,14 @@ export default function WarRoomDashboard() {
   const mainGraphEntry = selectedGraphPosition ? selectedGraphPosition.entryPrice : (status?.paperWallet?.startingCashUsd ?? 1000);
   const mainGraphStop = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 - (selectedGraphPosition.exitStrategy?.stopLossPct ?? 0) / 100) : undefined;
   const mainGraphTp1 = selectedGraphPosition ? selectedGraphPosition.entryPrice * (1 + ((selectedGraphPosition.exitStrategy?.takeProfits?.[0]?.gainPct ?? 0) / 100)) : undefined;
-  const mainGraphHigh = selectedGraphPosition ? selectedGraphPosition.highWaterPrice : undefined;
+  const mainGraphHigh = selectedGraphPosition ? selectedGraphPosition.highWaterPrice : (status?.paperWallet?.allTimeHighEquityUsd ?? (equityHistory.length ? Math.max(...equityHistory.map((point) => point.equity)) : undefined));
   const mainGraphScale = [...mainGraphValues, mainGraphCurrent, mainGraphEntry, ...(mainGraphStop ? [mainGraphStop] : []), ...(mainGraphTp1 ? [mainGraphTp1] : []), ...(mainGraphHigh ? [mainGraphHigh] : [])].filter((value) => Number.isFinite(value) && value > 0);
   const mainGraphYAxis = graphLabels(mainGraphScale, 6);
   const mainGraphXAxis = graphTimeLabels(mainGraphTimes, mainGraphRange, 5);
   const mainGraphPnlPct = selectedGraphPosition?.pnlPct ?? (status?.paperWallet?.totalReturnPct ?? 0);
   const mainGraphPositive = mainGraphPnlPct >= 0;
+  const allTimePortfolioHigh = status?.paperWallet?.allTimeHighEquityUsd ?? (equityHistory.length ? Math.max(...equityHistory.map((point) => point.equity)) : (status?.paperWallet?.equityUsd ?? 0));
+  const allTimePortfolioDrawdownPct = allTimePortfolioHigh > 0 ? ((allTimePortfolioHigh - (status?.paperWallet?.equityUsd ?? 0)) / allTimePortfolioHigh * 100) : 0;
 
   const graphRangeStart = mainGraphTimes[0] ?? graphNow;
   const graphRangeEnd = mainGraphTimes[mainGraphTimes.length - 1] ?? graphNow;
@@ -636,6 +644,31 @@ export default function WarRoomDashboard() {
     });
   };
 
+  const resetPaperWallet = async () => {
+    const confirmed = window.confirm(
+      "Reset PAPER wallet to $1,000 and clear current open PAPER positions?\n\nRunner Genome, Filing Cabinet, agent memories, closed trade history and all-time portfolio history will NOT be erased."
+    );
+    if (!confirmed || resettingPaperWallet) return;
+
+    setResettingPaperWallet(true);
+    setPaperResetMessage(null);
+    try {
+      const response = await fetch("/api/paper-reset", { method: "POST" });
+      const payload = await response.json() as { ok?: boolean; message?: string; error?: string; clearedOpenPositions?: number };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? `Reset failed (${response.status})`);
+
+      const refreshed = await fetch("/api/autopilot", { cache: "no-store" });
+      if (refreshed.ok) setStatus(await refreshed.json() as AutopilotPayload);
+      setMainGraphSelection("portfolio");
+      setPaperResetMessage(payload.message ?? "Paper wallet reset. Learning preserved.");
+      window.setTimeout(() => setPaperResetMessage(null), 6000);
+    } catch (err) {
+      setPaperResetMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResettingPaperWallet(false);
+    }
+  };
+
   const copyContract = async (address: string) => {
     try {
       await navigator.clipboard.writeText(address);
@@ -657,7 +690,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V2.27</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -669,14 +702,19 @@ export default function WarRoomDashboard() {
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market, scales confirmed winners, trims, exits and returns simulated proceeds to cash.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market while the dedicated Exit Strategist banks profits, kills dead trades, recycles stale capital and returns simulated proceeds to cash.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Cash</small><b>${(status?.paperWallet?.cashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Total P/L</small><b className={(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "positive" : "negative"}>{(status?.paperWallet?.totalPnlUsd ?? 0) >= 0 ? "+" : ""}${(status?.paperWallet?.totalPnlUsd ?? 0).toFixed(2)} ({(status?.paperWallet?.totalReturnPct ?? 0).toFixed(2)}%)</b></span>
-          <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span>
+          <span><small>Open positions</small><b>{status?.paperWallet?.openPositions ?? 0}</b></span><span><small>All-time high</small><b>${(status?.paperWallet?.allTimeHighEquityUsd ?? status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
+        
+          <button className="paper-reset-button" onClick={() => void resetPaperWallet()} disabled={resettingPaperWallet}>
+            {resettingPaperWallet ? "RESETTING…" : "RESET PAPER WALLET"}
+          </button>
         </div>
+        {paperResetMessage && <p className="paper-reset-message">{paperResetMessage}</p>}
         <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 7}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
         <div className="sizing-policy-strip"><span><b>$50+ meaningful training</b><small>If Council approves a BUY or qualified probe, soft sizing warnings cannot shrink it below $50 · only real cash/exposure capacity can delay it</small></span><span className="sizing-live-note">Hard safety vetoes still block · exits/trims may stay smaller</span></div>
         <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
@@ -743,6 +781,12 @@ export default function WarRoomDashboard() {
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
         </div>
 
+        <div className="exit-strategist-live">
+          <b>EXIT STRATEGIST · ACTIVE</b>
+          <span>Checks every open position every Guardian cycle · banks 20% @ +25% · 20% @ +50% · 25% @ +100% · 25% @ +200% · 10% moonbag</span>
+          <small>Dead trades and stale capital are recycled so fresh runners can keep getting funded.</small>
+        </div>
+
         <div className="portfolio-market-layout">
         <div className="main-market-card">
           <div className="main-market-toolbar">
@@ -764,7 +808,7 @@ export default function WarRoomDashboard() {
               <span><small>{selectedGraphPosition ? "PRICE" : "EQUITY"}</small><b>{compactGraphValue(mainGraphCurrent, true)}</b></span>
               <span><small>P/L</small><b className={mainGraphPositive ? "positive" : "negative"}>{mainGraphPnlPct >= 0 ? "+" : ""}{mainGraphPnlPct.toFixed(2)}%</b></span>
               <span><small>{selectedGraphPosition ? "ENTRY" : "START"}</small><b>{compactGraphValue(mainGraphEntry, true)}</b></span>
-              <span><small>{selectedGraphPosition ? "HIGH" : "CASH"}</small><b>{compactGraphValue(selectedGraphPosition ? (mainGraphHigh ?? mainGraphCurrent) : (status?.paperWallet?.cashUsd ?? 0), true)}</b></span>
+              <span><small>{selectedGraphPosition ? "HIGH" : "ALL-TIME HIGH"}</small><b>{compactGraphValue(selectedGraphPosition ? (mainGraphHigh ?? mainGraphCurrent) : allTimePortfolioHigh, true)}</b></span>{!selectedGraphPosition && <span><small>FROM HIGH</small><b className={allTimePortfolioDrawdownPct <= 0.1 ? "positive" : "negative"}>-{allTimePortfolioDrawdownPct.toFixed(2)}%</b></span>}
             </div>
           </div>
 
