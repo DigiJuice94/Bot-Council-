@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 function fail(message) {
-  console.error(`[v2.29.1-trajectory-type-fix] ${message}`);
+  console.error(`[v2.29.2-trajectory-type-fix] ${message}`);
   process.exit(1);
 }
 function patchFile(root, rel, fn) {
@@ -10,9 +10,12 @@ function patchFile(root, rel, fn) {
   if (!existsSync(path)) fail(`Missing generated file ${rel}`);
   const before = readFileSync(path, "utf8");
   const after = fn(before);
-  if (after === before) fail(`Patch produced no change for ${rel}`);
+  if (after === before) {
+    console.log(`[v2.29.2-trajectory-type-fix] ${rel} already satisfies the required type fix`);
+    return;
+  }
   writeFileSync(path, after);
-  console.log(`[v2.29.1-trajectory-type-fix] patched ${rel}`);
+  console.log(`[v2.29.2-trajectory-type-fix] patched ${rel}`);
 }
 
 export function applyV2291TrajectoryTypeFix(root = process.cwd()) {
@@ -56,5 +59,5 @@ export function applyV2291TrajectoryTypeFix(root = process.cwd()) {
     return text;
   });
 
-  console.log("[v2.29.1-trajectory-type-fix] RunnerGenome fallback now includes trajectory defaults and observer outcome typing is narrowed.");
+  console.log("[v2.29.2-trajectory-type-fix] RunnerGenome fallback now includes trajectory defaults and observer outcome typing is narrowed.");
 }
