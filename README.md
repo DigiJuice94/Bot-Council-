@@ -1,5 +1,17 @@
 # Bot War Room V3
 
+## V3.6 reserve-backed PAPER exits
+
+PAPER sells now fail closed when the fresh snapshot has `$0` liquidity or no executable price. Nonzero-liquidity sells use constant-product reserve math against the observed quote-side DEX reserve, so a manipulated token price can never create sale proceeds larger than the pool could plausibly pay. Full Guardian exits may still accept distressed slippage to recycle capital, but the credited cash is reserve-capped instead of using the old forced-percentage liquidation model. Entry, profit-taking and strategy thresholds are unchanged.
+
+This package also runs one idempotent ledger repair after deployment. It detects the specific impossible pattern produced by the old model—an enormous full-exit credit combined with distressed 6,000+ bps slippage—removes that fill and its corrupt equity peak, reverses the imaginary proceeds, and reclassifies the affected position as Unsellable / Locked Capital. It does not erase Runner Genome, Filing Cabinet, Trajectory Observer, Sellability Investigator cases or agent memory. Held DEX positions now retain zero-liquidity snapshots so Guardian can classify them immediately instead of losing the snapshot as an unavailable candidate.
+
+## V3.5 Research / Filing Cabinet tab
+
+The main War Room now stays focused on the live Council, portfolio, active positions, Moon Bags, unsellable capital and trade logs. Code Deciphered, Runner Genome/Filing Cabinet, Trajectory Observer, Entry/Exit Genome, case files, daily autopsy and diagnostic research are grouped under the dedicated **RESEARCH / FILING CABINET** top tab. The trading runtime and thresholds are unchanged.
+
+That tab now includes a persistent Sellability Investigator proof panel showing the exact number of unsellable fingerprints filed, chains represented, locked loss studied and unique future candidates blocked by learned fingerprints. These totals come from the Redis learning stores and are not derived from the capped visible trade list. Repeated scans of the same blocked token do not inflate the unique-block count.
+
 ## V3.4 Sellability Investigator
 
 The Council now has nine independent local entities: eight private-read specialists plus the separate Runner CIO. The new **Sellability Investigator** has a Council seat and a deliberately narrow job. Every Unsellable / Locked Capital outcome preserves its entry-time liquidity, liquidity/market-cap, volume/liquidity, holder concentration, bundle, tax, authority, ownership, lock and provider-verification fingerprint in Redis. Every future candidate is compared with those filed failures. One unusual loss can inform the vote but cannot create a learned ban; blocking requires repeated close cases, including a same-chain match, at high aggregate risk.
