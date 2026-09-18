@@ -84,6 +84,14 @@ function positionPnlUsd(position: ManagedPosition) {
 function isMoonBag(position: ManagedPosition) {
   if (position.status === "closed") return false;
   if (position.winnerState === "moonbag") return true;
+  // A confirmed partial SELL means the main trade has already banked capital
+  // and the remaining quantity is the runner remainder shown as a Moon Bag.
+  // Do not wait for every future take-profit level before separating it from
+  // untouched Active Trades.
+  const hasRealizedPartialExit = (position.realizedProceedsUsd ?? 0) > 0.005
+    && (position.realizedCostUsd ?? 0) > 0.005
+    && Math.max(0, position.remainingQuantity ?? 0) > 0;
+  if (hasRealizedPartialExit) return true;
   const targets = position.exitStrategy?.takeProfits ?? [];
   const allTargetsTaken = targets.length > 0 && targets.every((target) => position.takenProfitLabels.includes(target.label));
   const originalQuantity = Math.max(position.initialQuantity ?? position.quantity ?? 0, 0);
@@ -800,7 +808,7 @@ export default function WarRoomDashboard() {
               <div className="moon-bag-total"><span>Total Trade P/L</span><b className={totalPnl >= 0 ? "positive" : "negative"}>{totalPnl >= 0 ? "+" : "-"}${Math.abs(totalPnl).toFixed(2)}</b></div>
               <small className="active-trade-meta">{position.chain} · {position.takenProfitLabels.join(" · ") || "partial profits banked"} · {ago(position.openedAt)}</small>
             </article>;
-          }) : <div className="empty-row">No Moon Bags yet. Positions move here automatically after all planned partial-profit levels are completed.</div>}
+          }) : <div className="empty-row">No Moon Bags yet. A position moves here automatically as soon as a partial-profit sell is confirmed.</div>}
         </div>
         {moonBagPositions.length > 24 && <small className="active-trades-more">Showing 24 of {moonBagPositions.length} Moon Bags. Portfolio totals include every holding.</small>}
       </section>
