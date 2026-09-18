@@ -7,6 +7,7 @@ import { effectiveGuardianControls, confirmationScore, determineWinnerState, max
 import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
+import { applyClaudeProfitOptimizer } from "./claude-profit-optimizer";
 import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance } from "./runner-research";
 import { confirmedSellabilityFailure, sellabilityUnverified } from "./security-evidence";
@@ -48,6 +49,15 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     peakPnlPct: safe(position.peakPnlPct, position.maxFavorableExcursionPct),
     exitStrategistScore: safe(position.exitStrategistScore),
     exitStrategistReason: position.exitStrategistReason ?? "",
+    profitOptimizerProvider: position.profitOptimizerProvider,
+    profitOptimizerModel: position.profitOptimizerModel,
+    profitOptimizerAction: position.profitOptimizerAction,
+    profitOptimizerConfidence: safe(position.profitOptimizerConfidence),
+    profitOptimizerSellPct: safe(position.profitOptimizerSellPct),
+    profitOptimizerReason: position.profitOptimizerReason ?? "",
+    profitOptimizerContextKey: position.profitOptimizerContextKey,
+    profitOptimizerReviewedAt: position.profitOptimizerReviewedAt,
+    profitOptimizerError: position.profitOptimizerError,
   };
 }
 
@@ -432,8 +442,11 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
   };
 }
 
-async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel): Promise<ManagedPosition> {
-  const originalQtyTarget = position.quantity * (level.sellPct / 100);
+async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel, sellPctOverride?: number): Promise<ManagedPosition> {
+  const effectiveSellPct = Number.isFinite(sellPctOverride) && Number(sellPctOverride) > 0
+    ? Math.max(10, Math.min(35, Number(sellPctOverride)))
+    : level.sellPct;
+  const originalQtyTarget = position.quantity * (effectiveSellPct / 100);
   const sellQty = Math.min(position.remainingQuantity, originalQtyTarget);
   if (sellQty <= 0) return position;
   const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot);
@@ -477,7 +490,7 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
     pendingScaleLabel: undefined,
     updatedAt: new Date().toISOString(),
     lastAction: "TRIM",
-    lastReason: `${level.label} filled: sold ${level.sellPct}% of scaled size @ ${fill.fillPrice}. ${position.exitStrategy.moonbagPct ?? 0}% target moonbag remains protected by adaptive Guardian rules.`,
+    lastReason: `${level.label} filled: sold ${effectiveSellPct.toFixed(1)}% of scaled size @ ${fill.fillPrice}${sellPctOverride ? " under Claude Profit Optimizer sizing" : ""}. ${position.exitStrategy.moonbagPct ?? 0}% target moonbag remains protected by adaptive Guardian rules.`,
     profitCapturePct: Number(capture.toFixed(2)),
     status: remainingQuantity <= position.quantity * 0.001 ? "closed" : "open",
   };
@@ -608,13 +621,14 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
             }
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
+            next = await applyClaudeProfitOptimizer({ position: next, snapshot, portfolio, exitGenome });
           }
           if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
             if (next.lastAction === "SCALE_IN") {
               next = await executeScaleIn(next, snapshot, portfolio);
             } else if (next.lastAction === "TRIM") {
               const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
-              if (level) next = await executeTrim(next, snapshot, level);
+              if (level) next = await executeTrim(next, snapshot, level, next.profitOptimizerAction === "HOLD" ? undefined : next.profitOptimizerSellPct);
             } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
               next = await executeFullExit(next, snapshot);
             }

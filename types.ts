@@ -502,6 +502,15 @@ export type ManagedPosition = {
   peakPnlPct?: number;
   exitStrategistScore?: number;
   exitStrategistReason?: string;
+  profitOptimizerProvider?: "claude";
+  profitOptimizerModel?: string;
+  profitOptimizerAction?: "HOLD" | "TRIM" | "EXIT";
+  profitOptimizerConfidence?: number;
+  profitOptimizerSellPct?: number;
+  profitOptimizerReason?: string;
+  profitOptimizerContextKey?: string;
+  profitOptimizerReviewedAt?: string;
+  profitOptimizerError?: string;
   pendingScaleLabel?: string;
   learningRecorded?: boolean;
   exitStrategy: ExitStrategy;

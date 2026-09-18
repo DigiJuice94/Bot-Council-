@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
-import { resetPaperWalletPreserveLearning } from "@/lib/paper-wallet";
+import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
+import { listManagedPositions } from "@/lib/position-store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
-  try {
-    const result = await resetPaperWalletPreserveLearning("Manual dashboard reset");
-    return NextResponse.json({
-      ok: true,
-      ...result,
-      message: `Fresh PAPER run started at $${result.wallet.startingCashUsd.toFixed(2)}. Trade log and portfolio history cleared; learned research preserved.`,
-    }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+export async function GET(request: Request) {
+  // The dashboard's trade table uses this lightweight path so research/status
+  // generation cannot hold back visible position updates.
+  if (new URL(request.url).searchParams.get("light") === "1") {
+    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
   }
+  ensurePositionGuardianLoop();
+  const report = await refreshPositionGuardian();
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }

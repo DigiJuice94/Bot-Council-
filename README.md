@@ -1,5 +1,13 @@
 # Bot War Room V3
 
+## V3.4.0 Claude Profit Optimizer
+
+This release adds an optional Claude-powered Profit Optimizer on top of the existing local Quant, Exit Strategist and Position Guardian. Scanning, candidate scoring and the Council remain local and fast. Claude is called only for PAPER positions around profit-management moments, with a per-position review throttle (default 60 seconds) so the 5-second Guardian loop does not turn into an LLM call loop. When a position gets within five percentage points of its next take-profit level, the optimizer can pre-review that TP so a fast move can often use a cached Claude decision instead of waiting at the exact sell trigger.
+
+When the deterministic Guardian reaches a scheduled take-profit or a soft profitable Exit Strategist decision, Claude receives the current mark, entry/high-water structure, buy/sell pressure, volume acceleration, liquidity, Runner Exit Genome context, realized profit and local Exit Strategist state. It returns a bounded HOLD/TRIM/EXIT opinion. On scheduled take-profit events it can defer the trim or resize it to 10-35% of scaled size. It can reconsider only a soft, profitable Exit Strategist exit. It cannot add size, bypass zero-liquidity/security rules, cancel stop-loss/breakeven/trailing/time exits, or block an already-pending verified exit. If Claude times out, errors, returns malformed output or is not configured, the existing deterministic Guardian behavior continues unchanged. The latest Claude recommendation/error is persisted on the position and shown on Active Trade cards.
+
+Required Railway variable: `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`). Optional controls are `CLAUDE_PROFIT_OPTIMIZER_ENABLED`, `CLAUDE_PROFIT_OPTIMIZER_MODEL`, `CLAUDE_PROFIT_OPTIMIZER_REVIEW_MS`, `CLAUDE_PROFIT_OPTIMIZER_TIMEOUT_MS`. Default model is `claude-sonnet-5`. Anthropic API billing is separate from the normal Claude chat subscription.
+
 ## V3.3.2 pending-exit repair and buy diagnostics
 
 The Guardian no longer treats missing sellability verification as an emergency exit signal. The old strategy also set a $15,000 emergency-exit liquidity floor for early runners that were explicitly allowed to enter smaller pools. New early-runner exits use a floor tied to their entry liquidity; previously opened trades with a recorded sub-$15,000 entry pool get the corrected floor when Guardian reviews them. On each cycle it re-evaluates previously pending positions against actual exit reasons: if no exit trigger remains, the position returns to Open; if a real stop, security change or hold limit still calls for an exit, it remains pending until a verified sale or loss can be recorded. No sale proceeds are invented and no PAPER wallet balance is reset. Pending cards display their recorded reason.
@@ -62,4 +70,4 @@ Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-ti
 
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 
-No OpenAI API key or paid LLM service is used by the local Council.
+The core Council remains local and does not require OpenAI. V3.4 can optionally call Anthropic only for the bounded Claude Profit Optimizer when an Anthropic API key is configured.

@@ -19,6 +19,7 @@ type AutopilotPayload = {
   buyCount: number;
   paperWallet: PaperWalletSnapshot;
   providers: ProviderHealth[];
+  claudeProfitOptimizer?: { configured: boolean; enabled: boolean; model: string; reviewMs: number };
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   positions: ManagedPosition[];
@@ -753,9 +754,9 @@ export default function WarRoomDashboard() {
         </div>
 
         <div className="exit-strategist-live">
-          <b>EXIT STRATEGIST · ACTIVE</b>
-          <span>Checks every open position every Guardian cycle · banks 20% @ +25% · 20% @ +50% · 25% @ +100% · 25% @ +200% · 10% moonbag</span>
-          <small>Dead trades and stale capital are recycled so fresh runners can keep getting funded.</small>
+          <b>EXIT STRATEGIST + CLAUDE PROFIT OPTIMIZER · {!status ? "CHECKING" : status.claudeProfitOptimizer?.enabled ? `CONFIGURED · ${status.claudeProfitOptimizer.model}` : status.claudeProfitOptimizer?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
+          <span>Guardian keeps the hard safety/stop rules · Claude pre-reviews near-target TPs and handles soft profitable strategist exits, never the scanner or hard-exit path.</span>
+          <small>Claude can defer or resize a scheduled profit trim and reconsider only soft profitable exits; liquidity, security and protective exits always stay deterministic.</small>
         </div>
 
         <div className="portfolio-market-layout">
@@ -845,6 +846,8 @@ export default function WarRoomDashboard() {
               <div className="active-trade-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em className={`status-${position.status}`}>{position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></div>
               <div className="active-trade-values"><span><small>MARK</small><b>{price(position.markPrice)}</b></span><span><small>VALUE</small><b>${(Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0)).toFixed(2)}</b></span><span><small>P/L</small><b className={pnlUsd >= 0 ? "positive" : "negative"}>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</b></span></div>
               <small className="active-trade-meta">{position.chain} · entry {price(position.entryPrice)} · {ago(position.openedAt)}</small>
+              {position.profitOptimizerProvider === "claude" && position.profitOptimizerReviewedAt && <small className="active-trade-reason" title={position.profitOptimizerReason}>CLAUDE PROFIT OPTIMIZER · {position.profitOptimizerAction ?? "REVIEW"} {position.profitOptimizerConfidence ? `${position.profitOptimizerConfidence.toFixed(0)}/100` : ""} · {position.profitOptimizerReason || "reviewed"}</small>}
+              {position.profitOptimizerError && <small className="active-trade-reason" title={position.profitOptimizerError}>CLAUDE OPTIMIZER FALLBACK · local Guardian remains in control</small>}
               {position.status === "exit_pending" && <small className="active-trade-reason" title={position.lastReason}>{position.lastReason}</small>}
             </article>;
           }) : <div className="empty-row">No active PAPER trades. New Council-approved entries will appear here.</div>}
@@ -873,6 +876,7 @@ export default function WarRoomDashboard() {
               </div>
               <div className="moon-bag-total"><span>Total Trade P/L</span><b className={totalPnl >= 0 ? "positive" : "negative"}>{totalPnl >= 0 ? "+" : "-"}${Math.abs(totalPnl).toFixed(2)}</b></div>
               <small className="active-trade-meta">{position.chain} · {position.takenProfitLabels.join(" · ") || "partial profits banked"} · {ago(position.openedAt)}</small>
+              {position.profitOptimizerProvider === "claude" && position.profitOptimizerReviewedAt && <small className="active-trade-reason" title={position.profitOptimizerReason}>CLAUDE PROFIT OPTIMIZER · {position.profitOptimizerAction ?? "REVIEW"} {position.profitOptimizerConfidence ? `${position.profitOptimizerConfidence.toFixed(0)}/100` : ""} · {position.profitOptimizerReason || "reviewed"}</small>}
             </article>;
           }) : <div className="empty-row">No Moon Bags yet. A position moves here automatically as soon as a partial-profit sell is confirmed.</div>}
         </div>
