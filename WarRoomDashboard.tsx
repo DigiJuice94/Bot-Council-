@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentOpinion, ManagedPosition, PaperWalletSnapshot, ProviderHealth, WarRoomResult } from "@/lib/types";
 import { buildCouncilDiscussion, type CouncilTurn } from "@/lib/debate";
-import { COUNCIL_ART_DATA_URI } from "@/lib/council-art";
 
-type ChatRow = { id: string; at: string; bot: string; message: string; kind: "council" | "system" | "execution" | "guardian" };
 type AutopilotPayload = {
   running: boolean;
   mode: "paper";
@@ -23,7 +21,6 @@ type AutopilotPayload = {
   providers: ProviderHealth[];
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
-  chat: ChatRow[];
   positions: ManagedPosition[];
   lastError?: string;
   generatedAt: string;
@@ -61,12 +58,6 @@ function riskLabel(score: number) {
   if (score >= 38) return "MEDIUM";
   return "HIGH";
 }
-function timeOnly(value?: string) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
 function ago(value?: string) {
   if (!value) return "—";
   const ms = Date.now() - new Date(value).getTime();
@@ -90,6 +81,21 @@ function positionPnlUsd(position: ManagedPosition) {
   return (position.realizedProceedsUsd ?? 0) + openValue - (position.entryNotionalUsd ?? 0);
 }
 
+function isMoonBag(position: ManagedPosition) {
+  if (position.status === "closed") return false;
+  if (position.winnerState === "moonbag") return true;
+  const targets = position.exitStrategy?.takeProfits ?? [];
+  const allTargetsTaken = targets.length > 0 && targets.every((target) => position.takenProfitLabels.includes(target.label));
+  const originalQuantity = Math.max(position.initialQuantity ?? position.quantity ?? 0, 0);
+  const remainingPct = originalQuantity > 0 ? (Math.max(0, position.remainingQuantity) / originalQuantity) * 100 : 100;
+  return allTargetsTaken && remainingPct <= (position.exitStrategy?.moonbagPct ?? 10) + 2;
+}
+
+function tokenAmount(value: number) {
+  if (!Number.isFinite(value)) return "0";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: value < 1 ? 8 : 4 }).format(value);
+}
+
 function TokenAvatar({ imageUrl, symbol, compact = false }: { imageUrl?: string; symbol: string; compact?: boolean }) {
   const [failed, setFailed] = useState(false);
   const initial = symbol.replace(/^\$/, "").slice(0, 1).toUpperCase() || "?";
@@ -100,32 +106,7 @@ function TokenAvatar({ imageUrl, symbol, compact = false }: { imageUrl?: string;
   </span>;
 }
 
-function chatTone(bot: string, kind: ChatRow["kind"]) {
-  const name = bot.toLowerCase();
-  if (kind === "system" || name.includes("system")) return "system";
-  if (name.includes("cio")) return "cio";
-  if (name.includes("launch") || name.includes("early runner scout")) return "launch";
-  if (name.includes("social") || name.includes("narrative")) return "social";
-  if (name.includes("wallet") || name.includes("early flow")) return "wallet";
-  if (name.includes("quant")) return "quant";
-  if (name.includes("contract") || name.includes("safety gate")) return "contract";
-  if (name.includes("bear") || name.includes("dumper")) return "bear";
-  if (name.includes("portfolio")) return "portfolio";
-  if (name.includes("exit strategist")) return "exit";
-  if (name.includes("trajectory")) return "observer";
-  if (name.includes("executor")) return "executor";
-  if (name.includes("guardian")) return "guardian";
-  return "neutral";
-}
-
-function chatInitials(bot: string) {
-  const words = bot.trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return "AI";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase();
-}
-
-const CHAT_REVEAL_MS = 1150;
+const AUTOPILOT_STATUS_EVENT = "bot-war-room:status";
 
 type EquityHistoryPoint = { at: number; equity: number; cash: number; openValue: number };
 type PositionHistoryPoint = { at: number; price: number };
@@ -365,9 +346,6 @@ export default function WarRoomDashboard() {
   const [replayResult, setReplayResult] = useState<WarRoomResult | null>(null);
   const [activeTurn, setActiveTurn] = useState(-1);
   const [scanBubble, setScanBubble] = useState<{ agentId: AgentOpinion["id"]; message: string; round: CouncilTurn["round"] } | null>(null);
-  const [renderedChat, setRenderedChat] = useState<ChatRow[]>([]);
-  const [chatQueue, setChatQueue] = useState<ChatRow[]>([]);
-  const [chatInitialized, setChatInitialized] = useState(false);
   const [equityHistory, setEquityHistory] = useState<EquityHistoryPoint[]>([]);
   const [positionHistory, setPositionHistory] = useState<Record<string, PositionHistoryPoint[]>>({});
   const [mainGraphSelection, setMainGraphSelection] = useState<string>("portfolio");
@@ -382,8 +360,6 @@ export default function WarRoomDashboard() {
   const pendingReplayRef = useRef<WarRoomResult | null>(null);
   const lastObservedDecisionRef = useRef<string | null>(null);
   const lastScanCountRef = useRef(0);
-  const chatFeedRef = useRef<HTMLDivElement | null>(null);
-  const chatSeenIdsRef = useRef<Set<string>>(new Set());
   const result = status?.latestResult ?? null;
 
   useEffect(() => {
@@ -398,6 +374,7 @@ export default function WarRoomDashboard() {
         const payload = await response.json() as AutopilotPayload;
         if (!alive || generation !== paperResetGenerationRef.current || paperResetInFlightRef.current) return;
         setStatus(payload);
+        window.dispatchEvent(new CustomEvent(AUTOPILOT_STATUS_EVENT, { detail: payload }));
         setError(null);
       } catch (err) {
         if (!alive) return;
@@ -511,13 +488,14 @@ export default function WarRoomDashboard() {
   }, [status?.generatedAt]);
 
   const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
-  const chat = status?.chat ?? [];
   // Redis hash reads are intentionally unordered. Keep the trade log stable
   // and newest-first after each lightweight live refresh.
   const positions = [...(livePositions ?? status?.positions ?? [])].sort((a, b) =>
     (b.openedAt ?? b.updatedAt ?? "").localeCompare(a.openedAt ?? a.updatedAt ?? "")
   );
   const openPositions = positions.filter((position) => position.status !== "closed");
+  const moonBagPositions = openPositions.filter(isMoonBag);
+  const activePositions = openPositions.filter((position) => !isMoonBag(position));
   // The server snapshot includes every open PAPER position; the UI list is display-capped.
   const openPositionValue = status?.paperWallet?.openExposureUsd ?? 0;
   const openPositionCost = status?.paperWallet?.openCostUsd ?? 0;
@@ -591,48 +569,6 @@ export default function WarRoomDashboard() {
     : "#222";
 
   const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "portfolio"];
-  const liveSpeaker = displayedTurn ? roomBots.find((bot) => bot.id === displayedTurn.agentId) : undefined;
-
-  // First load shows a small recent window so the page does not explode in height.
-  // After that, every newly-arriving server message is queued and revealed one at a time.
-  useEffect(() => {
-    if (!chat.length) return;
-    const ordered = [...chat].reverse();
-
-    if (!chatInitialized) {
-      const recent = ordered.slice(-6);
-      setRenderedChat(recent);
-      chatSeenIdsRef.current = new Set(chat.map((row) => row.id));
-      setChatInitialized(true);
-      return;
-    }
-
-    const fresh = ordered.filter((row) => !chatSeenIdsRef.current.has(row.id));
-    if (!fresh.length) return;
-    for (const row of fresh) chatSeenIdsRef.current.add(row.id);
-    setChatQueue((current) => [...current, ...fresh].slice(-120));
-  }, [chat, chatInitialized]);
-
-  // Drain the live queue at a deliberate conversational pace.
-  useEffect(() => {
-    if (!chatQueue.length) return;
-    const timer = window.setTimeout(() => {
-      const next = chatQueue[0];
-      setChatQueue((current) => current.slice(1));
-      setRenderedChat((current) => [...current, next].slice(-60));
-    }, CHAT_REVEAL_MS);
-    return () => window.clearTimeout(timer);
-  }, [chatQueue]);
-
-  // Always live: scrolling never suspends message delivery.
-  useEffect(() => {
-    const feed = chatFeedRef.current;
-    if (!feed) return;
-    const id = window.requestAnimationFrame(() => {
-      feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [renderedChat]);
 
   const resetPaperWallet = async () => {
     if (paperResetInFlightRef.current) return;
@@ -701,7 +637,7 @@ export default function WarRoomDashboard() {
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
         <div className="table-scene" aria-label="Eight-bot council meeting room">
-          <img className="council-reference-art" src={COUNCIL_ART_DATA_URI} alt="Eight Bot War Room agents seated around the council table" draggable={false} />
+          <img className="council-reference-art" src="/bot-council-reference.png" alt="Eight Bot War Room agents seated around the council table" draggable={false} fetchPriority="high" />
           {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={Boolean(displayedTurn && bot.id === displayedTurn.agentId)} speech={bot.id === displayedTurn?.agentId ? displayedTurn.message : undefined} context={bot.id === displayedTurn?.agentId ? (replayResult && currentTurn ? `$${replayResult.snapshot.symbol} · ${currentTurn.round}` : `${status?.currentChain ?? "Live"} · real scan`) : undefined} />)}
         </div>
         <div className="live-caption"><span className={`status-dot ${displayedTurn ? "talking" : ""}`} /><b>{displayedTurn ? `${roomBots.find((b) => b.id === displayedTurn.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{displayedTurn ? displayedTurn.message : status ? `REAL DATA · ${status.dataMode === "birdeye" ? "Birdeye New Listings" : status.dataMode === "adapter" ? "adapter" : "DEX Screener"} · scanning ${status.currentChain} · ${status.candidateCount} real candidates · ${status.buyCount} paper buys` : "Starting real-data paper scanner"}</span></div>
@@ -726,42 +662,6 @@ export default function WarRoomDashboard() {
         <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
         <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
-      </section>
-
-      <section id="chat" className="log-panel page-panel group-chat-panel">
-        <div className="wide-panel-head group-chat-head">
-          <div><h2>◯ Council Group Chat</h2><p>Messages arrive one at a time in the exact order the War Room said them</p></div>
-          <div className="group-chat-head-actions">
-            <span className="group-chat-order">OLDEST ↑ NEWEST</span>
-            <span className="live-chip"><i /> LIVE</span>
-          </div>
-        </div>
-        <div className="group-chat-feed" ref={chatFeedRef} aria-live="polite">
-          {renderedChat.length ? renderedChat.map((row, index) => {
-            const tone = chatTone(row.bot, row.kind);
-            const previous = renderedChat[index - 1];
-            const grouped = Boolean(previous && previous.bot === row.bot && previous.kind === row.kind);
-            return (
-              <div className={`group-message tone-${tone} ${grouped ? "grouped" : ""}`} key={row.id}>
-                {!grouped ? <div className="group-avatar" aria-hidden="true">{chatInitials(row.bot)}</div> : <div className="group-avatar-spacer" />}
-                <div className="group-message-body">
-                  {!grouped && <div className="group-message-meta"><b>{row.bot}</b><time dateTime={row.at} title={new Date(row.at).toLocaleString()}>{timeOnly(row.at)}</time></div>}
-                  <div className="group-bubble"><p>{row.message}</p>{grouped && <time dateTime={row.at} title={new Date(row.at).toLocaleString()}>{timeOnly(row.at)}</time>}</div>
-                </div>
-              </div>
-            );
-          }) : <div className="group-chat-empty"><span>•••</span><p>The Council is booting. Messages will appear here in speaking order.</p></div>}
-          {displayedTurn && <div className={`group-message group-typing tone-${chatTone(liveSpeaker?.name ?? "Council", "council")}`}>
-            <div className="group-avatar" aria-hidden="true">{chatInitials(liveSpeaker?.name ?? "Council")}</div>
-            <div className="group-message-body">
-              <div className="group-message-meta"><b>{liveSpeaker?.name ?? "Council"}</b><span>speaking now</span></div>
-              <div className="group-bubble typing-bubble"><i /><i /><i /></div>
-            </div>
-          </div>}
-        </div>
-        <div className="group-chat-footer">
-          <span><i /> Always live · one message every {(CHAT_REVEAL_MS / 1000).toFixed(1)}s</span>
-        </div>
       </section>
 
       <section id="wallet-live" className="wallet-live-panel page-panel">
@@ -864,9 +764,9 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="active-trades" className="active-trades-panel page-panel">
-        <div className="wide-panel-head"><div><h2>◉ Active Trades</h2><p>Open PAPER positions currently held and monitored by the Exit Strategist.</p></div><span className="quiet-chip">{openPositions.length} holding{openPositions.length === 1 ? "" : "s"}</span></div>
+        <div className="wide-panel-head"><div><h2>◉ Active Trades</h2><p>Main PAPER positions currently held and actively managed by the Exit Strategist.</p></div><span className="quiet-chip">{activePositions.length} active</span></div>
         <div className="active-trades-grid">
-          {openPositions.length ? openPositions.slice(0, 24).map((position) => {
+          {activePositions.length ? activePositions.slice(0, 24).map((position) => {
             const pnlUsd = positionPnlUsd(position);
             return <article className="active-trade-card" key={position.id}>
               <div className="active-trade-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em className={`status-${position.status}`}>{position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></div>
@@ -875,7 +775,34 @@ export default function WarRoomDashboard() {
             </article>;
           }) : <div className="empty-row">No active PAPER trades. New Council-approved entries will appear here.</div>}
         </div>
-        {openPositions.length > 24 && <small className="active-trades-more">Showing 24 of {openPositions.length} active positions. Portfolio totals include all holdings.</small>}
+        {activePositions.length > 24 && <small className="active-trades-more">Showing 24 of {activePositions.length} active trades. Portfolio totals include every holding.</small>}
+      </section>
+
+      <section id="moon-bags" className="moon-bags-panel page-panel">
+        <div className="wide-panel-head"><div><h2>🌙 Moon Bags</h2><p>Partial profits were already taken; these smaller remainders continue running under Moon Bag protection.</p></div><span className="moonbag-chip">{moonBagPositions.length} moon bag{moonBagPositions.length === 1 ? "" : "s"}</span></div>
+        <div className="moon-bags-grid">
+          {moonBagPositions.length ? moonBagPositions.slice(0, 24).map((position) => {
+            const remainingValue = Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0);
+            const remainingCost = Math.max(0, position.remainingNotionalUsd ?? ((position.remainingQuantity ?? 0) * (position.entryPrice ?? 0)));
+            const unrealizedPnl = remainingValue - remainingCost;
+            const realizedPnl = position.realizedPnlUsd ?? 0;
+            const totalPnl = realizedPnl + unrealizedPnl;
+            return <article className="moon-bag-card" key={position.id}>
+              <div className="moon-bag-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em>MOON BAG</em></div>
+              <div className="moon-bag-values">
+                <span><small>REMAINING VALUE</small><b>${remainingValue.toFixed(2)}</b></span>
+                <span><small>REMAINING TOKENS</small><b>{tokenAmount(position.remainingQuantity ?? 0)}</b></span>
+                <span><small>CURRENT MARK</small><b>{price(position.markPrice)}</b></span>
+                <span><small>ORIGINAL ENTRY</small><b>{price(position.initialEntryPrice ?? position.entryPrice)}</b></span>
+                <span><small>REALIZED PROFIT</small><b className={realizedPnl >= 0 ? "positive" : "negative"}>{realizedPnl >= 0 ? "+" : "-"}${Math.abs(realizedPnl).toFixed(2)}</b></span>
+                <span><small>MOON BAG P/L</small><b className={unrealizedPnl >= 0 ? "positive" : "negative"}>{unrealizedPnl >= 0 ? "+" : "-"}${Math.abs(unrealizedPnl).toFixed(2)}</b></span>
+              </div>
+              <div className="moon-bag-total"><span>Total Trade P/L</span><b className={totalPnl >= 0 ? "positive" : "negative"}>{totalPnl >= 0 ? "+" : "-"}${Math.abs(totalPnl).toFixed(2)}</b></div>
+              <small className="active-trade-meta">{position.chain} · {position.takenProfitLabels.join(" · ") || "partial profits banked"} · {ago(position.openedAt)}</small>
+            </article>;
+          }) : <div className="empty-row">No Moon Bags yet. Positions move here automatically after all planned partial-profit levels are completed.</div>}
+        </div>
+        {moonBagPositions.length > 24 && <small className="active-trades-more">Showing 24 of {moonBagPositions.length} Moon Bags. Portfolio totals include every holding.</small>}
       </section>
 
       <section id="trades" className="log-panel page-panel">

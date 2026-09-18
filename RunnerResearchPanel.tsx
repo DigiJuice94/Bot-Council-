@@ -85,18 +85,9 @@ function timeAgo(value?: string) {
 export default function RunnerResearchPanel() {
   const [payload, setPayload] = useState<Payload | null>(null);
   useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      try {
-        const response = await fetch("/api/autopilot", { cache: "no-store" });
-        if (!response.ok) return;
-        const next = await response.json() as Payload;
-        if (active) setPayload(next);
-      } catch { /* main dashboard owns connectivity warnings */ }
-    };
-    void poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => { active = false; window.clearInterval(timer); };
+    const receive = (event: Event) => setPayload((event as CustomEvent<Payload>).detail);
+    window.addEventListener("bot-war-room:status", receive);
+    return () => window.removeEventListener("bot-war-room:status", receive);
   }, []);
 
   const r = payload?.research;

@@ -29,18 +29,9 @@ type Payload = {
 export default function DiagnosticsPanel() {
   const [status, setStatus] = useState<Payload | null>(null);
   useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      try {
-        const response = await fetch("/api/autopilot", { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = await response.json() as Payload;
-        if (active) setStatus(payload);
-      } catch { /* main dashboard already shows connectivity errors */ }
-    };
-    void poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => { active = false; window.clearInterval(timer); };
+    const receive = (event: Event) => setStatus((event as CustomEvent<Payload>).detail);
+    window.addEventListener("bot-war-room:status", receive);
+    return () => window.removeEventListener("bot-war-room:status", receive);
   }, []);
 
   const funnel = status?.funnel;
