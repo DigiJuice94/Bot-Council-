@@ -1,11 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { classifyMarketRegime } from "@/lib/regime";
+import { getLearningSnapshot } from "@/lib/learning-store";
+import type { MarketSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// V2.12 deliberately disables client/manual paper order injection.
-// The only code path allowed to create a new paper position is the server-side autonomous Council in lib/autopilot.ts.
-export async function POST() {
-  return NextResponse.json({
-    error: "Manual paper execution is disabled in V2.12. The autonomous War Room owns the paper wallet and only real-provider Council decisions may create entries.",
-  }, { status: 403, headers: { "Cache-Control": "no-store" } });
+export async function POST(request: NextRequest) {
+  const body = await request.json() as { snapshot?: MarketSnapshot };
+  if (!body.snapshot) return NextResponse.json({ error: "snapshot is required" }, { status: 400 });
+  const regime = classifyMarketRegime(body.snapshot);
+  return NextResponse.json(await getLearningSnapshot(regime, body.snapshot), { headers: { "Cache-Control": "no-store" } });
 }

@@ -1,5 +1,11 @@
 # Bot War Room V3
 
+## Clean GitHub baseline
+
+This repository is the complete V3.6.2 source. The authoritative application lives in `app/`, `components/`, `lib/` and `public/`; Docker builds directly from those folders. Old V2 patch scripts, root-level duplicate source files and source archives are excluded. Upload future updates with their folder structure intact. The existing Railway variables and Redis PAPER wallet data are separate from the repository.
+
+To replace the old flat GitHub checkout with this ZIP using GitHub Desktop: clone `DigiJuice94/Bot-Council-`, create a new branch, remove the old working-tree files while keeping the hidden `.git` directory, copy the *contents* of the extracted `Bot-War-Room-V3-FULL` folder into the checkout root, commit, push and open a pull request. Confirm `app/page.tsx`, `components/WarRoomDashboard.tsx`, `lib/autopilot.ts` and `public/bot-council-reference.png` appear under their folders. Do not upload the ZIP itself as a repository file or flatten its folder tree.
+
 ## V3.6.2 parallel discovery
 
 Each cycle starts discovery on two different chains at once. The Council evaluates any resulting candidates in order under one execution lease, so PAPER wallet updates cannot overlap. If the second candidate waited over 10 seconds, its snapshot is refreshed before Council review. DEX Screener's chain-independent latest listing requests are shared between parallel scans for 15 seconds to avoid duplicate traffic. This increases listing coverage per cycle, though a cycle can still take longer than its two-second timer when provider calls or Council work are slow. Buy decisions continue to require a fresh token check before a PAPER fill.
@@ -70,9 +76,7 @@ The Railway Docker deployment uses Next.js standalone output and starts with `no
 
 Extract the ZIP and upload the contents of Bot-War-Room-V3-FULL to the repository root. Keep existing Railway environment variables and Redis unchanged.
 
-The source remains in normal app/, components/, lib/, and public/ folders. An upload-safe deployment archive contains an exact copy of those current folders because some browser-based repository uploads omit directory trees. Docker extracts that current copy authoritatively before every build, preventing either missing folders or stale root files from being deployed.
-
-Use the included Dockerfile. No prepare-structure script or V2 patch chain is used. When changing source in the future, deployment-source.tar.gz must be regenerated from the same final source before packaging.
+Use the included Dockerfile. It requires the normal `app/`, `components/`, `lib/` and `public/` directories at the repository root and builds them directly. Keep those directories when uploading future changes.
 
 ## Persistence
 

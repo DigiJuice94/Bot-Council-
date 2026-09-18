@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { classifyMarketRegime } from "@/lib/regime";
-import { getLearningSnapshot } from "@/lib/learning-store";
-import type { MarketSnapshot } from "@/lib/types";
+import { getTradeJournal } from "@/lib/trade-journal";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
-  const body = await request.json() as { snapshot?: MarketSnapshot };
-  if (!body.snapshot) return NextResponse.json({ error: "snapshot is required" }, { status: 400 });
-  const regime = classifyMarketRegime(body.snapshot);
-  return NextResponse.json(await getLearningSnapshot(regime, body.snapshot), { headers: { "Cache-Control": "no-store" } });
+export async function GET(request: NextRequest) {
+  const limit = Number(request.nextUrl.searchParams.get("limit") ?? 100);
+  return NextResponse.json(await getTradeJournal(limit), { headers: { "Cache-Control": "no-store" } });
 }

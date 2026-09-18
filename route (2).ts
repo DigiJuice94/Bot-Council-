@@ -1,67 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runWarRoom } from "@/lib/engine";
-import { fetchLiveCandidate, liveMarketDataMode } from "@/lib/market-data";
-import { ensurePositionGuardianLoop } from "@/lib/position-manager";
-import { classifyMarketRegime } from "@/lib/regime";
-import { relevantMemoryHints, resolveAdaptiveWeights } from "@/lib/learning-store";
-import { loadLatestProfitability } from "@/lib/profitability-store";
-import { getPaperPortfolioContext } from "@/lib/paper-wallet";
-import type { Chain, MarketSnapshot, TradingMode } from "@/lib/types";
-import { ensureReleaseFreshStart } from "@/lib/release-fresh-start";
+import { runProfitabilityBenchmark, type BenchmarkConfig } from "@/lib/backtest";
+import { saveLatestProfitability, loadLatestProfitability } from "@/lib/profitability-store";
+import { fetchHistoricalFrames } from "@/lib/market-data";
+import type { Chain, HistoricalFrame } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  const metrics = await loadLatestProfitability();
+  return NextResponse.json({
+    status: metrics ? "measured" : "awaiting-data",
+    metrics,
+    message: metrics ? "Latest reproducible benchmark loaded." : "No real historical benchmark has been run yet.",
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function POST(request: NextRequest) {
-  await ensureReleaseFreshStart();
-  ensurePositionGuardianLoop();
-  let previous: MarketSnapshot | undefined;
-  let chain: Chain | undefined;
-  let mode: TradingMode = "paper";
-  try {
-    const body = await request.json();
-    previous = body?.snapshot;
-    chain = body?.chain;
-    mode = body?.mode === "live" ? "live" : "paper";
-  } catch {
-    previous = undefined;
-  }
-
-  const requestedChain = chain ?? previous?.chain ?? "Solana";
-  const snapshot = await fetchLiveCandidate(requestedChain);
-  if (!snapshot) {
-    return NextResponse.json({
-      ok: false,
-      chain: requestedChain,
-      dataMode: liveMarketDataMode(),
-      message: "No qualifying real market candidate is available right now. Demo/fake candidates are disabled.",
-    }, {
-      status: 503,
-      headers: { "Cache-Control": "no-store", "X-Market-Data-Mode": liveMarketDataMode() },
-    });
-  }
-
-  const regime = classifyMarketRegime(snapshot);
-  const [learning, memoryHints, profitability, portfolio] = await Promise.all([
-    resolveAdaptiveWeights(regime, snapshot),
-    relevantMemoryHints(snapshot, regime.id),
-    loadLatestProfitability(),
-    getPaperPortfolioContext(snapshot.chain),
-  ]);
-
-  const result = runWarRoom(snapshot, {
-    mode,
-    regime,
-    agentWeights: learning.weights,
-    learningSource: learning.source,
-    memoryHints,
-    profitability,
-    portfolio,
-  });
-  return NextResponse.json(result, {
-    headers: {
-      "Cache-Control": "no-store",
-      "X-Market-Data-Mode": liveMarketDataMode(),
-      "X-Learning-Mode": learning.source,
-    },
-  });
+  const body = await request.json() as { frames?: HistoricalFrame[]; config?: BenchmarkConfig; fetchFromAdapter?: boolean; chain?: Chain; limit?: number };
+  let frames = Array.isArray(body.frames) ? body.frames : [];
+  if (!frames.length && body.fetchFromAdapter && body.chain) frames = await fetchHistoricalFrames(body.chain, body.limit ?? 5000);
+  if (!frames.length) return NextResponse.json({ error: "Provide frames[] or set fetchFromAdapter=true with a chain and a configured /history market-data adapter." }, { status: 400 });
+  if (frames.length > 50_000) return NextResponse.json({ error: "Maximum 50,000 historical frames per benchmark run" }, { status: 413 });
+  const report = runProfitabilityBenchmark(frames, body.config ?? {});
+  await saveLatestProfitability(report.metrics);
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }
