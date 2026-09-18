@@ -218,7 +218,27 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   context.runnerGenome = result.runnerGenome;
   context.independentCouncil = result.independentCouncil;
   context.initialAllocationPct = portfolio.equityUsd > 0 ? request.notionalUsd / portfolio.equityUsd * 100 : 0;
-  const eligibility = await eligibilityWithPaperUnknownOverride(result, request, context);
+
+  // Last-mile entry verification: Council decisions can take long enough for a
+  // brand-new pool to disappear between discovery and execution. Never trust
+  // the earlier candidate snapshot for the final fill. A missing refresh fails
+  // closed because it may mean the pair/liquidity no longer exists.
+  const executionSnapshot = await fetchLiveTokenSnapshot(request.chain, request.tokenAddress);
+  if (!executionSnapshot) {
+    const reason = "Entry blocked: fresh final liquidity verification returned no executable market.";
+    recordRejection(reason);
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+    return false;
+  }
+  if (!Number.isFinite(executionSnapshot.liquidity) || executionSnapshot.liquidity <= 0) {
+    const reason = "Entry blocked: fresh final liquidity verification reports $0 liquidity.";
+    recordRejection(reason);
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+    return false;
+  }
+  context.snapshot = executionSnapshot;
+  const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
+  const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
   if (!eligibility.allowed) {
     recordRejection(eligibility.reason);
     addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${eligibility.reason}`, "execution");
@@ -226,11 +246,11 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   }
 
   try {
-    const fill = await executePaper(request, result.snapshot);
+    const fill = await executePaper(request, executionSnapshot);
     const position = await registerPaperPosition({
       fill,
       request,
-      snapshot: result.snapshot,
+      snapshot: executionSnapshot,
       exitStrategy: result.exitStrategy,
       entryContext: context,
       reentryCount: eligibility.reentryCount,

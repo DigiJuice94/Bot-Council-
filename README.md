@@ -6,6 +6,8 @@ When Guardian confirms that an owned PAPER token is not sellable, is a honeypot,
 
 Zero liquidity is an absolute execution rule: a candidate reporting `$0` liquidity cannot be bought, regardless of Council output. If an already-owned token later reaches `$0` liquidity, Guardian records it as Unsellable with `$0` proceeds rather than manufacturing a paper exit.
 
+Every PAPER buy now performs a second fresh token lookup immediately before fill creation. The order fails closed when that lookup is missing, stale/non-executable, or reports `$0` liquidity, preventing an earlier Council snapshot from authorizing a pool that disappeared while the Council was deliberating.
+
 ## Fast dashboard, Moon Bags and one-time fresh bankroll
 
 This release automatically starts one fresh, verified PAPER ledger at server startup, before runtime loops start. It uses the existing configured starting balance (default $1,000), clears the PAPER trade log/positions/fills and starts a new portfolio history marker. Runner Genome, Filing Cabinet, Trajectory Observer and private agent research are retained. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata.
