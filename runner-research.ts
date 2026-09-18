@@ -21,7 +21,7 @@ let genomeModelCache: GenomeModelCache | null = null;
 const GENOME_MODEL_CACHE_MS = 30_000;
 
 export type ResearchOutcome = "open" | "runner" | "dumper" | "neutral";
-export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor" | "observer";
+export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "sellability" | "cio" | "executor" | "observer";
 
 export type ResearchObservation = {
   at: string;
@@ -365,6 +365,7 @@ function outcomeResearchNotes(row: CoinCaseFile): BotResearchNote[] {
     ["quant", `${outcome} autopsy for $${row.symbol}: early volume/MC ${(first?.volumeToMc ?? 0).toFixed(2)}x, buy/sell ${(first?.buySellRatio ?? 0).toFixed(2)}x, acceleration ${(first?.volumeAccelerationPct ?? 0).toFixed(0)}%.`],
     ["contract", `${outcome} autopsy for $${row.symbol}: early top-10 ${(first?.top10Pct ?? 0).toFixed(1)}% and bundled ${(first?.bundledPct ?? 0).toFixed(1)}%; file whether concentration distinguished this outcome.`],
     ["bear", `${outcome} autopsy for $${row.symbol}: study what warned against the move before the outcome was obvious; peak-to-trough behavior reached ${draw}.`],
+    ["sellability", `${outcome} sellability review for $${row.symbol}: compare entry liquidity, liquidity/MC, verification coverage, authorities, taxes and concentration with filed locked-capital cases.`],
     ["cio", `${outcome} autopsy for $${row.symbol}: preserve the sequence of early signals and compare it with matched ${row.outcome === "runner" ? "dumpers" : "runners"}, not just the final snapshot.`],
     ["executor", `${outcome} autopsy for $${row.symbol}: ${row.paperTradeOpened ? `paper entry was opened near $${Math.round(row.paperEntryMarketCap ?? 0).toLocaleString()} MC` : "no paper position was opened"}; use this case to evaluate capture quality and missed opportunity.`],
   ];
@@ -532,6 +533,13 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
       row.paperProfitCapturePct = position.profitCapturePct;
       row.paperHoldMinutes = Math.max(0, (new Date(position.closedAt ?? position.updatedAt).getTime() - new Date(position.openedAt).getTime()) / 60_000);
       row.paperExitReason = position.lastReason;
+      if (position.status === "unsellable") {
+        row.botNotes = [...row.botNotes, {
+          at: position.unsellableAt ?? position.updatedAt,
+          agentId: "sellability" as BotRole,
+          message: `UNSELLABLE case filed for $${position.symbol}: $${(position.lockedCapitalLossUsd ?? -position.realizedPnlUsd).toFixed(2)} locked/lost. Entry fingerprint preserved for comparison with future candidates. ${position.unsellableReason ?? position.lastReason}`,
+        }].slice(-MAX_BOT_NOTES_PER_CASE);
+      }
       classifyCase(row);
       const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? process.env.PAPER_TRAINING_TRADE_USD ?? 50));
       const meaningfulTrainingTrade = (row.paperRequestedUsd ?? 0) + 0.005 >= trainingTradeUsd;

@@ -1,5 +1,13 @@
 # Bot War Room V3
 
+## V3.4 Sellability Investigator
+
+The Council now has nine independent local entities: eight private-read specialists plus the separate Runner CIO. The new **Sellability Investigator** has a Council seat and a deliberately narrow job. Every Unsellable / Locked Capital outcome preserves its entry-time liquidity, liquidity/market-cap, volume/liquidity, holder concentration, bundle, tax, authority, ownership, lock and provider-verification fingerprint in Redis. Every future candidate is compared with those filed failures. One unusual loss can inform the vote but cannot create a learned ban; blocking requires repeated close cases, including a same-chain match, at high aggregate risk.
+
+Recognized Pump.fun, Moonshot, Four.meme and Fomo launchpad candidates must prove graduation before entry. A launchpad/bonding venue is a hard SKIP. Graduation is accepted only when the fresh execution snapshot identifies a separate DEX pair with executable liquidity. Ordinary non-launchpad DEX tokens keep the existing entry rules. This graduation and learned-sellability check runs both during the independent Council round and again on the fresh last-mile snapshot immediately before every PAPER fill.
+
+The Sellability Investigator is local and uses no OpenAI/ChatGPT API. Its case file is preserved across wallet resets together with the existing learning stores.
+
 ## V3.3 locked-capital accounting
 
 When Guardian confirms that an owned PAPER token is not sellable, is a honeypot, or can freeze transfers, the position is moved to **Unsellable / Locked Capital**. No simulated sale proceeds are credited. The remaining cost is counted as a loss in verified portfolio accounting, the stuck token remains visible, and the completed failure is retained by specialist learning. Entry rules, Council thresholds, profit-taking levels, and Moon Bag behavior are unchanged.
@@ -46,7 +54,7 @@ Use the included Dockerfile. No prepare-structure script or V2 patch chain is us
 
 ## Persistence
 
-Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-time portfolio history, Runner Genome/Filing Cabinet research, Trajectory Observer research, and private Council entity memories. The Redis key namespaces are unchanged from V2.29.4.
+Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-time portfolio history, Runner Genome/Filing Cabinet research, Trajectory Observer research, private Council entity memories and Sellability Investigator cases. Existing Redis key namespaces remain unchanged from V2.29.4; V3.4 adds a separate `bot-war-room:sellability-investigator:v1:cases` research key without migrating or deleting prior data.
 
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 

@@ -27,6 +27,14 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const earlyRunnerLane = !p.liveTradingEnabled && m.marketCap >= 8_000 && m.marketCap <= 80_000 && m.ageMinutes <= 1_440;
   const unknown = (message: string) => paperCanExploreUnknowns ? warnings.push(`${message}; PAPER mode reduced to exploration sizing`) : hardBlocks.push(message);
 
+  if (m.launchpad?.detected) {
+    check(
+      m.launchpad.status === "graduated",
+      `${m.launchpad.platform} graduation verified on an executable DEX pool`,
+      `${m.launchpad.platform} token is still bonding or lacks verified DEX graduation`,
+    );
+  }
+
   if (directLive && q) {
     if (!q.sellability) unknown("Sellability verification unavailable from live security provider");
     else check(m.sellable, "Sellability verified", "Sellability check failed");

@@ -13,6 +13,7 @@ import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositio
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
+import { assessSellabilityRisk } from "./sellability-investigator";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -148,6 +149,7 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
     agentWeights: result.agentWeights,
     decision: result.decision,
     conviction: result.conviction,
+    sellabilityInvestigation: result.sellabilityInvestigation,
     riskMaxPositionPct: result.risk.maxPositionPct,
     initialAllocationPct,
     portfolioEquityUsd: portfolio.equityUsd,
@@ -157,6 +159,7 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
 function explicitSecurityFailure(result: WarRoomResult) {
   const snapshot = result.snapshot;
   const q = snapshot.dataProvenance?.quality;
+  if (snapshot.launchpad?.detected && snapshot.launchpad.status !== "graduated") return `${snapshot.launchpad.platform} graduation is not verified`;
   if (q?.sellability && !snapshot.sellable) return "Sellability explicitly failed";
   if (q?.honeypot && snapshot.honeypot) return "Honeypot evidence is positive";
   if (q?.top10 && snapshot.top10Pct > 80) return "Top 10 holders exceed 80%";
@@ -236,7 +239,17 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
     addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
   }
+  const finalSellability = await assessSellabilityRisk(executionSnapshot);
+  if (finalSellability.verifiedBlock || finalSellability.learnedBlock) {
+    const reason = finalSellability.verifiedBlock
+      ? `Entry blocked by fresh Sellability Investigator verification: ${finalSellability.evidence[0] ?? "token cannot be exited safely"}`
+      : `Entry blocked by Sellability Investigator: ${finalSellability.similarCases} close unsellable fingerprint matches at ${finalSellability.riskScore}/100 risk.`;
+    recordRejection(reason);
+    addChat("Sellability Investigator", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+    return false;
+  }
   context.snapshot = executionSnapshot;
+  context.sellabilityInvestigation = finalSellability;
   const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
   const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
   if (!eligibility.allowed) {

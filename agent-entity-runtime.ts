@@ -1,6 +1,7 @@
 import { buildExecutionPlan } from "./execution";
 import { runWarRoom } from "./engine";
 import { loadPrivateEntityMemory, recordEntityDecision } from "./agent-entity-store";
+import { assessSellabilityRisk } from "./sellability-investigator";
 import type {
   AgentOpinion,
   CouncilEntityId,
@@ -64,6 +65,10 @@ const ENTITY_SPECS: EntitySpec[] = [
     mission: "Look for the specific fingerprints that historically preceded failed launches and dumps.",
   },
   {
+    id: "sellability", name: "Sellability Investigator", shortName: "SI", color: "#e65f49",
+    mission: "Study every unsellable loss and identify its pre-buy fingerprint before future capital enters.",
+  },
+  {
     id: "portfolio", name: "Portfolio Strategist", shortName: "PS", color: "#70a8ff",
     mission: "Independently decide whether the setup deserves $50, $75, $100, $125 or $150 in PAPER.",
   },
@@ -91,7 +96,7 @@ type EntityMemoryLite = {
   lesson: string;
 };
 
-function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio: PortfolioRiskContext) {
+function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio: PortfolioRiskContext, sellabilityInvestigation: NonNullable<WarRoomResult["sellabilityInvestigation"]>) {
   const g = base.runnerGenome;
   return {
     token: {
@@ -162,6 +167,7 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
       warnings: base.risk.warnings,
       executorFeasibility: base.councilProcess.executorVote,
     },
+    sellabilityInvestigation,
     paperPortfolio: {
       equityUsd: portfolio.equityUsd,
       cashUsd: portfolio.cashUsd,
@@ -357,6 +363,18 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
       `5m MC ${t.marketCapChange5mPct.toFixed(1)}% · buy/sell ${t.buySellRatio.toFixed(2)}x.`,
     ];
     risks = g.dumperEvidence.slice(0, 4);
+  } else if (spec.id === "sellability") {
+    const investigation = packet.sellabilityInvestigation;
+    score = clamp(100 - investigation.riskScore);
+    thesis = investigation.verifiedBlock
+      ? "Fresh verified evidence says this token cannot be exited safely, so I vote SKIP."
+      : investigation.learnedBlock
+        ? "This candidate repeatedly matches the pre-buy fingerprints of filed unsellable losses, so I vote SKIP."
+        : investigation.sampleSize
+          ? "I compared this candidate with the unsellable case file; the current pattern does not meet the repeated-case block standard."
+          : "No unsellable cases are filed yet, so I rely on verified live sellability evidence and begin building the case library.";
+    evidence = investigation.evidence;
+    risks = investigation.riskScore >= 55 ? investigation.evidence : [];
   } else {
     score = clamp(
       g.entryScore * 0.58 +
@@ -408,7 +426,7 @@ async function thinkMeeting(
 
   // Peer evidence may influence the second-round vote, but each specialty keeps
   // its own weight and may disagree with consensus.
-  if (spec.id === "contract") {
+  if (spec.id === "contract" || spec.id === "sellability") {
     score = own.score; // safety does not get socially voted away
   } else if (spec.id === "bear") {
     score = clamp(own.score + buy * 1.2 - skip * 0.8);
@@ -452,6 +470,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
     quant: 1.35,
     contract: 1.55,
     bear: 1.25,
+    sellability: 1.65,
     portfolio: 1.00,
   };
 
@@ -468,7 +487,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
   const genomeBoost = (packet.runnerGenome.entryScore * 0.72 + packet.runnerGenome.trajectoryScore * 0.28 - packet.runnerGenome.dumperRiskScore * 0.25 - packet.runnerGenome.trajectoryDumperRiskScore * 0.10) / 100;
   const composite = clamp(normalized * 72 + genomeBoost * 28);
 
-  const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK";
+  const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK" || packet.sellabilityInvestigation.verifiedBlock || packet.sellabilityInvestigation.learnedBlock;
   const vote: "BUY" | "WATCH" | "SKIP" = hardBlocked
     ? "SKIP"
     : composite >= 57 ? "BUY"
@@ -492,7 +511,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
     score: Math.round(composite),
     thesis: hardBlocked
       ? `The specialist meeting completed, but explicit token-level safety/execution evidence blocked the trade.`
-      : `Seven independent local entities finished their private reads and meeting. Final split: ${buy} BUY / ${watch} WATCH / ${skip} SKIP. I synthesize that as ${vote}.`,
+      : `Eight independent local specialists finished their private reads and meeting. Final split: ${buy} BUY / ${watch} WATCH / ${skip} SKIP. I synthesize that as ${vote}.`,
     evidence: [
       `Council composite ${composite.toFixed(0)}/100.`,
       `Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${packet.runnerGenome.dumperRiskScore.toFixed(0)}/100.`,
@@ -523,14 +542,15 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   const mode = options.mode ?? "paper";
 
   // Shared analytics calculate objective measurements only. Their old synthetic
-  // role opinions are discarded; seven separate local entities form the Council.
+  // role opinions are discarded; eight separate local specialists form the Council.
   const base = runWarRoom(snapshot, options);
   const portfolio = options.portfolio!;
-  const packet = compactPacket(snapshot, base, portfolio);
+  const sellabilityInvestigation = await assessSellabilityRisk(snapshot);
+  const packet = compactPacket(snapshot, base, portfolio, sellabilityInvestigation);
   const sessionId = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
   const privateRoundStartedAt = now();
 
-  // All seven private reads execute independently before any peer output exists.
+  // All eight private reads execute independently before any peer output exists.
   const initialOpinions = await Promise.all(ENTITY_SPECS.map((spec) => thinkPrivate(spec, packet)));
 
   const meetingRoundStartedAt = now();
@@ -550,7 +570,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
 
   const cioOpinion = await thinkCio(packet, meetingOpinions);
 
-  const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK";
+  const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK" || sellabilityInvestigation.verifiedBlock || sellabilityInvestigation.learnedBlock;
   const finalDecision = deterministicBlocked ? "SKIP" : cioOpinion.vote;
   const suggestedTradeUsd = boundedTradeUsd(
     meetingOpinions.find((o) => o.agentId === "portfolio")?.suggestedTradeUsd
@@ -559,7 +579,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   );
   const runnerGenome = { ...base.runnerGenome, suggestedTradeUsd };
 
-  const alignedBots = Math.max(1, Math.min(8, meetingOpinions.filter((o) => o.vote === cioOpinion.vote).length + 1));
+  const alignedBots = Math.max(1, Math.min(9, meetingOpinions.filter((o) => o.vote === cioOpinion.vote).length + 1));
   const buySupport = meetingOpinions.filter((o) => o.vote === "BUY").length;
   const watchSupport = meetingOpinions.filter((o) => o.vote === "WATCH").length;
   const researchSupport = buySupport + watchSupport;
@@ -570,10 +590,11 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     requiredResearchSupport: 4,
     cioVote: cioOpinion.vote,
     alignedBots,
-    totalBots: 8 as const,
+    totalBots: 9 as const,
     reasons: [
-      "Seven local specialist entities completed private reads before peer reveal.",
-      `${buySupport}/7 meeting entities voted BUY · ${watchSupport}/7 WATCH · ${7 - buySupport - watchSupport}/7 SKIP.`,
+      "Eight local specialist entities completed private reads before peer reveal.",
+      `${buySupport}/8 meeting entities voted BUY · ${watchSupport}/8 WATCH · ${8 - buySupport - watchSupport}/8 SKIP.`,
+      `Sellability Investigator: risk ${sellabilityInvestigation.riskScore}/100 · ${sellabilityInvestigation.similarCases} close unsellable matches · ${sellabilityInvestigation.learnedBlock || sellabilityInvestigation.verifiedBlock ? "BLOCK" : "NO BLOCK"}.`,
       `Runner CIO separately synthesized the completed meeting at ${cioOpinion.confidence}% confidence.`,
       "No OpenAI/ChatGPT API call is used anywhere in this Council runtime.",
       "Trajectory Observer is background research only: it supplies sequence evidence and private lessons but has no Council vote.",
@@ -600,7 +621,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   agents.push(toAgentOpinion(cioOpinion, CIO_SPEC.color, CIO_SPEC.shortName));
 
   const preMeeting = initialOpinions
-    .filter((opinion) => opinion.agentId !== "portfolio")
+    .filter((opinion) => opinion.agentId !== "portfolio" && opinion.agentId !== "sellability")
     .map((opinion) => ({
       agentId: opinion.agentId as ResearchAgentId,
       score: opinion.score,
@@ -644,9 +665,9 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   const auditTrail = [
     ...filteredAudit,
     `INDEPENDENT LOCAL COUNCIL · session ${sessionId}`,
-    "PRIVATE ROUND · 7/7 specialist entities locked opinions before peer reveal",
+    "PRIVATE ROUND · 8/8 specialist entities locked opinions before peer reveal",
     ...initialOpinions.map((o: IndependentEntityOpinion) => `PRIVATE ${o.agentName} · ${o.vote} · ${o.confidence}% · ${o.thesis}`),
-    "MEETING ROUND · peer summaries revealed only after all seven private reads completed",
+    "MEETING ROUND · peer summaries revealed only after all eight private reads completed",
     ...meetingOpinions.map((o: IndependentEntityOpinion) => `MEETING ${o.agentName} · ${o.vote} · ${o.confidence}%${o.changedVote ? " · VOTE CHANGED" : ""} · ${o.rebuttal ?? o.thesis}`),
     `RUNNER CIO · ${cioOpinion.vote} · ${cioOpinion.confidence}% · ${cioOpinion.thesis}`,
     `DETERMINISTIC EXECUTOR · ${base.councilProcess.executorVote}${deterministicBlocked ? " · token-level safety/execution override to SKIP" : ""}`,
@@ -655,6 +676,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
 
   return {
     ...base,
+    sellabilityInvestigation,
     runnerGenome,
     councilProcess,
     preMeeting,

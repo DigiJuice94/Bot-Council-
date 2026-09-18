@@ -72,6 +72,9 @@ export async function assessPaperEntryEligibility(args: {
   if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
     return { allowed: false, isReentry: false, reentryCount: 0, reason: "Entry blocked: token reports zero executable liquidity." };
   }
+  if (snapshot.launchpad?.detected && snapshot.launchpad.status !== "graduated") {
+    return { allowed: false, isReentry: false, reentryCount: 0, reason: `Entry blocked: ${snapshot.launchpad.platform} token has not verified graduation to an executable DEX pool.` };
+  }
   const affordability = await canAffordPaperBuy(request.notionalUsd);
   if (!affordability.allowed) return { allowed: false, isReentry: false, reentryCount: 0, reason: affordability.reason ?? "Paper wallet cannot fund this entry." };
   const positions = (await listManagedPositions()).map(normalizedPosition);

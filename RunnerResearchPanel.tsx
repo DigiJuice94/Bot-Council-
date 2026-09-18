@@ -213,7 +213,7 @@ export default function RunnerResearchPanel() {
 
       <div className="v214-two-col">
         <article className="v214-box">
-          <div className="v214-box-title"><h3>What the bots are filing</h3><span>all 8 roles</span></div>
+          <div className="v214-box-title"><h3>What the bots are filing</h3><span>all 9 roles</span></div>
           <div className="v214-lessons">{lessons.length ? lessons.map((row, index) => <div key={`${row.at}-${row.agentId}-${index}`}><span>{row.agentId.toUpperCase()}</span><p>{row.message}</p><time>{timeAgo(row.at)}</time></div>) : <p className="v214-muted">The next Council reads will appear here as research notes.</p>}</div>
         </article>
 
