@@ -6,7 +6,7 @@ The Council now has nine independent local entities: eight private-read speciali
 
 Recognized Pump.fun, Moonshot, Four.meme and Fomo launchpad candidates must prove graduation before entry. A launchpad/bonding venue is a hard SKIP. Graduation is accepted only when the fresh execution snapshot identifies a separate DEX pair with executable liquidity. Ordinary non-launchpad DEX tokens keep the existing entry rules. This graduation and learned-sellability check runs both during the independent Council round and again on the fresh last-mile snapshot immediately before every PAPER fill.
 
-The Sellability Investigator is local and uses no OpenAI/ChatGPT API. Its case file is preserved across wallet resets together with the existing learning stores.
+The Sellability Investigator is local and uses no OpenAI/ChatGPT API. Its case file is preserved across wallet resets together with the existing learning stores. This V3.4 package intentionally triggers one fresh PAPER wallet reset on its first successful deployment only; later restarts retain the new run.
 
 ## V3.3 locked-capital accounting
 
@@ -18,7 +18,7 @@ Every PAPER buy now performs a second fresh token lookup immediately before fill
 
 ## Fast dashboard, Moon Bags and one-time fresh bankroll
 
-This release automatically starts one fresh, verified PAPER ledger at server startup, before runtime loops start. It uses the existing configured starting balance (default $1,000), clears the PAPER trade log/positions/fills and starts a new portfolio history marker. Runner Genome, Filing Cabinet, Trajectory Observer and private agent research are retained. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata.
+This release automatically starts one fresh, verified PAPER ledger before the autopilot, Guardian, cycle API, or position API can perform PAPER work. The runtime entry points await the reset directly, so correctness does not depend on Railway invoking the Next.js instrumentation hook. It uses the existing configured starting balance (default $1,000), clears the PAPER trade log/positions/fills and starts a new portfolio history marker. Runner Genome, Filing Cabinet, Trajectory Observer and private agent research are retained. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata.
 
 The background Portfolio Auditor is the single source of truth for Cash, Open Cost, Current Position Value, Unrealized P/L, Realized P/L, Total P/L and Equity. It reconciles the full server ledger rather than the limited UI trade list. Cross-process execution leases prevent overlapping Railway workers from applying the same PAPER buy, trim or exit twice. Automatic research refills are disabled by default; if explicitly enabled, added PAPER capital is tracked separately and excluded from profit.
 

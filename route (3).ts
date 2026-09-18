@@ -7,10 +7,12 @@ import { relevantMemoryHints, resolveAdaptiveWeights } from "@/lib/learning-stor
 import { loadLatestProfitability } from "@/lib/profitability-store";
 import { getPaperPortfolioContext } from "@/lib/paper-wallet";
 import type { Chain, MarketSnapshot, TradingMode } from "@/lib/types";
+import { ensureReleaseFreshStart } from "@/lib/release-fresh-start";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
+  await ensureReleaseFreshStart();
   ensurePositionGuardianLoop();
   let previous: MarketSnapshot | undefined;
   let chain: Chain | undefined;

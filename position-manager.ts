@@ -8,6 +8,7 @@ import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeM
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { getRunnerExitGuidance } from "./runner-research";
+import { ensureReleaseFreshStart } from "./release-fresh-start";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
@@ -556,6 +557,7 @@ export function ensurePositionGuardianLoop() {
 }
 
 export async function refreshPositionGuardian(): Promise<PositionGuardianReport> {
+  await ensureReleaseFreshStart();
   if (guardianGlobal.__botWarRoomGuardianBusy) {
     const storage = await positionStorageMode();
     return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };

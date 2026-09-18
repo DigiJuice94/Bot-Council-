@@ -14,6 +14,7 @@ import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import { assessSellabilityRisk } from "./sellability-investigator";
+import { ensureReleaseFreshStart } from "./release-fresh-start";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -430,7 +431,7 @@ async function scanOneChain(chain: Chain) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/${result.councilProcess.totalBots} independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {
@@ -448,6 +449,7 @@ async function scanOneChain(chain: Chain) {
 }
 
 export async function runAutonomousTick() {
+  await ensureReleaseFreshStart();
   if (globalState.__botWarRoomAutopilotBusyV14) return;
   globalState.__botWarRoomAutopilotBusyV14 = true;
   let releaseLease: (() => Promise<void>) | null = null;
@@ -488,10 +490,11 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
+  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; every Council entity files lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
 }
 
 export async function getAutopilotStatus() {
+  await ensureReleaseFreshStart();
   ensureAutonomousWarRoom();
   const bankroll = await ensurePaperWalletResearchFunds();
   const positions = await listManagedPositions();
