@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.6.0-reserve-backed-exits",
+  "version": "3.4.0-sellability-investigator",
   "private": true,
   "scripts": {
     "dev": "next dev",

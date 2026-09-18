@@ -13,7 +13,7 @@ import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositio
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import { assessSellabilityRisk, getSellabilityLearningSnapshot, recordLearnedSellabilityBlock } from "./sellability-investigator";
+import { assessSellabilityRisk } from "./sellability-investigator";
 import { ensureReleaseFreshStart } from "./release-fresh-start";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
@@ -416,10 +416,6 @@ async function scanOneChain(chain: Chain) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
   }
 
-  if (result.sellabilityInvestigation?.learnedBlock) {
-    await recordLearnedSellabilityBlock(snapshot, result.sellabilityInvestigation);
-  }
-
   await observeCouncilResult(result);
   current.latestResult = result;
   current.recentDecisions = [result, ...current.recentDecisions.filter((row) => row.decisionId !== result.decisionId)].slice(0, MAX_DECISIONS);
@@ -506,7 +502,6 @@ export async function getAutopilotStatus() {
   const resetMeta = await getPaperWalletResetMeta();
   const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
-  const sellabilityLearning = await getSellabilityLearningSnapshot();
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
   return {
@@ -515,7 +510,6 @@ export async function getAutopilotStatus() {
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    sellabilityLearning,
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };

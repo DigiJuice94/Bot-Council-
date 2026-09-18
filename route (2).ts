@@ -1,49 +1,27 @@
-import { NextResponse } from "next/server";
-import { getPaperWallet } from "@/lib/paper-wallet";
-import { listManagedPositions } from "@/lib/position-store";
+import { NextRequest, NextResponse } from "next/server";
+import { runProfitabilityBenchmark, type BenchmarkConfig } from "@/lib/backtest";
+import { saveLatestProfitability, loadLatestProfitability } from "@/lib/profitability-store";
+import { fetchHistoricalFrames } from "@/lib/market-data";
+import type { Chain, HistoricalFrame } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const requestedLimit = Number(url.searchParams.get("limit") ?? 500);
-  const limit = Math.max(25, Math.min(1_000, Number.isFinite(requestedLimit) ? Math.round(requestedLimit) : 500));
-  const [wallet, positions] = await Promise.all([getPaperWallet(), listManagedPositions()]);
-  const byId = new Map(positions.map((position) => [position.id, position]));
-
-  const rows = wallet.recentFills.slice(0, limit).map((fill) => {
-    const position = fill.positionId ? byId.get(fill.positionId) : undefined;
-    const quantity = fill.quantity ?? (fill.side === "BUY"
-      ? fill.filledUsd / Math.max(fill.fillPrice, 1e-12)
-      : fill.requestedUsd * Math.max(0.01, 1 - fill.slippageBps / 10_000) / Math.max(fill.fillPrice, 1e-12));
-    const nextUntaken = position?.exitStrategy?.takeProfits?.find((level) => !position.takenProfitLabels.includes(level.label));
-    const nextTargetPrice = fill.nextTargetPrice ?? (nextUntaken && position
-      ? position.entryPrice * (1 + nextUntaken.gainPct / 100)
-      : undefined);
-    const moonbagExitFloorPrice = fill.moonbagExitFloorPrice ?? (position?.highWaterPrice
-      ? position.highWaterPrice * (1 - (position.exitStrategy?.moonbagTrailingStopPct ?? position.exitStrategy?.trailingStopPct ?? 0) / 100)
-      : undefined);
-
-    return {
-      ...fill,
-      action: fill.action ?? (fill.side === "BUY" ? "ENTRY" : fill.remainingQuantityAfter === 0 ? "EXIT" : "TRIM"),
-      quantity,
-      remainingQuantityAfter: fill.remainingQuantityAfter ?? position?.remainingQuantity,
-      portfolioEquityAfterUsd: fill.portfolioEquityAfterUsd,
-      entryPrice: position?.initialEntryPrice ?? position?.entryPrice,
-      entryQuantity: position?.initialQuantity ?? position?.quantity,
-      imageUrl: position?.imageUrl,
-      status: position?.status,
-      realizedPnlAfterUsd: fill.positionRealizedPnlAfterUsd,
-      nextTargetPrice,
-      moonbagExitFloorPrice,
-    };
-  });
-
+export async function GET() {
+  const metrics = await loadLatestProfitability();
   return NextResponse.json({
-    rows,
-    totalStored: wallet.recentFills.length,
-    accountingVerified: wallet.accountingVerified,
-    generatedAt: new Date().toISOString(),
+    status: metrics ? "measured" : "awaiting-data",
+    metrics,
+    message: metrics ? "Latest reproducible benchmark loaded." : "No real historical benchmark has been run yet.",
   }, { headers: { "Cache-Control": "no-store" } });
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json() as { frames?: HistoricalFrame[]; config?: BenchmarkConfig; fetchFromAdapter?: boolean; chain?: Chain; limit?: number };
+  let frames = Array.isArray(body.frames) ? body.frames : [];
+  if (!frames.length && body.fetchFromAdapter && body.chain) frames = await fetchHistoricalFrames(body.chain, body.limit ?? 5000);
+  if (!frames.length) return NextResponse.json({ error: "Provide frames[] or set fetchFromAdapter=true with a chain and a configured /history market-data adapter." }, { status: 400 });
+  if (frames.length > 50_000) return NextResponse.json({ error: "Maximum 50,000 historical frames per benchmark run" }, { status: 413 });
+  const report = runProfitabilityBenchmark(frames, body.config ?? {});
+  await saveLatestProfitability(report.metrics);
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }

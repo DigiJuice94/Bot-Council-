@@ -689,12 +689,11 @@ function launchpadState(pair: DexPair, chain: Chain, tokenAddress: string): NonN
   };
 }
 
-function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener", fallbackImageUrl?: string, allowNonExecutable = false, fallbackPrice = 0): MarketSnapshot | null {
-  const reportedPrice = num(pair.priceUsd, 0);
-  const price = reportedPrice > 0 ? reportedPrice : Math.max(0, fallbackPrice);
+function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener", fallbackImageUrl?: string): MarketSnapshot | null {
+  const price = num(pair.priceUsd, 0);
   const liquidity = num(pair.liquidity?.usd, 0);
   const tokenAddress = String(pair.baseToken?.address ?? "");
-  if (!tokenAddress || (!allowNonExecutable && (price <= 0 || liquidity <= 0))) return null;
+  if (!tokenAddress || price <= 0 || liquidity <= 0) return null;
   const createdAt = num(pair.pairCreatedAt, Date.now());
   const ageMinutes = Math.max(1, Math.round((Date.now() - createdAt) / 60_000));
   const marketCap = num(pair.marketCap, num(pair.fdv, 0));
@@ -808,9 +807,7 @@ export async function fetchLivePositionSnapshot(position: ManagedPosition): Prom
   const pair = chooseBestPair(pairs, position.tokenAddress);
   if (!pair) return null;
   const security = await fetchSecurity(position.chain, position.tokenAddress);
-  // Held positions must retain a zero-liquidity snapshot so Guardian can mark
-  // them unsellable. Candidate discovery still rejects the same snapshot.
-  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener", position.imageUrl, true, position.markPrice);
+  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener", position.imageUrl);
 }
 
 export async function fetchLiveCandidate(chain: Chain): Promise<MarketSnapshot | null> {

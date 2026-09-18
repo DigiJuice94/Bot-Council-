@@ -581,7 +581,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
           const confirmedUnsellable = !snapshot.sellable || snapshot.honeypot || snapshot.liquidity <= 0 ||
             (snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
-          if (next.mode === "paper" && confirmedUnsellable) {
+          if (next.status === "exit_pending" && next.mode === "paper" && confirmedUnsellable) {
             const reason = snapshot.liquidity <= 0
               ? "Guardian confirmed zero executable liquidity while attempting to exit."
               : snapshot.honeypot

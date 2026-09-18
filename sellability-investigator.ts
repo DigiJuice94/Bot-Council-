@@ -2,10 +2,8 @@ import { createClient } from "redis";
 import type { ManagedPosition, MarketSnapshot } from "./types";
 
 const CASES_KEY = "bot-war-room:sellability-investigator:v1:cases";
-const LEARNED_BLOCKS_KEY = "bot-war-room:sellability-investigator:v1:learned-blocks";
 const MAX_CASES = 2_000;
 const memoryCases = new Map<string, SellabilityCase>();
-const memoryLearnedBlocks = new Map<string, SellabilityLearnedBlock>();
 let redisPromise: Promise<any | null> | null = null;
 
 export type SellabilityFingerprint = {
@@ -52,27 +50,6 @@ export type SellabilityGuidance = {
   verifiedBlock: boolean;
   nearestSimilarityPct: number;
   evidence: string[];
-};
-
-export type SellabilityLearnedBlock = {
-  id: string;
-  chain: string;
-  tokenAddress: string;
-  symbol: string;
-  blockedAt: string;
-  riskScore: number;
-  similarCases: number;
-};
-
-export type SellabilityLearningSnapshot = {
-  casesFiled: number;
-  chainCoverage: number;
-  totalLockedLossUsd: number;
-  learnedCandidatesBlocked: number;
-  latestCaseAt?: string;
-  latestCaseSymbol?: string;
-  latestBlockAt?: string;
-  latestBlockSymbol?: string;
 };
 
 const clamp = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
@@ -190,47 +167,6 @@ export async function recordUnsellableCase(position: ManagedPosition, finalSnaps
     .sort((a, b) => a.row.recordedAt.localeCompare(b.row.recordedAt))
     .slice(0, count - MAX_CASES);
   if (oldest.length) await redis.hDel(CASES_KEY, oldest.map((item) => item.id));
-}
-
-export async function recordLearnedSellabilityBlock(snapshot: MarketSnapshot, guidance: SellabilityGuidance) {
-  if (!guidance.learnedBlock) return;
-  const id = `${snapshot.chain}:${snapshot.tokenAddress.toLowerCase()}`;
-  const row: SellabilityLearnedBlock = {
-    id,
-    chain: snapshot.chain,
-    tokenAddress: snapshot.tokenAddress,
-    symbol: snapshot.symbol,
-    blockedAt: new Date().toISOString(),
-    riskScore: guidance.riskScore,
-    similarCases: guidance.similarCases,
-  };
-  memoryLearnedBlocks.set(id, row);
-  const redis = await getRedis();
-  if (redis) await redis.hSet(LEARNED_BLOCKS_KEY, id, JSON.stringify(row));
-}
-
-export async function getSellabilityLearningSnapshot(): Promise<SellabilityLearningSnapshot> {
-  const cases = await allCases();
-  const redis = await getRedis();
-  let blocks = [...memoryLearnedBlocks.values()];
-  if (redis) {
-    const rows = await redis.hGetAll(LEARNED_BLOCKS_KEY) as Record<string, string>;
-    blocks = Object.values(rows).flatMap((raw) => {
-      try { return [JSON.parse(raw) as SellabilityLearnedBlock]; } catch { return []; }
-    });
-  }
-  const latestCase = [...cases].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
-  const latestBlock = [...blocks].sort((a, b) => b.blockedAt.localeCompare(a.blockedAt))[0];
-  return {
-    casesFiled: cases.length,
-    chainCoverage: new Set(cases.map((row) => row.chain)).size,
-    totalLockedLossUsd: Number(cases.reduce((sum, row) => sum + Math.max(0, row.lossUsd), 0).toFixed(2)),
-    learnedCandidatesBlocked: blocks.length,
-    latestCaseAt: latestCase?.recordedAt,
-    latestCaseSymbol: latestCase?.symbol,
-    latestBlockAt: latestBlock?.blockedAt,
-    latestBlockSymbol: latestBlock?.symbol,
-  };
 }
 
 export async function assessSellabilityRisk(snapshot: MarketSnapshot): Promise<SellabilityGuidance> {

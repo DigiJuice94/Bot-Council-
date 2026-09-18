@@ -360,13 +360,7 @@ function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
   });
 }
 
-type WarRoomDashboardProps = {
-  researchTabActive?: boolean;
-  onOpenResearch?: () => void;
-  onOpenWarRoom?: () => void;
-};
-
-export default function WarRoomDashboard({ researchTabActive = false, onOpenResearch, onOpenWarRoom }: WarRoomDashboardProps) {
+export default function WarRoomDashboard() {
   const [status, setStatus] = useState<AutopilotPayload | null>(null);
   const [livePositions, setLivePositions] = useState<ManagedPosition[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -691,28 +685,24 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
   };
 
   const openDetailedTradeLog = () => {
-    onOpenWarRoom?.();
     setDetailedTradeLogActive(true);
     window.setTimeout(() => document.getElementById("detailed-trade-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
 
   const scrollToSection = (id: string) => {
-    onOpenWarRoom?.();
-    window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
     <main className="light-app">
       <nav className="war-room-top-tabs" aria-label="War Room sections">
-        <button type="button" className={!researchTabActive ? "active" : ""} onClick={() => scrollToSection("live")}>WAR ROOM</button>
+        <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
         <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
         <button type="button" onClick={() => scrollToSection("unsellable-capital")}>UNSELLABLE</button>
         <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
-        <button type="button" className={researchTabActive ? "active" : ""} onClick={onOpenResearch}>RESEARCH / FILING CABINET</button>
       </nav>
-      <div className="war-room-primary-view" hidden={researchTabActive}>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
           <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · MOON BAGS</small></div>
@@ -996,7 +986,6 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
         <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
         <div><b>Entities cannot vote around hard safety</b><span>The nine Council entities decide independently, but deterministic Executor/Guardian infrastructure still enforces explicit sellability, honeypot, authority and accounting constraints.</span></div>
       </section>
-      </div>
     </main>
   );
 }
