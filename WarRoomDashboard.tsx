@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentOpinion, ManagedPosition, PaperWalletSnapshot, ProviderHealth, WarRoomResult } from "@/lib/types";
+import type { AgentOpinion, ManagedPosition, PaperWalletFillRecord, PaperWalletSnapshot, ProviderHealth, WarRoomResult } from "@/lib/types";
 import { buildCouncilDiscussion, type CouncilTurn } from "@/lib/debate";
 
 type AutopilotPayload = {
@@ -24,6 +24,16 @@ type AutopilotPayload = {
   positions: ManagedPosition[];
   lastError?: string;
   generatedAt: string;
+};
+
+type DetailedTradeRow = PaperWalletFillRecord & {
+  action: "ENTRY" | "SCALE_IN" | "TRIM" | "EXIT";
+  quantity: number;
+  entryPrice?: number;
+  entryQuantity?: number;
+  imageUrl?: string;
+  status?: ManagedPosition["status"];
+  realizedPnlAfterUsd?: number;
 };
 
 const fallbackBots: AgentOpinion[] = [
@@ -361,6 +371,9 @@ export default function WarRoomDashboard() {
   const [copiedCa, setCopiedCa] = useState<string | null>(null);
   const [resettingPaperWallet, setResettingPaperWallet] = useState(false);
   const [paperResetMessage, setPaperResetMessage] = useState<string | null>(null);
+  const [detailedTradeRows, setDetailedTradeRows] = useState<DetailedTradeRow[]>([]);
+  const [detailedTradeTotal, setDetailedTradeTotal] = useState(0);
+  const [detailedTradeLogActive, setDetailedTradeLogActive] = useState(false);
   const paperResetInFlightRef = useRef(false);
   const livePositionPollInFlightRef = useRef(false);
   const autopilotPollInFlightRef = useRef(false);
@@ -395,6 +408,27 @@ export default function WarRoomDashboard() {
     const timer = window.setInterval(() => void poll(), 2500);
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
+
+  // The detailed ledger is lazy-loaded only after its top tab is opened so it
+  // cannot slow the initial War Room boot.
+  useEffect(() => {
+    if (!detailedTradeLogActive) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/trade-log?limit=1000", { cache: "no-store" });
+        if (!response.ok || !alive) return;
+        const payload = await response.json() as { rows?: DetailedTradeRow[]; totalStored?: number };
+        setDetailedTradeRows(payload.rows ?? []);
+        setDetailedTradeTotal(payload.totalStored ?? payload.rows?.length ?? 0);
+      } catch {
+        // Keep the last verified ledger visible during a temporary refresh miss.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 3000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [detailedTradeLogActive]);
 
   // Keep the Trades Log responsive even while the heavier autopilot payload
   // is rebuilding research statistics.
@@ -511,7 +545,15 @@ export default function WarRoomDashboard() {
   const realizedPnl = status?.paperWallet?.realizedPnlUsd ?? 0;
   const reconciledEquity = (status?.paperWallet?.cashUsd ?? 0) + openPositionValue;
   const reconciliationDelta = status?.paperWallet ? status.paperWallet.equityUsd - reconciledEquity : 0;
-  const reconciliationPass = Math.abs(reconciliationDelta) <= 0.10;
+  const costValueDelta = openPositionCost + unrealizedPnl - openPositionValue;
+  const contributionUsd = status?.paperWallet?.capitalContributionsUsd ?? 0;
+  const pnlEquityDelta = status?.paperWallet
+    ? status.paperWallet.startingCashUsd + contributionUsd + realizedPnl + unrealizedPnl - status.paperWallet.equityUsd
+    : 0;
+  const reconciliationPass = Boolean(status?.paperWallet?.accountingVerified)
+    && Math.abs(reconciliationDelta) <= 0.01
+    && Math.abs(costValueDelta) <= 0.01
+    && Math.abs(pnlEquityDelta) <= 0.01;
 
   useEffect(() => {
     if (mainGraphSelection === "portfolio") return;
@@ -606,6 +648,8 @@ export default function WarRoomDashboard() {
         generatedAt: wallet.updatedAt,
       } : current);
       setMainGraphSelection("portfolio");
+      setDetailedTradeRows([]);
+      setDetailedTradeTotal(0);
       setPaperResetMessage(payload.message ?? "Paper wallet reset. Learning preserved.");
       window.setTimeout(() => setPaperResetMessage(null), 6000);
     } catch (err) {
@@ -636,8 +680,24 @@ export default function WarRoomDashboard() {
     window.setTimeout(() => setCopiedCa((current) => current === address ? null : current), 1400);
   };
 
+  const openDetailedTradeLog = () => {
+    setDetailedTradeLogActive(true);
+    window.setTimeout(() => document.getElementById("detailed-trade-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <main className="light-app">
+      <nav className="war-room-top-tabs" aria-label="War Room sections">
+        <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
+        <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
+        <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
+        <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
+        <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
+      </nav>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
           <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · MOON BAGS</small></div>
@@ -675,7 +735,7 @@ export default function WarRoomDashboard() {
       <section id="wallet-live" className="wallet-live-panel page-panel">
         <div className="wide-panel-head wallet-live-head">
           <div><h2>⌁ Live Wallet & Positions</h2><p>Updates automatically as open coins move. Buys, trims and exits are reflected in wallet equity and position charts.</p></div>
-          <span className={reconciliationPass ? "wallet-reconcile pass" : "wallet-reconcile fail"}>{reconciliationPass ? "RECONCILIATION PASS" : "RECONCILIATION ERROR"}</span>
+          {reconciliationPass && <span className="wallet-reconcile pass">ACCOUNTING VERIFIED</span>}
         </div>
 
         <div className="wallet-audit-grid">
@@ -765,7 +825,7 @@ export default function WarRoomDashboard() {
           </div>
           <div className="allocation-foot">
             <span>Cash + live marked positions</span>
-            <b className={reconciliationPass ? "positive" : "negative"}>{reconciliationPass ? "RECONCILED" : "CHECK WALLET"}</b>
+            <b className="positive">{reconciliationPass ? "VERIFIED" : "VERIFYING"}</b>
           </div>
         </aside>
         </div>
@@ -813,8 +873,46 @@ export default function WarRoomDashboard() {
         {moonBagPositions.length > 24 && <small className="active-trades-more">Showing 24 of {moonBagPositions.length} Moon Bags. Portfolio totals include every holding.</small>}
       </section>
 
+      <section id="detailed-trade-log" className="detailed-log-panel page-panel">
+        <div className="wide-panel-head">
+          <div><h2>☷ Detailed Trade Ledger</h2><p>Exact entry, scale, trim and exit fills with verified post-trade portfolio accounting.</p></div>
+          <span className="quiet-chip">{detailedTradeTotal} fills · {detailedTradeLogActive ? "LIVE" : "OPEN TAB TO LOAD"}</span>
+        </div>
+        {!detailedTradeLogActive ? (
+          <button type="button" className="open-ledger-button" onClick={openDetailedTradeLog}>OPEN DETAILED TRADE LOG</button>
+        ) : (
+          <div className="detailed-log-scroll">
+            <div className="detailed-log-table">
+              <div className="detailed-log-row detailed-log-head">
+                <span>Time / Action</span><span>Token / CA</span><span>Chain</span><span>USD Filled</span><span>Coins Bought / Sold</span><span>Entry Price</span><span>Fill Price</span><span>Coins Remaining</span><span>Next Profit Target</span><span>Moon Bag Exit Floor</span><span>Realized P/L</span><span>Cash After</span><span>Portfolio After</span><span>Fee / Slippage</span>
+              </div>
+              {detailedTradeRows.length ? detailedTradeRows.map((fill) => {
+                const isSell = fill.side === "SELL";
+                const realized = fill.realizedPnlAfterUsd;
+                return <div className="detailed-log-row" key={fill.id}>
+                  <span className="detailed-time"><b className={`ledger-action action-${fill.action.toLowerCase()}`}>{fill.action}</b><small>{new Date(fill.createdAt).toLocaleString()}</small></span>
+                  <div className="trade-token-cell"><TokenAvatar imageUrl={fill.imageUrl} symbol={fill.symbol} compact /><div className="trade-token-copy"><b>${fill.symbol}</b><span className="ca-line"><code title={fill.tokenAddress}>CA {shortCa(fill.tokenAddress)}</code><button type="button" onClick={() => void copyContract(fill.tokenAddress)}>{copiedCa === fill.tokenAddress ? "COPIED" : "COPY"}</button></span></div></div>
+                  <span>{fill.chain}</span>
+                  <strong>{isSell ? `+$${fill.filledUsd.toFixed(2)}` : `-$${fill.requestedUsd.toFixed(2)}`}</strong>
+                  <span><b>{tokenAmount(fill.quantity ?? 0)}</b><small>{isSell ? "sold" : "received"}</small></span>
+                  <span>{fill.entryPrice ? price(fill.entryPrice) : "—"}</span>
+                  <span>{price(fill.fillPrice)}</span>
+                  <span><b>{tokenAmount(fill.remainingQuantityAfter ?? 0)}</b><small>{isSell && (fill.remainingQuantityAfter ?? 0) > 0 ? "remaining / moon bag" : (fill.remainingQuantityAfter ?? 0) === 0 ? "fully closed" : "held"}</small></span>
+                  <span>{fill.nextTargetPrice ? price(fill.nextTargetPrice) : "—"}</span>
+                  <span>{fill.moonbagExitFloorPrice ? <><b>{price(fill.moonbagExitFloorPrice)}</b><small>adaptive high-water floor</small></> : "—"}</span>
+                  <strong className={typeof realized === "number" ? realized >= 0 ? "positive" : "negative" : ""}>{typeof realized === "number" ? `${realized >= 0 ? "+" : "-"}$${Math.abs(realized).toFixed(2)}` : "—"}</strong>
+                  <span>{typeof fill.cashAfterUsd === "number" ? `$${fill.cashAfterUsd.toFixed(2)}` : "—"}</span>
+                  <span>{typeof fill.portfolioEquityAfterUsd === "number" ? `$${fill.portfolioEquityAfterUsd.toFixed(2)}` : "—"}</span>
+                  <span><b>${fill.feeUsd.toFixed(4)}</b><small>{fill.slippageBps} bps</small></span>
+                </div>;
+              }) : <div className="empty-row">No PAPER fills in this verified run yet.</div>}
+            </div>
+          </div>
+        )}
+      </section>
+
       <section id="trades" className="log-panel page-panel">
-        <div className="wide-panel-head"><div><h2>↗ Buys & Closes Log</h2><p>Entries, trims, exits and completed PAPER trades recorded by the War Room</p></div><span className="quiet-chip">Guardian owned</span></div>
+        <div className="wide-panel-head"><div><h2>↗ Buys & Closes Log</h2><p>Quick position summary. Use the Detailed Trade Log tab for every exact fill and post-trade balance.</p></div><span className="quiet-chip">Guardian owned</span></div>
         <div className="trades-table enriched-trades-table">
           <div className="trade-row trade-head"><span>Token / CA</span><span>Chain</span><span>Buy Size</span><span>Entry</span><span>Mark / Exit</span><span>Status</span><span>P/L</span><span>Time</span></div>
           {positions.length ? positions.slice(0, 16).map((position) => {

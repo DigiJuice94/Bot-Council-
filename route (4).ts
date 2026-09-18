@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
-import { getAutopilotStatus } from "@/lib/autopilot";
+import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
+import { listManagedPositions } from "@/lib/position-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const status = await getAutopilotStatus();
-  const { chat: _chat, ...dashboardStatus } = status;
-  return NextResponse.json(dashboardStatus, { headers: { "Cache-Control": "no-store" } });
+export async function GET(request: Request) {
+  // The dashboard's trade table uses this lightweight path so research/status
+  // generation cannot hold back visible position updates.
+  if (new URL(request.url).searchParams.get("light") === "1") {
+    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
+  }
+  ensurePositionGuardianLoop();
+  const report = await refreshPositionGuardian();
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }

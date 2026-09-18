@@ -528,6 +528,14 @@ export type PaperWalletFillRecord = {
   feeUsd: number;
   slippageBps: number;
   createdAt: string;
+  action?: "ENTRY" | "SCALE_IN" | "TRIM" | "EXIT";
+  quantity?: number;
+  remainingQuantityAfter?: number;
+  cashAfterUsd?: number;
+  portfolioEquityAfterUsd?: number;
+  positionRealizedPnlAfterUsd?: number;
+  nextTargetPrice?: number;
+  moonbagExitFloorPrice?: number;
 };
 
 export type PaperEquityHistoryPoint = {
@@ -549,6 +557,8 @@ export type PaperWalletState = {
   updatedAt: string;
   dayKey: string;
   dayStartEquityUsd: number;
+  /** Extra PAPER capital added after the run started; excluded from profit. */
+  capitalContributionsUsd?: number;
   equityHistory?: PaperEquityHistoryPoint[];
   allTimeHighEquityUsd?: number;
   allTimeHighAt?: string;
@@ -568,6 +578,8 @@ export type PaperWalletSnapshot = PaperWalletState & {
   dailyPnlPct: number;
   openPositions: number;
   storage: "redis" | "memory";
+  accountingVerified: boolean;
+  accountingVerifiedAt: string;
 };
 
 export type ProviderHealth = {

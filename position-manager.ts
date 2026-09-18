@@ -4,7 +4,7 @@ import { fetchLivePositionSnapshot } from "./market-data";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
-import { listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
+import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { getRunnerExitGuidance } from "./runner-research";
@@ -182,7 +182,21 @@ export async function registerPaperPosition(args: {
   };
   await saveManagedPosition(position);
   try {
-    await applyPaperFillToWallet({ fill, decisionId: request.decisionId, tokenAddress: request.tokenAddress, positionId: position.id });
+    await applyPaperFillToWallet({
+      fill,
+      decisionId: request.decisionId,
+      tokenAddress: request.tokenAddress,
+      positionId: position.id,
+      action: "ENTRY",
+      quantity,
+      remainingQuantityAfter: quantity,
+      markPriceAfter: snapshot.price,
+      entryNotionalAfterUsd: position.entryNotionalUsd,
+      realizedCostAfterUsd: 0,
+      positionRealizedPnlAfterUsd: 0,
+      nextTargetPrice: nextTargetPrice(position),
+      moonbagExitFloorPrice: moonbagExitFloorPrice(position),
+    });
     await appendFillJournal(fill, request.tokenAddress, position.id);
   } catch (error) {
     await removeManagedPosition(position.id).catch(() => undefined);
@@ -193,6 +207,16 @@ export async function registerPaperPosition(args: {
 
 function nextTakeProfit(position: ManagedPosition, pnlPct: number): ExitLevel | undefined {
   return position.exitStrategy.takeProfits.find((level) => !position.takenProfitLabels.includes(level.label) && pnlPct >= level.gainPct);
+}
+
+function nextTargetPrice(position: ManagedPosition, takenLabels = position.takenProfitLabels) {
+  const next = position.exitStrategy.takeProfits.find((level) => !takenLabels.includes(level.label));
+  return next ? position.entryPrice * (1 + next.gainPct / 100) : undefined;
+}
+
+function moonbagExitFloorPrice(position: ManagedPosition) {
+  const trailingPct = Math.max(0, position.exitStrategy.moonbagTrailingStopPct ?? position.exitStrategy.trailingStopPct ?? 0);
+  return position.highWaterPrice > 0 ? position.highWaterPrice * (1 - trailingPct / 100) : undefined;
 }
 
 function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext): WarRoomResult {
@@ -348,14 +372,29 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
   }
 
   const fill = await executePaper(paperRequest(position, "BUY", requestedUsd, step.label), snapshot);
-  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-${step.label}`, tokenAddress: position.tokenAddress, positionId: position.id });
-  await appendFillJournal(fill, position.tokenAddress, position.id);
   const addedQty = fill.filledUsd / Math.max(fill.fillPrice, 1e-12);
   const oldQty = position.quantity;
   const newQty = oldQty + addedQty;
   const newEntryNotional = position.entryNotionalUsd + fill.filledUsd;
   const newEntryPrice = newQty > 0 ? (position.entryPrice * oldQty + fill.fillPrice * addedQty) / newQty : position.entryPrice;
   const newRemainingQty = position.remainingQuantity + addedQty;
+  const scaledPosition = { ...position, entryPrice: newEntryPrice, entryNotionalUsd: newEntryNotional };
+  await applyPaperFillToWallet({
+    fill,
+    decisionId: `${position.decisionId}-${step.label}`,
+    tokenAddress: position.tokenAddress,
+    positionId: position.id,
+    action: "SCALE_IN",
+    quantity: addedQty,
+    remainingQuantityAfter: newRemainingQty,
+    markPriceAfter: snapshot.price,
+    entryNotionalAfterUsd: newEntryNotional,
+    realizedCostAfterUsd: position.realizedCostUsd,
+    positionRealizedPnlAfterUsd: position.realizedPnlUsd,
+    nextTargetPrice: nextTargetPrice(scaledPosition),
+    moonbagExitFloorPrice: moonbagExitFloorPrice(scaledPosition),
+  });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
 
   return {
     ...position,
@@ -386,8 +425,6 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
   const sellQty = Math.min(position.remainingQuantity, originalQtyTarget);
   if (sellQty <= 0) return position;
   const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot);
-  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-TP-${level.label}`, tokenAddress: position.tokenAddress, positionId: position.id });
-  await appendFillJournal(fill, position.tokenAddress, position.id);
   const cost = sellQty * position.entryPrice;
   const remainingQuantity = Math.max(0, position.remainingQuantity - sellQty);
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
@@ -399,6 +436,22 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
   const postTrim = { ...position, remainingQuantity, takenProfitLabels };
   const rawMovePct = position.entryPrice > 0 ? ((snapshot.price - position.entryPrice) / position.entryPrice) * 100 : 0;
   const winnerState = determineWinnerState(postTrim as ManagedPosition, rawMovePct, position.lastConfirmationScore ?? 0);
+  await applyPaperFillToWallet({
+    fill,
+    decisionId: `${position.decisionId}-TP-${level.label}`,
+    tokenAddress: position.tokenAddress,
+    positionId: position.id,
+    action: "TRIM",
+    quantity: sellQty,
+    remainingQuantityAfter: remainingQuantity,
+    markPriceAfter: snapshot.price,
+    entryNotionalAfterUsd: position.entryNotionalUsd,
+    realizedCostAfterUsd: realizedCostUsd,
+    positionRealizedPnlAfterUsd: realizedPnlUsd,
+    nextTargetPrice: nextTargetPrice(position, takenProfitLabels),
+    moonbagExitFloorPrice: moonbagExitFloorPrice({ ...position, highWaterPrice: Math.max(position.highWaterPrice, snapshot.price) }),
+  });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
   return {
     ...position,
     remainingQuantity,
@@ -422,14 +475,26 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
   if (position.remainingQuantity <= 0) return { ...position, status: "closed" };
   const sellQty = position.remainingQuantity;
   const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, "EXIT"), snapshot);
-  await applyPaperFillToWallet({ fill, decisionId: `${position.decisionId}-EXIT`, tokenAddress: position.tokenAddress, positionId: position.id });
-  await appendFillJournal(fill, position.tokenAddress, position.id);
   const cost = sellQty * position.entryPrice;
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
   const realizedCostUsd = position.realizedCostUsd + cost;
   const realizedPnlUsd = realizedProceedsUsd - realizedCostUsd;
   const realizedReturnPct = position.entryNotionalUsd > 0 ? realizedPnlUsd / position.entryNotionalUsd * 100 : 0;
   const capture = position.maxFavorableExcursionPct > 0 && realizedReturnPct > 0 ? Math.max(0, Math.min(100, realizedReturnPct / position.maxFavorableExcursionPct * 100)) : 0;
+  await applyPaperFillToWallet({
+    fill,
+    decisionId: `${position.decisionId}-EXIT`,
+    tokenAddress: position.tokenAddress,
+    positionId: position.id,
+    action: "EXIT",
+    quantity: sellQty,
+    remainingQuantityAfter: 0,
+    markPriceAfter: snapshot.price,
+    entryNotionalAfterUsd: position.entryNotionalUsd,
+    realizedCostAfterUsd: realizedCostUsd,
+    positionRealizedPnlAfterUsd: realizedPnlUsd,
+  });
+  await appendFillJournal(fill, position.tokenAddress, position.id);
   return {
     ...position,
     status: "closed",
@@ -448,7 +513,10 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
   };
 }
 
-const guardianGlobal = globalThis as typeof globalThis & { __botWarRoomGuardianTimer?: ReturnType<typeof setInterval> };
+const guardianGlobal = globalThis as typeof globalThis & {
+  __botWarRoomGuardianTimer?: ReturnType<typeof setInterval>;
+  __botWarRoomGuardianBusy?: boolean;
+};
 
 export function ensurePositionGuardianLoop() {
   if (guardianGlobal.__botWarRoomGuardianTimer) return;
@@ -458,64 +526,78 @@ export function ensurePositionGuardianLoop() {
 }
 
 export async function refreshPositionGuardian(): Promise<PositionGuardianReport> {
+  if (guardianGlobal.__botWarRoomGuardianBusy) {
+    const storage = await positionStorageMode();
+    return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };
+  }
+  guardianGlobal.__botWarRoomGuardianBusy = true;
   const positions = (await listManagedPositions()).filter((position) => position.status !== "closed").map(normalizedPosition);
   const refreshed: ManagedPosition[] = [];
   let staleCount = 0;
-
-  for (const position of positions) {
-    let next = position;
-    let snapshot: MarketSnapshot | null = null;
-    try {
-      snapshot = await fetchLivePositionSnapshot(position);
-      if (snapshot) {
-        const portfolio = await getPaperPortfolioContext(position.chain);
-        const exitGenome = await getRunnerExitGuidance(position, snapshot);
-        // A previously flagged exit must never become permanently pending. In
-        // particular, emergency exits can be triggered by a sellability or
-        // honeypot failure, so those conditions cannot block the follow-up
-        // paper sell.
-        if (position.status === "exit_pending" && position.mode === "paper") {
-          next = await executeFullExit(position, snapshot);
-        } else {
-          next = evaluatePosition(position, snapshot, portfolio, exitGenome);
-        }
-        if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
-          if (next.lastAction === "SCALE_IN") {
-            next = await executeScaleIn(next, snapshot, portfolio);
-          } else if (next.lastAction === "TRIM") {
-            const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
-            if (level) next = await executeTrim(next, snapshot, level);
-          } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
+  try {
+    for (const position of positions) {
+      let next = position;
+      const releaseLease = await acquireRuntimeLease(`guardian:${position.id}`, 120_000);
+      if (!releaseLease) continue;
+      try {
+        const latest = (await listManagedPositions()).find((row) => row.id === position.id);
+        if (!latest || latest.status === "closed") continue;
+        next = normalizedPosition(latest);
+        const snapshot = await fetchLivePositionSnapshot(next);
+        if (snapshot) {
+          const portfolio = await getPaperPortfolioContext(next.chain);
+          const exitGenome = await getRunnerExitGuidance(next, snapshot);
+          // A previously flagged exit must never become permanently pending. In
+          // particular, emergency exits can be triggered by a sellability or
+          // honeypot failure, so those conditions cannot block the follow-up
+          // paper sell.
+          if (next.status === "exit_pending" && next.mode === "paper") {
             next = await executeFullExit(next, snapshot);
+          } else {
+            next = evaluatePosition(next, snapshot, portfolio, exitGenome);
           }
+          if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
+            if (next.lastAction === "SCALE_IN") {
+              next = await executeScaleIn(next, snapshot, portfolio);
+            } else if (next.lastAction === "TRIM") {
+              const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
+              if (level) next = await executeTrim(next, snapshot, level);
+            } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
+              next = await executeFullExit(next, snapshot);
+            }
+          }
+          if (next.status === "closed" && !next.learningRecorded) {
+            await reflectOnClosedPosition(next, snapshot);
+            next = { ...next, learningRecorded: true };
+          }
+          await saveManagedPosition(next);
+        } else {
+          staleCount += 1;
         }
-        if (next.status === "closed" && !next.learningRecorded) {
-          await reflectOnClosedPosition(next, snapshot);
-          next = { ...next, learningRecorded: true };
-        }
-        await saveManagedPosition(next);
-      } else {
+      } catch (error) {
         staleCount += 1;
+        console.error(`[position-guardian] ${position.symbol}`, error);
+      } finally {
+        await releaseLease().catch(() => undefined);
       }
-    } catch (error) {
-      staleCount += 1;
-      console.error(`[position-guardian] ${position.symbol}`, error);
+      refreshed.push(next);
     }
-    refreshed.push(next);
-  }
 
-  const storage = await positionStorageMode();
-  const activePositions = refreshed.filter((position) => position.status !== "closed");
-  return {
-    storage,
-    openCount: activePositions.length,
-    urgentCount: activePositions.filter((position) => position.lastAction === "EXIT").length,
-    positions: activePositions.sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
-    generatedAt: new Date().toISOString(),
-    warning: storage === "memory"
-      ? "REDIS_URL is not connected; position and learning memory will not survive a process restart."
-      : staleCount
-        ? `${staleCount} position(s) remain persisted but are waiting for a fresh market-data snapshot.`
-        : undefined,
-  };
+    const storage = await positionStorageMode();
+    const activePositions = refreshed.filter((position) => position.status !== "closed");
+    return {
+      storage,
+      openCount: activePositions.length,
+      urgentCount: activePositions.filter((position) => position.lastAction === "EXIT").length,
+      positions: activePositions.sort((a, b) => b.openedAt.localeCompare(a.openedAt)),
+      generatedAt: new Date().toISOString(),
+      warning: storage === "memory"
+        ? "REDIS_URL is not connected; position and learning memory will not survive a process restart."
+        : staleCount
+          ? `${staleCount} position(s) remain persisted but are waiting for a fresh market-data snapshot.`
+          : undefined,
+    };
+  } finally {
+    guardianGlobal.__botWarRoomGuardianBusy = false;
+  }
 }

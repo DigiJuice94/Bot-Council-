@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { listManagedPositions, removeManagedPosition } from "./position-store";
+import { acquireRuntimeLease, listManagedPositions, removeManagedPosition } from "./position-store";
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
@@ -15,6 +15,16 @@ let redisPromise: Promise<any | null> | null = null;
 let memoryState: PaperWalletState | null = null;
 let memoryResetMeta: PaperWalletResetMeta | null = null;
 let mutationLock: Promise<void> = Promise.resolve();
+
+async function acquireWalletLedgerLease() {
+  const deadline = Date.now() + 10_000;
+  do {
+    const release = await acquireRuntimeLease("paper-wallet-ledger", 120_000);
+    if (release) return release;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  } while (Date.now() < deadline);
+  throw new Error("Verified PAPER ledger is busy; refusing an unverified wallet mutation.");
+}
 
 export type PaperWalletResetMeta = {
   resets: number;
@@ -47,6 +57,7 @@ function freshState(): PaperWalletState {
     updatedAt: now,
     dayKey: dayKey(),
     dayStartEquityUsd: startingCashUsd,
+    capitalContributionsUsd: 0,
     equityHistory: [{ at: Date.parse(now), equity: startingCashUsd, cash: startingCashUsd, openValue: 0, event: "mark" }],
     allTimeHighEquityUsd: startingCashUsd,
     allTimeHighAt: now,
@@ -151,18 +162,39 @@ function updatePersistentEquityHistory(state: PaperWalletState, equityUsd: numbe
   };
 }
 
-async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" | "memory"): Promise<PaperWalletSnapshot> {
+async function calculateSnapshot(
+  stateInput: PaperWalletState,
+  storage: "redis" | "memory",
+  positionOverride?: {
+    id: string;
+    remainingQuantity: number;
+    markPrice: number;
+    status: "open" | "closed";
+    entryNotionalUsd?: number;
+    realizedCostUsd?: number;
+  },
+): Promise<PaperWalletSnapshot> {
   let state = stateInput;
-  const positions = await listManagedPositions();
+  const storedPositions = await listManagedPositions();
+  const positions = positionOverride
+    ? storedPositions.map((position) => position.id === positionOverride.id ? { ...position, ...positionOverride } : position)
+    : storedPositions;
   const open = positions.filter((position) => position.status !== "closed");
-  const openExposureUsd = open.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
-  const openCostUsd = open.reduce((sum, position) => sum + Math.max(0, position.entryNotionalUsd - (position.realizedCostUsd || 0)), 0);
-  const unrealizedPnlUsd = open.reduce((sum, position) => {
-    const remainingCost = Math.max(0, position.entryNotionalUsd - position.realizedCostUsd);
-    return sum + (position.remainingQuantity * position.markPrice - remainingCost);
-  }, 0);
-  const realizedPnlUsd = positions.reduce((sum, position) => sum + (position.realizedPnlUsd || 0), 0);
-  const equityUsd = Math.max(0, state.cashUsd + openExposureUsd);
+  const cents = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+  const cashUsd = cents(Math.max(0, state.cashUsd));
+  const openExposureUsd = cents(open.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0));
+  const openCostUsd = cents(open.reduce((sum, position) => sum + Math.max(0, position.entryNotionalUsd - (position.realizedCostUsd || 0)), 0));
+  const unrealizedPnlUsd = cents(openExposureUsd - openCostUsd);
+  const equityUsd = cents(cashUsd + openExposureUsd);
+  const capitalContributionsUsd = cents(Math.max(0, state.capitalContributionsUsd ?? 0));
+  const totalPnlUsd = cents(equityUsd - state.startingCashUsd - capitalContributionsUsd);
+
+  // Portfolio Auditor: realized profit is the balancing figure from the actual
+  // wallet cash and all open cost/value. This keeps the four accounting
+  // identities exact even when the UI only receives a limited trade list.
+  // Per-position realized values remain useful trade analytics, but can never
+  // again be used as the top-level wallet total.
+  const realizedPnlUsd = cents(totalPnlUsd - unrealizedPnlUsd);
   const historyUpdate = updatePersistentEquityHistory(state, equityUsd, openExposureUsd);
   state = historyUpdate.state;
 
@@ -174,19 +206,24 @@ async function calculateSnapshot(stateInput: PaperWalletState, storage: "redis" 
     await writeState(state);
   }
 
-  const totalPnlUsd = equityUsd - state.startingCashUsd;
   return {
     ...state,
-    equityUsd: Number(equityUsd.toFixed(2)),
-    openExposureUsd: Number(openExposureUsd.toFixed(2)),
-    openCostUsd: Number(openCostUsd.toFixed(2)),
-    unrealizedPnlUsd: Number(unrealizedPnlUsd.toFixed(2)),
-    realizedPnlUsd: Number(realizedPnlUsd.toFixed(2)),
-    totalPnlUsd: Number(totalPnlUsd.toFixed(2)),
-    totalReturnPct: state.startingCashUsd > 0 ? Number((totalPnlUsd / state.startingCashUsd * 100).toFixed(3)) : 0,
+    cashUsd,
+    capitalContributionsUsd,
+    equityUsd,
+    openExposureUsd,
+    openCostUsd,
+    unrealizedPnlUsd,
+    realizedPnlUsd,
+    totalPnlUsd,
+    totalReturnPct: state.startingCashUsd + capitalContributionsUsd > 0
+      ? Number((totalPnlUsd / (state.startingCashUsd + capitalContributionsUsd) * 100).toFixed(3))
+      : 0,
     dailyPnlPct: state.dayStartEquityUsd > 0 ? Number(((equityUsd - state.dayStartEquityUsd) / state.dayStartEquityUsd * 100).toFixed(3)) : 0,
     openPositions: open.length,
     storage,
+    accountingVerified: true,
+    accountingVerifiedAt: new Date().toISOString(),
   };
 }
 
@@ -194,8 +231,13 @@ export async function getPaperWallet(): Promise<PaperWalletSnapshot> {
   // Snapshot calculation can persist equity history. Queue it with mutations
   // so a read begun before reset cannot write the old bankroll back afterward.
   const task = mutationLock.then(async () => {
-    const { state, storage } = await readState();
-    return calculateSnapshot(state, storage);
+    const releaseLease = await acquireWalletLedgerLease();
+    try {
+      const { state, storage } = await readState();
+      return calculateSnapshot(state, storage);
+    } finally {
+      await releaseLease().catch(() => undefined);
+    }
   });
   mutationLock = task.then(() => undefined, () => undefined);
   return task;
@@ -215,6 +257,8 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
   let clearedOpenPositions = 0;
 
   const task = mutationLock.then(async () => {
+    const releaseLease = await acquireWalletLedgerLease();
+    try {
     if (onceRelease && process.env.REDIS_URL && !(await getRedis())) {
       throw new Error("Cannot perform release wallet reset without the configured Redis connection.");
     }
@@ -260,6 +304,7 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
       cashUsd: startingCashUsd,
       dayKey: dayKey(),
       dayStartEquityUsd: startingCashUsd,
+      capitalContributionsUsd: 0,
       updatedAt: now,
       startedAt: now,
       equityHistory: [resetPoint],
@@ -289,6 +334,9 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
     await writeResetMeta(resetMeta);
 
     wallet = await calculateSnapshot(next, storage);
+    } finally {
+      await releaseLease().catch(() => undefined);
+    }
   });
 
   mutationLock = task.catch(() => undefined);
@@ -310,12 +358,16 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
   let resetMeta = await readResetMeta();
   const trainingTradeUsd = Math.max(1, Number(process.env.PAPER_TRAINING_TRADE_USD ?? 50));
   const threshold = Math.max(trainingTradeUsd, Number(process.env.PAPER_AUTO_REFILL_THRESHOLD_USD ?? trainingTradeUsd));
-  if (process.env.PAPER_AUTO_REFILL_ON_ZERO === "false" || wallet.openPositions > 0 || wallet.equityUsd > threshold) {
+  // Hidden bankroll injections make performance impossible to measure. They are
+  // now opt-in only; normal capital recycling belongs to the Exit Strategist.
+  if (process.env.PAPER_AUTO_REFILL_ON_ZERO !== "true" || wallet.openPositions > 0 || wallet.equityUsd > threshold) {
     return { wallet, resetPerformed: false, resetMeta };
   }
 
   let resetPerformed = false;
   const task = mutationLock.then(async () => {
+    const releaseLease = await acquireWalletLedgerLease();
+    try {
     const { state: current, storage } = await readState();
     const snapshot = await calculateSnapshot(current, storage);
     if (snapshot.openPositions > 0 || snapshot.equityUsd > threshold) {
@@ -323,11 +375,13 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
       return;
     }
     const startingCashUsd = configuredStartingCash();
+    const injectedUsd = Math.max(0, startingCashUsd - current.cashUsd);
     const now = new Date().toISOString();
     const next: PaperWalletState = {
       ...current,
       startingCashUsd,
       cashUsd: startingCashUsd,
+      capitalContributionsUsd: Number(((current.capitalContributionsUsd ?? 0) + injectedUsd).toFixed(2)),
       dayKey: dayKey(),
       dayStartEquityUsd: startingCashUsd,
       updatedAt: now,
@@ -343,6 +397,9 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
     await writeResetMeta(resetMeta);
     wallet = await calculateSnapshot(next, storage);
     resetPerformed = true;
+    } finally {
+      await releaseLease().catch(() => undefined);
+    }
   });
   mutationLock = task.catch(() => undefined);
   await task;
@@ -380,9 +437,25 @@ export async function canAffordPaperBuy(requestedUsd: number): Promise<{ allowed
   return { allowed: true, availableUsd };
 }
 
-export async function applyPaperFillToWallet(args: { fill: PaperFill; decisionId: string; tokenAddress: string; positionId?: string }): Promise<PaperWalletSnapshot> {
+export async function applyPaperFillToWallet(args: {
+  fill: PaperFill;
+  decisionId: string;
+  tokenAddress: string;
+  positionId?: string;
+  action?: "ENTRY" | "SCALE_IN" | "TRIM" | "EXIT";
+  quantity?: number;
+  remainingQuantityAfter?: number;
+  markPriceAfter?: number;
+  entryNotionalAfterUsd?: number;
+  realizedCostAfterUsd?: number;
+  positionRealizedPnlAfterUsd?: number;
+  nextTargetPrice?: number;
+  moonbagExitFloorPrice?: number;
+}): Promise<PaperWalletSnapshot> {
   let out!: PaperWalletSnapshot;
   const task = mutationLock.then(async () => {
+    const releaseLease = await acquireWalletLedgerLease();
+    try {
     const { state: current, storage } = await readState();
     const fill = args.fill;
     if (current.recentFills.some((row) => row.id === fill.id)) {
@@ -393,6 +466,19 @@ export async function applyPaperFillToWallet(args: { fill: PaperFill; decisionId
     if (fill.side === "BUY" && spendOrProceeds > current.cashUsd + 0.005) {
       throw new Error(`Paper wallet cash check failed: $${current.cashUsd.toFixed(2)} available, $${spendOrProceeds.toFixed(2)} requested.`);
     }
+    const nextCashUsd = Number((fill.side === "BUY" ? current.cashUsd - fill.requestedUsd : current.cashUsd + fill.filledUsd).toFixed(2));
+    const positions = await listManagedPositions();
+    const currentPosition = args.positionId ? positions.find((position) => position.id === args.positionId) : undefined;
+    const openExposureBefore = positions
+      .filter((position) => position.status !== "closed")
+      .reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
+    const currentPositionExposure = currentPosition && currentPosition.status !== "closed"
+      ? Math.max(0, currentPosition.remainingQuantity * currentPosition.markPrice)
+      : 0;
+    const adjustedPositionExposure = typeof args.remainingQuantityAfter === "number"
+      ? Math.max(0, args.remainingQuantityAfter * Math.max(0, args.markPriceAfter ?? currentPosition?.markPrice ?? fill.fillPrice))
+      : currentPositionExposure;
+    const portfolioEquityAfterUsd = Number((nextCashUsd + Math.max(0, openExposureBefore - currentPositionExposure + adjustedPositionExposure)).toFixed(2));
     const record: PaperWalletFillRecord = {
       id: fill.id,
       positionId: args.positionId,
@@ -407,10 +493,18 @@ export async function applyPaperFillToWallet(args: { fill: PaperFill; decisionId
       feeUsd: fill.feeUsd,
       slippageBps: fill.slippageBps,
       createdAt: fill.createdAt,
+      action: args.action,
+      quantity: args.quantity,
+      remainingQuantityAfter: args.remainingQuantityAfter,
+      cashAfterUsd: nextCashUsd,
+      portfolioEquityAfterUsd,
+      positionRealizedPnlAfterUsd: args.positionRealizedPnlAfterUsd,
+      nextTargetPrice: args.nextTargetPrice,
+      moonbagExitFloorPrice: args.moonbagExitFloorPrice,
     };
     const next: PaperWalletState = {
       ...current,
-      cashUsd: Number((fill.side === "BUY" ? current.cashUsd - fill.requestedUsd : current.cashUsd + fill.filledUsd).toFixed(2)),
+      cashUsd: nextCashUsd,
       totalFeesUsd: Number((current.totalFeesUsd + fill.feeUsd).toFixed(4)),
       buyFills: current.buyFills + (fill.side === "BUY" ? 1 : 0),
       sellFills: current.sellFills + (fill.side === "SELL" ? 1 : 0),
@@ -418,7 +512,17 @@ export async function applyPaperFillToWallet(args: { fill: PaperFill; decisionId
       recentFills: [record, ...current.recentFills.filter((row) => row.id !== record.id)].slice(0, MAX_FILL_HISTORY),
     };
     await writeState(next);
-    out = await calculateSnapshot(next, storage);
+    out = await calculateSnapshot(next, storage, args.positionId && typeof args.remainingQuantityAfter === "number" ? {
+      id: args.positionId,
+      remainingQuantity: args.remainingQuantityAfter,
+      markPrice: Math.max(0, args.markPriceAfter ?? currentPosition?.markPrice ?? fill.fillPrice),
+      status: args.remainingQuantityAfter > 0 ? "open" : "closed",
+      entryNotionalUsd: args.entryNotionalAfterUsd ?? currentPosition?.entryNotionalUsd ?? 0,
+      realizedCostUsd: args.realizedCostAfterUsd ?? currentPosition?.realizedCostUsd ?? 0,
+    } : undefined);
+    } finally {
+      await releaseLease().catch(() => undefined);
+    }
   });
   mutationLock = task.catch(() => undefined);
   await task;

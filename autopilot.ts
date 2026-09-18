@@ -6,7 +6,7 @@ import { fetchLiveCandidate, fetchLiveTokenSnapshot, getWaterfallProviderHealth 
 import { liveMarketDataMode } from "./market-data";
 import { ensurePaperWalletResearchFunds, getPaperPortfolioContext, getPaperWalletResetMeta } from "./paper-wallet";
 import { assessPaperEntryEligibility, ensurePositionGuardianLoop, registerPaperPosition } from "./position-manager";
-import { listManagedPositions } from "./position-store";
+import { acquireRuntimeLease, listManagedPositions } from "./position-store";
 import { loadLatestProfitability } from "./profitability-store";
 import { getProviderHealth } from "./provider-health";
 import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
@@ -417,7 +417,10 @@ async function scanOneChain(chain: Chain) {
 export async function runAutonomousTick() {
   if (globalState.__botWarRoomAutopilotBusyV14) return;
   globalState.__botWarRoomAutopilotBusyV14 = true;
+  let releaseLease: (() => Promise<void>) | null = null;
   try {
+    releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
+    if (!releaseLease) return;
     const cursor = globalState.__botWarRoomAutopilotCursorV14 ?? 0;
     const chain = CHAINS[cursor % CHAINS.length];
     globalState.__botWarRoomAutopilotCursorV14 = (cursor + 1) % CHAINS.length;
@@ -437,6 +440,7 @@ export async function runAutonomousTick() {
     }
     console.error("[autopilot] cycle failed", error);
   } finally {
+    if (releaseLease) await releaseLease().catch(() => undefined);
     globalState.__botWarRoomAutopilotBusyV14 = false;
   }
 }
@@ -451,7 +455,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V2.27 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, bankroll auto-refills after research bankruptcy, and Code Deciphered progress is tracked continuously.`, "system");
+  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
 }
 
 export async function getAutopilotStatus() {
