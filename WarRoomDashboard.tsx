@@ -43,9 +43,8 @@ const fallbackBots: AgentOpinion[] = [
   { id: "quant", name: "Runner Pattern Quant", shortName: "QB", score: 0, stance: "neutral", summary: "Waiting for real market data.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
   { id: "contract", name: "Fast Safety Gate", shortName: "CB", score: 0, stance: "neutral", summary: "Waiting for security evidence.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
   { id: "bear", name: "Dumper Pattern Specialist", shortName: "BB", score: 0, stance: "neutral", summary: "Waiting to red-team a real candidate.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "sellability", name: "Sellability Investigator", shortName: "SI", score: 0, stance: "neutral", summary: "Waiting to compare the next candidate with unsellable case fingerprints.", detail: "No candidate loaded yet.", evidence: [], color: "#e65f49" },
   { id: "portfolio", name: "Portfolio Strategist", shortName: "PS", score: 0, stance: "neutral", summary: "Waiting to size a real opportunity.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
-  { id: "cio", name: "Runner CIO", shortName: "CIO", score: 0, stance: "neutral", summary: "Waiting for eight locked private reads.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
+  { id: "cio", name: "Runner CIO", shortName: "CIO", score: 0, stance: "neutral", summary: "Waiting for seven locked private reads.", detail: "No candidate loaded yet.", evidence: [], color: "#111111" },
 ];
 
 const botDescriptions: Record<string, { label: string; text: string; tag: string; icon: string }> = {
@@ -56,7 +55,6 @@ const botDescriptions: Record<string, { label: string; text: string; tag: string
   quant: { label: "Runner Pattern Quant", text: "Models MC velocity, volume acceleration, buy pressure and runner-pattern similarity.", tag: "GENOME", icon: "▥" },
   contract: { label: "Fast Safety Gate", text: "Looks for specific hard sellability/scam failures without punishing a coin merely for being early.", tag: "SAFETY", icon: "▤" },
   bear: { label: "Dumper Pattern Specialist", text: "Compares each setup with failed launches and identifies distribution patterns before the dump.", tag: "DUMPER", icon: "◆" },
-  sellability: { label: "Sellability Investigator", text: "Studies every unsellable loss, files its pre-buy fingerprint and independently blocks repeated high-confidence locked-capital patterns.", tag: "EXIT RISK", icon: "◎" },
   portfolio: { label: "Portfolio Strategist", text: "Forms its own private opinion on starter size, capital allocation and when stronger Runner Genome evidence deserves more than the $50 minimum.", tag: "SIZING", icon: "◫" },
 };
 
@@ -313,13 +311,13 @@ function DecisionCard({ result, replaying, dataMode, currentChain }: {
       </div>
       <p className="decision-thesis">{thesis}</p>
       {result.independentCouncil && <div className={`entity-proof ${result.independentCouncil.mode === "isolated-local-fallback" ? "degraded" : "verified"}`}>
-        <b>{result.independentCouncil.mode === "independent-local" ? "9 INDEPENDENT LOCAL ENTITIES · $0 API" : result.independentCouncil.mode === "independent-ai" ? "9 INDEPENDENT ENTITIES" : "ISOLATED LOCAL FALLBACK"}</b>
-        <span>8 private reads → peer reveal/meeting → separate Runner CIO</span>
+        <b>{result.independentCouncil.mode === "independent-local" ? "8 INDEPENDENT LOCAL ENTITIES · $0 API" : result.independentCouncil.mode === "independent-ai" ? "8 INDEPENDENT ENTITIES" : "ISOLATED LOCAL FALLBACK"}</b>
+        <span>7 private reads → peer reveal/meeting → separate Runner CIO</span>
         <small>{result.independentCouncil.agentModel} · CIO {result.independentCouncil.cioModel}</small>
       </div>}
       <div className="decision-context-mini">
         <span><b>{result.councilProcess.lane === "early-runner" ? "EARLY RUNNER" : result.councilProcess.lane === "meme" ? result.memeRegime.label : result.regime.label}</b><small>{result.councilProcess.lane === "early-runner" ? `$${Math.round(result.snapshot.marketCap).toLocaleString()} MC` : result.councilProcess.lane === "meme" ? "Meme lane" : "Regime"}</small></span>
-        <span><b>{result.councilProcess.alignedBots}/{result.councilProcess.totalBots}</b><small>Bot alignment</small></span>
+        <span><b>{result.councilProcess.alignedBots}/8</b><small>Bot alignment</small></span>
         <span><b>{`${result.runnerGenome.entryScore.toFixed(0)}/100`}</b><small>Runner Genome</small></span>
         <span><b>{result.councilProcess.executorVote}</b><small>Executor</small></span>
       </div>
@@ -336,7 +334,6 @@ function CouncilBot({ bot, index, active, speech, context }: {
   bot: AgentOpinion; index: number; active: boolean; speech?: string; context?: string;
 }) {
   return <div className={`council-bot bot-pos-${index} ${active ? "speaking" : ""}`}>
-    {(bot.id === "sellability" || index === 8) && <span className={`sellability-seat ${bot.id === "cio" ? "cio-seat" : ""}`} aria-label={`${bot.name} Council seat`}>{bot.shortName}</span>}
     {active && <>
       <div className="speech-pop" role="status"><b>{bot.name}</b>{context && <small className="speech-context">{context}</small>}<span>{speech ?? bot.summary}</span></div>
       <span className="active-seat-pulse" aria-hidden="true" />
@@ -351,7 +348,7 @@ function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
     { agentId: "launch", round: "opening" }, { agentId: "social", round: "opening" },
     { agentId: "wallet", round: "opening" }, { agentId: "quant", round: "rebuttal" },
     { agentId: "contract", round: "rebuttal" }, { agentId: "bear", round: "rebuttal" },
-    { agentId: "sellability", round: "rebuttal" }, { agentId: "portfolio", round: "rebuttal" }, { agentId: "cio", round: "decision" },
+    { agentId: "portfolio", round: "rebuttal" }, { agentId: "cio", round: "decision" },
   ];
   return order.flatMap(({ agentId, round }) => {
     const exact = full.find((turn) => turn.agentId === agentId && (!round || turn.round === round));
@@ -360,13 +357,7 @@ function buildVisualCouncilReplay(result: WarRoomResult): CouncilTurn[] {
   });
 }
 
-type WarRoomDashboardProps = {
-  researchTabActive?: boolean;
-  onOpenResearch?: () => void;
-  onOpenWarRoom?: () => void;
-};
-
-export default function WarRoomDashboard({ researchTabActive = false, onOpenResearch, onOpenWarRoom }: WarRoomDashboardProps) {
+export default function WarRoomDashboard() {
   const [status, setStatus] = useState<AutopilotPayload | null>(null);
   const [livePositions, setLivePositions] = useState<ManagedPosition[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -538,7 +529,7 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
     });
   }, [status?.generatedAt]);
 
-  const visibleBots = useMemo(() => [...roomBots].slice(0, 9), [roomBots]);
+  const visibleBots = useMemo(() => [...roomBots].slice(0, 8), [roomBots]);
   // Redis hash reads are intentionally unordered. Keep the trade log stable
   // and newest-first after each lightweight live refresh.
   const positions = [...(livePositions ?? status?.positions ?? [])].sort((a, b) =>
@@ -628,7 +619,7 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
     ? `conic-gradient(${allocationSlices.map((slice) => `${slice.color} ${slice.start.toFixed(2)}% ${slice.end.toFixed(2)}%`).join(",")})`
     : "#222";
 
-  const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "sellability", "portfolio"];
+  const roster = ["cio", "launch", "social", "wallet", "quant", "contract", "bear", "portfolio"];
 
   const resetPaperWallet = async () => {
     if (paperResetInFlightRef.current) return;
@@ -691,43 +682,39 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
   };
 
   const openDetailedTradeLog = () => {
-    onOpenWarRoom?.();
     setDetailedTradeLogActive(true);
     window.setTimeout(() => document.getElementById("detailed-trade-log")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
 
   const scrollToSection = (id: string) => {
-    onOpenWarRoom?.();
-    window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
     <main className="light-app">
       <nav className="war-room-top-tabs" aria-label="War Room sections">
-        <button type="button" className={!researchTabActive ? "active" : ""} onClick={() => scrollToSection("live")}>WAR ROOM</button>
+        <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
         <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
         <button type="button" onClick={() => scrollToSection("unsellable-capital")}>UNSELLABLE</button>
         <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
-        <button type="button" className={researchTabActive ? "active" : ""} onClick={onOpenResearch}>RESEARCH / FILING CABINET</button>
       </nav>
-      <div className="war-room-primary-view" hidden={researchTabActive}>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
           <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · MOON BAGS</small></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
-        <div className="table-scene" aria-label="Nine-entity council meeting room">
-          <img className="council-reference-art" src="/bot-council-reference.png" alt="Bot War Room agents seated around the council table" draggable={false} fetchPriority="high" />
+        <div className="table-scene" aria-label="Eight-bot council meeting room">
+          <img className="council-reference-art" src="/bot-council-reference.png" alt="Eight Bot War Room agents seated around the council table" draggable={false} fetchPriority="high" />
           {visibleBots.map((bot, index) => <CouncilBot key={bot.id} bot={bot} index={index} active={Boolean(displayedTurn && bot.id === displayedTurn.agentId)} speech={bot.id === displayedTurn?.agentId ? displayedTurn.message : undefined} context={bot.id === displayedTurn?.agentId ? (replayResult && currentTurn ? `$${replayResult.snapshot.symbol} · ${currentTurn.round}` : `${status?.currentChain ?? "Live"} · real scan`) : undefined} />)}
         </div>
         <div className="live-caption"><span className={`status-dot ${displayedTurn ? "talking" : ""}`} /><b>{displayedTurn ? `${roomBots.find((b) => b.id === displayedTurn.agentId)?.name ?? "Council"} speaking` : "Autonomous Council live"}</b><span>{displayedTurn ? displayedTurn.message : status ? `REAL DATA · ${status.dataMode === "birdeye" ? "Birdeye New Listings" : status.dataMode === "adapter" ? "adapter" : "DEX Screener"} · scanning ${status.currentChain} · ${status.candidateCount} real candidates · ${status.buyCount} paper buys` : "Starting real-data paper scanner"}</span></div>
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into eight isolated specialist entities first, including the Sellability Investigator; only after their private opinions lock do they meet, and a separate ninth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market while the dedicated Exit Strategist banks profits, kills dead trades, recycles stale capital and returns simulated proceeds to cash.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market while the dedicated Exit Strategist banks profits, kills dead trades, recycles stale capital and returns simulated proceeds to cash.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>
@@ -743,7 +730,7 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
         <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 7}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
         <div className="sizing-policy-strip"><span><b>$50+ meaningful training</b><small>If Council approves a BUY or qualified probe, soft sizing warnings cannot shrink it below $50 · only real cash/exposure capacity can delay it</small></span><span className="sizing-live-note">Hard safety vetoes still block · exits/trims may stay smaller</span></div>
         <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
-        <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} title={provider.ok ? `Last success: ${provider.lastSuccessAt ?? "this session"}` : !provider.configured ? "Provider is not configured" : provider.lastErrorAt ? `Last request failed at ${provider.lastErrorAt}. Check provider logs for the cause.` : "Configured; no successful request yet. Some providers are only called for relevant chains or trades."} className={provider.ok ? "provider-ok" : !provider.configured ? "provider-off" : provider.lastErrorAt ? "provider-error" : "provider-warn"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : !provider.configured ? "OFF" : provider.lastErrorAt ? "ERROR" : "IDLE"}</small></span>)}</div>
+        <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
         {(status?.lastError || error) && <p className="autonomy-warning">{status?.lastError ?? error}</p>}
       </section>
 
@@ -987,16 +974,15 @@ export default function WarRoomDashboard({ researchTabActive = false, onOpenRese
       </section>
 
       <section id="roster" className="roster-panel page-panel">
-        <div className="wide-panel-head"><div><h2>♧ Bot Roster</h2><p>Nine autonomous entities. Eight specialists work privately first; Runner CIO receives their locked opinions only afterward.</p></div><span>Executor is infrastructure, not a Council seat.</span></div>
+        <div className="wide-panel-head"><div><h2>♧ Bot Roster</h2><p>Eight autonomous entities. Seven work privately first; Runner CIO receives their locked opinions only afterward.</p></div><span>Executor is infrastructure, not a Council seat.</span></div>
         <div className="roster-grid">{roster.map((id) => { const bot = botDescriptions[id]; return <article className="roster-card" key={id}><span className="roster-icon">{bot.icon}</span><div><h3>{bot.label}</h3><p>{bot.text}</p><small>{bot.tag}</small></div></article>; })}</div>
       </section>
 
       <section id="system" className="system-strip page-panel">
         <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled. Decisions and fills are journaled for later analysis.</span></div>
         <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
-        <div><b>Entities cannot vote around hard safety</b><span>The nine Council entities decide independently, but deterministic Executor/Guardian infrastructure still enforces explicit sellability, honeypot, authority and accounting constraints.</span></div>
+        <div><b>Entities cannot vote around hard safety</b><span>The eight entities decide independently, but deterministic Executor/Guardian infrastructure still enforces explicit sellability, honeypot, authority and accounting constraints.</span></div>
       </section>
-      </div>
     </main>
   );
 }

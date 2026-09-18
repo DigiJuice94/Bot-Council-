@@ -13,9 +13,7 @@ import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositio
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import { assessSellabilityRisk, getSellabilityLearningSnapshot, recordLearnedSellabilityBlock } from "./sellability-investigator";
-import { ensureReleaseFreshStart } from "./release-fresh-start";
-import type { Chain, ExecutionRequest, ManagedPosition, MarketSnapshot, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
+import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -150,7 +148,6 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
     agentWeights: result.agentWeights,
     decision: result.decision,
     conviction: result.conviction,
-    sellabilityInvestigation: result.sellabilityInvestigation,
     riskMaxPositionPct: result.risk.maxPositionPct,
     initialAllocationPct,
     portfolioEquityUsd: portfolio.equityUsd,
@@ -160,7 +157,6 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
 function explicitSecurityFailure(result: WarRoomResult) {
   const snapshot = result.snapshot;
   const q = snapshot.dataProvenance?.quality;
-  if (snapshot.launchpad?.detected && snapshot.launchpad.status !== "graduated") return `${snapshot.launchpad.platform} graduation is not verified`;
   if (q?.sellability && !snapshot.sellable) return "Sellability explicitly failed";
   if (q?.honeypot && snapshot.honeypot) return "Honeypot evidence is positive";
   if (q?.top10 && snapshot.top10Pct > 80) return "Top 10 holders exceed 80%";
@@ -240,17 +236,7 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
     addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
   }
-  const finalSellability = await assessSellabilityRisk(executionSnapshot);
-  if (finalSellability.verifiedBlock || finalSellability.learnedBlock) {
-    const reason = finalSellability.verifiedBlock
-      ? `Entry blocked by fresh Sellability Investigator verification: ${finalSellability.evidence[0] ?? "token cannot be exited safely"}`
-      : `Entry blocked by Sellability Investigator: ${finalSellability.similarCases} close unsellable fingerprint matches at ${finalSellability.riskScore}/100 risk.`;
-    recordRejection(reason);
-    addChat("Sellability Investigator", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
-    return false;
-  }
   context.snapshot = executionSnapshot;
-  context.sellabilityInvestigation = finalSellability;
   const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
   const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
   if (!eligibility.allowed) {
@@ -365,7 +351,7 @@ async function reviewOneShadowDecision() {
   }
 }
 
-async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | null>, reviewResearch: boolean) {
+async function scanOneChain(chain: Chain) {
   const current = state();
   current.currentChain = chain;
   current.lastScanAt = new Date().toISOString();
@@ -380,14 +366,9 @@ async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | nu
   if (bankroll.resetPerformed) {
     addChat("System", `Research bankroll automatically restarted at $${bankroll.wallet.startingCashUsd.toFixed(2)} after reaching zero. Reset #${bankroll.resetMeta.resets}; prior losses remain in the research record.`, "system");
   }
-  // Start discovery immediately; keep research and shadow reviews every cycle.
-  const [snapshot] = await Promise.all([
-    candidate,
-    reviewResearch ? (async () => {
-      await refreshOneResearchCase(fetchLiveTokenSnapshot);
-      await reviewOneShadowDecision();
-    })() : Promise.resolve(),
-  ]);
+  await refreshOneResearchCase(fetchLiveTokenSnapshot);
+  await reviewOneShadowDecision();
+  const snapshot = await fetchLiveCandidate(chain);
   if (!snapshot) {
     if (current.scanCount % CHAINS.length === 0) addChat("Launch Scout", `${chain}: no new qualifying real candidate. Provider waterfall is continuing automatically.`, "system");
     return;
@@ -405,6 +386,7 @@ async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | nu
     getPaperPortfolioContext(snapshot.chain),
     getRunnerGenomeGuidance(snapshot),
   ]);
+
   const result = await runIndependentCouncil(snapshot, {
     mode: "paper",
     regime,
@@ -418,10 +400,6 @@ async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | nu
 
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
-  }
-
-  if (result.sellabilityInvestigation?.learnedBlock) {
-    await recordLearnedSellabilityBlock(snapshot, result.sellabilityInvestigation);
   }
 
   await observeCouncilResult(result);
@@ -439,7 +417,7 @@ async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | nu
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/${result.councilProcess.totalBots} independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {
@@ -457,7 +435,6 @@ async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | nu
 }
 
 export async function runAutonomousTick() {
-  await ensureReleaseFreshStart();
   if (globalState.__botWarRoomAutopilotBusyV14) return;
   globalState.__botWarRoomAutopilotBusyV14 = true;
   let releaseLease: (() => Promise<void>) | null = null;
@@ -465,28 +442,9 @@ export async function runAutonomousTick() {
     releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
     if (!releaseLease) return;
     const cursor = globalState.__botWarRoomAutopilotCursorV14 ?? 0;
-    const firstChain = CHAINS[cursor % CHAINS.length];
-    const secondChain = CHAINS[(cursor + 1) % CHAINS.length];
-    globalState.__botWarRoomAutopilotCursorV14 = (cursor + 2) % CHAINS.length;
-    // Scan two different chains together, then process their Council decisions
-    // in order under the same lease so PAPER wallet writes cannot overlap.
-    const firstCandidate = fetchLiveCandidate(firstChain).catch((error: unknown) => {
-      console.error(`[autopilot] discovery failed on ${firstChain}`, error);
-      return null;
-    });
-    const secondCandidate = fetchLiveCandidate(secondChain).catch((error: unknown) => {
-      console.error(`[autopilot] discovery failed on ${secondChain}`, error);
-      return null;
-    });
-    await scanOneChain(firstChain, firstCandidate, true);
-    const secondForEvaluation = secondCandidate.then(async (snapshot) => {
-      if (!snapshot) return null;
-      const fetchedAt = Date.parse(snapshot.dataProvenance?.fetchedAt ?? "");
-      if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt < 10_000) return snapshot;
-      // Council must see a current mark if the first evaluation took time.
-      return fetchLiveTokenSnapshot(secondChain, snapshot.tokenAddress);
-    });
-    await scanOneChain(secondChain, secondForEvaluation, false);
+    const chain = CHAINS[cursor % CHAINS.length];
+    globalState.__botWarRoomAutopilotCursorV14 = (cursor + 1) % CHAINS.length;
+    await scanOneChain(chain);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const current = state();
@@ -517,11 +475,10 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; every Council entity files lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
+  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
 }
 
 export async function getAutopilotStatus() {
-  await ensureReleaseFreshStart();
   ensureAutonomousWarRoom();
   const bankroll = await ensurePaperWalletResearchFunds();
   const positions = await listManagedPositions();
@@ -529,7 +486,6 @@ export async function getAutopilotStatus() {
   const resetMeta = await getPaperWalletResetMeta();
   const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
-  const sellabilityLearning = await getSellabilityLearningSnapshot();
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
   return {
@@ -538,7 +494,6 @@ export async function getAutopilotStatus() {
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    sellabilityLearning,
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };

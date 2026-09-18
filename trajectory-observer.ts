@@ -393,7 +393,7 @@ export async function distributeTrajectoryOutcomeLesson(row: TrajectoryCaseLike)
 
   return [
     `Trajectory Observer filed ${row.outcome.toUpperCase()} sequence: ${headline}`,
-    `Feedback distributed privately to the runner specialists and CIO; the dedicated Sellability Investigator learns only from unsellable outcomes. Observer has no vote and cannot place or block a trade.`,
+    `Feedback distributed privately to all 8 Council entities; Observer has no vote and cannot place or block a trade.`,
   ];
 }
 

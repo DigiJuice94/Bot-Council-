@@ -62,16 +62,6 @@ type Research = {
 type Payload = {
   research?: Research;
   paperWalletResetMeta?: { resets: number; totalInjectedUsd: number; lastResetAt?: string };
-  sellabilityLearning?: {
-    casesFiled: number;
-    chainCoverage: number;
-    totalLockedLossUsd: number;
-    learnedCandidatesBlocked: number;
-    latestCaseAt?: string;
-    latestCaseSymbol?: string;
-    latestBlockAt?: string;
-    latestBlockSymbol?: string;
-  };
 };
 
 function compactUsd(value: number) {
@@ -108,7 +98,6 @@ export default function RunnerResearchPanel() {
   const requirementRows = r?.requirements ?? [];
   const caseRows = r?.recentCases ?? [];
   const lessons = useMemo(() => (r?.recentBotLessons ?? []).slice(0, 8), [r?.recentBotLessons]);
-  const sellability = payload?.sellabilityLearning;
 
   return (
     <section className="v214-research page-panel" id="filing-cabinet">
@@ -126,23 +115,6 @@ export default function RunnerResearchPanel() {
         <div className="v214-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><i style={{ width: `${progress}%` }} /></div>
         <div className="v214-progress-labels"><span>Collecting evidence</span><span>Testing hypotheses</span><span>Validating edge</span><span>CODE DECIPHERED</span></div>
       </div>
-
-      <article className="sellability-learning-card">
-        <div className="sellability-learning-head">
-          <div><span>SELLABILITY INVESTIGATOR · PERSISTENT LEARNING</span><h3>Locked-capital patterns are being filed and checked before future buys.</h3><p>Counts below come from the persistent Sellability case library, not from the visible trade-card limit.</p></div>
-          <strong>{sellability?.casesFiled ?? 0}<small>cases filed</small></strong>
-        </div>
-        <div className="sellability-learning-grid">
-          <div><small>Unsellable cases learned</small><b>{sellability?.casesFiled ?? 0}</b></div>
-          <div><small>Chains represented</small><b>{sellability?.chainCoverage ?? 0}</b></div>
-          <div><small>Locked loss studied</small><b>-${(sellability?.totalLockedLossUsd ?? 0).toFixed(2)}</b></div>
-          <div><small>Unique learned blocks</small><b>{sellability?.learnedCandidatesBlocked ?? 0}</b></div>
-        </div>
-        <div className="sellability-learning-foot">
-          <span>Latest filed: <b>{sellability?.latestCaseSymbol ? `$${sellability.latestCaseSymbol}` : "waiting"}</b>{sellability?.latestCaseAt ? ` · ${timeAgo(sellability.latestCaseAt)}` : ""}</span>
-          <span>Latest learned block: <b>{sellability?.latestBlockSymbol ? `$${sellability.latestBlockSymbol}` : "none yet"}</b>{sellability?.latestBlockAt ? ` · ${timeAgo(sellability.latestBlockAt)}` : ""}</span>
-        </div>
-      </article>
 
       <div className="v214-stat-grid">
         <div><strong>{r?.casesStudied ?? 0}</strong><span>coin case files</span></div>
@@ -241,7 +213,7 @@ export default function RunnerResearchPanel() {
 
       <div className="v214-two-col">
         <article className="v214-box">
-          <div className="v214-box-title"><h3>What the bots are filing</h3><span>all 9 roles</span></div>
+          <div className="v214-box-title"><h3>What the bots are filing</h3><span>all 8 roles</span></div>
           <div className="v214-lessons">{lessons.length ? lessons.map((row, index) => <div key={`${row.at}-${row.agentId}-${index}`}><span>{row.agentId.toUpperCase()}</span><p>{row.message}</p><time>{timeAgo(row.at)}</time></div>) : <p className="v214-muted">The next Council reads will appear here as research notes.</p>}</div>
         </article>
 

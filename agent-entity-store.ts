@@ -1,6 +1,5 @@
 import { createClient } from "redis";
 import type { CouncilEntityId, IndependentEntityOpinion, ManagedPosition } from "./types";
-import { recordUnsellableCase } from "./sellability-investigator";
 
 const PREFIX = "bot-war-room:entity-memory:v226";
 const OUTCOME_SET_KEY = `${PREFIX}:recorded-outcomes`;
@@ -112,9 +111,6 @@ async function markOutcomeRecorded(positionId: string) {
 }
 
 export async function recordIndependentCouncilOutcome(position: ManagedPosition) {
-  if (position.status === "unsellable") {
-    await recordUnsellableCase(position).catch((error) => console.error("[sellability-investigator] case write", error));
-  }
   const council = position.entryContext?.independentCouncil;
   if (!council || (position.status !== "closed" && position.status !== "unsellable")) return;
   if (await outcomeAlreadyRecorded(position.id)) return;

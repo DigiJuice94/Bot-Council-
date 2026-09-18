@@ -8,7 +8,6 @@ import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeM
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { getRunnerExitGuidance } from "./runner-research";
-import { ensureReleaseFreshStart } from "./release-fresh-start";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
@@ -72,9 +71,6 @@ export async function assessPaperEntryEligibility(args: {
   const { request, snapshot, entryContext } = args;
   if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
     return { allowed: false, isReentry: false, reentryCount: 0, reason: "Entry blocked: token reports zero executable liquidity." };
-  }
-  if (snapshot.launchpad?.detected && snapshot.launchpad.status !== "graduated") {
-    return { allowed: false, isReentry: false, reentryCount: 0, reason: `Entry blocked: ${snapshot.launchpad.platform} token has not verified graduation to an executable DEX pool.` };
   }
   const affordability = await canAffordPaperBuy(request.notionalUsd);
   if (!affordability.allowed) return { allowed: false, isReentry: false, reentryCount: 0, reason: affordability.reason ?? "Paper wallet cannot fund this entry." };
@@ -557,7 +553,6 @@ export function ensurePositionGuardianLoop() {
 }
 
 export async function refreshPositionGuardian(): Promise<PositionGuardianReport> {
-  await ensureReleaseFreshStart();
   if (guardianGlobal.__botWarRoomGuardianBusy) {
     const storage = await positionStorageMode();
     return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };
@@ -581,7 +576,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
           const confirmedUnsellable = !snapshot.sellable || snapshot.honeypot || snapshot.liquidity <= 0 ||
             (snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
-          if (next.mode === "paper" && confirmedUnsellable) {
+          if (next.status === "exit_pending" && next.mode === "paper" && confirmedUnsellable) {
             const reason = snapshot.liquidity <= 0
               ? "Guardian confirmed zero executable liquidity while attempting to exit."
               : snapshot.honeypot

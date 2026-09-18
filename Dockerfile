@@ -7,11 +7,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Support the current flat GitHub upload as well as a future clean checkout.
-# The archive already in this repository contains the V3.6.2 source folders.
-RUN if [ ! -f app/page.tsx ] && [ -f deployment-source.tar.gz ]; then \
-      tar -xzf deployment-source.tar.gz; \
-    fi \
+RUN test -f deployment-source.tar.gz \
+    && tar -xzf deployment-source.tar.gz \
     && test -f app/page.tsx \
     && test -f app/layout.tsx \
     && test -f app/api/paper-reset/route.ts \

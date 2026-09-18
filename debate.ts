@@ -43,14 +43,14 @@ export function buildCouncilDiscussion(result: WarRoomResult): CouncilTurn[] {
         id: "independent-cio",
         agentId: "cio",
         round: "decision",
-        message: `I received eight locked private reads and their meeting responses; I did not generate them. My synthesis is ${trace.cioOpinion.vote} at ${trace.cioOpinion.confidence}% confidence. ${trace.cioOpinion.thesis}`,
+        message: `I received seven locked private reads and their meeting responses; I did not generate them. My synthesis is ${trace.cioOpinion.vote} at ${trace.cioOpinion.confidence}% confidence. ${trace.cioOpinion.thesis}`,
       },
       {
         id: "deterministic-executor",
         agentId: "executor",
         round: "execution",
         respondsTo: "cio",
-        message: `Deterministic Executor is outside the nine-entity Council. It only applies route/accounting/hard-safety rules after the CIO decision. Feasibility: ${result.councilProcess.executorVote}.`,
+        message: `Deterministic Executor is outside the eight-entity Council. It only applies route/accounting/hard-safety rules after the CIO decision. Feasibility: ${result.councilProcess.executorVote}.`,
       },
     ];
   }

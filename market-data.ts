@@ -97,8 +97,6 @@ type SecurityResult = {
 
 type MarketDataGlobal = typeof globalThis & {
   __bwrDexDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
-  __bwrDexLatestAll?: { at: number; rows: any[] };
-  __bwrDexLatestPending?: Promise<any[]>;
   __bwrGeckoDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
   __bwrSecurityCacheV12?: Map<string, { at: number; value: SecurityResult }>;
   __bwrCandidateSeen?: Map<string, number>;
@@ -282,26 +280,13 @@ async function birdeyeNewListings(chain: Chain): Promise<DiscoveryToken[]> {
   return nestedArray(payload).map((row) => discoveryRow(row, DEX_CHAIN[chain], "birdeye")).filter(Boolean) as DiscoveryToken[];
 }
 
-async function latestDexListings(): Promise<any[]> {
-  const cached = globalCache.__bwrDexLatestAll;
-  if (cached && Date.now() - cached.at < 15_000) return cached.rows;
-  if (globalCache.__bwrDexLatestPending) return globalCache.__bwrDexLatestPending;
-  const endpoints = ["token-profiles/latest/v1", "token-boosts/latest/v1", "community-takeovers/latest/v1"];
-  const pending = Promise.all(endpoints.map((path) => fetchJson<any[]>(`${DEX_BASE}/${path}`, "dexscreener")))
-    .then((results) => {
-      const rows = results.flatMap((value) => Array.isArray(value) ? value : []);
-      globalCache.__bwrDexLatestAll = { at: Date.now(), rows };
-      return rows;
-    }).finally(() => { globalCache.__bwrDexLatestPending = undefined; });
-  globalCache.__bwrDexLatestPending = pending;
-  return pending;
-}
-
 async function dexDiscoveryTokens(chain: Chain): Promise<DiscoveryToken[]> {
   const dexChain = DEX_CHAIN[chain];
   const cached = dexDiscoveryCache.get(dexChain);
   if (cached && Date.now() - cached.at < 15_000) return cached.tokens;
-  const combined = (await latestDexListings())
+  const endpoints = ["token-profiles/latest/v1", "token-boosts/latest/v1", "community-takeovers/latest/v1"];
+  const results = await Promise.all(endpoints.map((path) => fetchJson<any[]>(`${DEX_BASE}/${path}`, "dexscreener")));
+  const combined = results.flatMap((rows) => Array.isArray(rows) ? rows : [])
     .filter((row) => row?.chainId === dexChain)
     .map((row) => discoveryRow({ ...row, address: row.tokenAddress }, dexChain, "dexscreener"))
     .filter(Boolean) as DiscoveryToken[];
@@ -671,45 +656,11 @@ function inferredAssetClass(pair: DexPair, chain: Chain, ageMinutes: number, mar
   return "unknown";
 }
 
-function launchpadState(pair: DexPair, chain: Chain, tokenAddress: string): NonNullable<MarketSnapshot["launchpad"]> | undefined {
-  const dex = String(pair.dexId ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const address = tokenAddress.toLowerCase();
-  const platform = dex.includes("pumpfun") || address.endsWith("pump") ? "pumpfun"
-    : dex.includes("moonshot") ? "moonshot"
-      : dex.includes("fourmeme") || dex === "four" ? "fourmeme"
-        : dex.includes("fomo") ? "fomo"
-          : undefined;
-  if (!platform) return undefined;
-  const bondingVenue = (platform === "pumpfun" && dex === "pumpfun") ||
-    (platform === "moonshot" && dex.includes("moonshot")) ||
-    (platform === "fourmeme" && (dex.includes("fourmeme") || dex === "four")) ||
-    (platform === "fomo" && dex.includes("fomo"));
-  if (bondingVenue) {
-    return {
-      detected: true,
-      platform,
-      status: "bonding",
-      evidence: `${pair.dexId ?? platform} is the launchpad/bonding venue; no post-graduation DEX pool is verified.`,
-    };
-  }
-  const pairAddress = String(pair.pairAddress ?? "");
-  const liquidity = num(pair.liquidity?.usd, 0);
-  return {
-    detected: true,
-    platform,
-    status: pairAddress && liquidity > 0 ? "graduated" : "unknown",
-    evidence: pairAddress && liquidity > 0
-      ? `Post-launchpad ${pair.dexId ?? "DEX"} pool ${pairAddress.slice(0, 8)}… has executable liquidity.`
-      : "Launchpad origin detected, but a post-graduation DEX pool could not be verified.",
-  };
-}
-
-function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener", fallbackImageUrl?: string, allowNonExecutable = false, fallbackPrice = 0): MarketSnapshot | null {
-  const reportedPrice = num(pair.priceUsd, 0);
-  const price = reportedPrice > 0 ? reportedPrice : Math.max(0, fallbackPrice);
+function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult, discoverySource: DiscoveryToken["source"] = "dexscreener", fallbackImageUrl?: string): MarketSnapshot | null {
+  const price = num(pair.priceUsd, 0);
   const liquidity = num(pair.liquidity?.usd, 0);
   const tokenAddress = String(pair.baseToken?.address ?? "");
-  if (!tokenAddress || (!allowNonExecutable && (price <= 0 || liquidity <= 0))) return null;
+  if (!tokenAddress || price <= 0 || liquidity <= 0) return null;
   const createdAt = num(pair.pairCreatedAt, Date.now());
   const ageMinutes = Math.max(1, Math.round((Date.now() - createdAt) / 60_000));
   const marketCap = num(pair.marketCap, num(pair.fdv, 0));
@@ -728,7 +679,6 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
   const bundledPct = security.bundledPct ?? 0;
   const boostCount = num(pair.boosts?.active, 0);
   const q = { ...security.quality };
-  const launchpad = launchpadState(pair, chain, tokenAddress);
 
   return {
     symbol: String(pair.baseToken?.symbol ?? "UNKNOWN").replace(/^\$/, "").slice(0, 20),
@@ -745,7 +695,6 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
     ownershipRenounced: security.ownershipRenounced ?? false, proxyContract: security.proxyContract ?? false,
     volumeAccelerationPct, marketCapChange5mPct: priceChangeBucket(pair, "m5"),
     assetClass: inferredAssetClass(pair, chain, ageMinutes, marketCap, volume24h),
-    launchpad,
     launchMetrics: {
       holdersPerMinute: q.holders && holders > 0 && ageMinutes <= 1440 ? holders / Math.max(1, ageMinutes) : undefined,
       transactionsPerMinute: tx1h > 0 ? tx1h / Math.min(60, Math.max(1, ageMinutes)) : undefined,
@@ -764,7 +713,6 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
         q.authorities || chain !== "Solana" ? "Authority evidence is available where applicable." : "Solana mint/freeze authority evidence is incomplete; deterministic risk fails closed.",
         q.bundled ? "Bundled-supply evidence is available." : "Bundled-supply evidence is unverified and cannot be treated as zero-risk.",
         boostCount > 0 ? `DEX Screener reports ${boostCount} active boost(s); no social score is fabricated from boosts.` : "Dedicated social velocity is not connected; Social Scout treats that domain as unverified.",
-        ...(launchpad ? [`Launchpad graduation: ${launchpad.status.toUpperCase()} · ${launchpad.evidence}`] : []),
         "Smart-money counts remain unverified unless a dedicated provider supplies them; zero is not treated as verified flow.",
       ],
     },
@@ -823,9 +771,7 @@ export async function fetchLivePositionSnapshot(position: ManagedPosition): Prom
   const pair = chooseBestPair(pairs, position.tokenAddress);
   if (!pair) return null;
   const security = await fetchSecurity(position.chain, position.tokenAddress);
-  // Held positions must retain a zero-liquidity snapshot so Guardian can mark
-  // them unsellable. Candidate discovery still rejects the same snapshot.
-  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener", position.imageUrl, true, position.markPrice);
+  return snapshotFromPair(position.chain, pair, security, process.env.BIRDEYE_API_KEY && BIRDEYE_CHAIN[position.chain] ? "birdeye" : "dexscreener", position.imageUrl);
 }
 
 export async function fetchLiveCandidate(chain: Chain): Promise<MarketSnapshot | null> {

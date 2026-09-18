@@ -100,12 +100,6 @@ export type MarketSnapshot = {
   marketCapChange5mPct?: number;
   context?: MarketContext;
   assetClass?: "meme" | "standard" | "unknown";
-  launchpad?: {
-    detected: boolean;
-    platform: "pumpfun" | "moonshot" | "fourmeme" | "fomo" | "other";
-    status: "bonding" | "graduated" | "unknown";
-    evidence: string;
-  };
   launchMetrics?: LaunchMetrics;
   dataProvenance?: DataProvenance;
 };
@@ -200,7 +194,7 @@ export type CouncilProcess = {
   cioVote: Decision;
   executorVote: "READY" | "REDUCE" | "BLOCK";
   alignedBots: number;
-  totalBots: 8 | 9;
+  totalBots: 8;
   reasons: string[];
 };
 
@@ -227,26 +221,13 @@ export type AgentId =
   | "quant"
   | "contract"
   | "bear"
-  | "sellability"
   | "portfolio"
   | "cio"
   | "executor";
 
-export type ResearchAgentId = "launch" | "social" | "wallet" | "quant" | "contract" | "bear";
+export type ResearchAgentId = Exclude<AgentId, "cio" | "executor" | "portfolio">;
 
-export type CouncilEntityId = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "sellability" | "portfolio" | "cio";
-
-export type SellabilityInvestigation = {
-  riskScore: number;
-  confidence: number;
-  sampleSize: number;
-  chainSampleSize: number;
-  similarCases: number;
-  learnedBlock: boolean;
-  verifiedBlock: boolean;
-  nearestSimilarityPct: number;
-  evidence: string[];
-};
+export type CouncilEntityId = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "portfolio" | "cio";
 
 export type IndependentEntityOpinion = {
   agentId: CouncilEntityId;
@@ -453,7 +434,6 @@ export type PositionEntryContext = {
   conviction: number;
   runnerGenome?: RunnerGenomeGuidance;
   independentCouncil?: IndependentCouncilTrace;
-  sellabilityInvestigation?: SellabilityInvestigation;
   riskMaxPositionPct?: number;
   initialAllocationPct?: number;
   portfolioEquityUsd?: number;
@@ -673,7 +653,6 @@ export type WarRoomResult = {
   memeRegime: MemeRegime;
   runnerGenome: RunnerGenomeGuidance;
   independentCouncil?: IndependentCouncilTrace;
-  sellabilityInvestigation?: SellabilityInvestigation;
   councilProcess: CouncilProcess;
   alpha: AlphaSignal;
   preMeeting: IndependentAgentRead[];
