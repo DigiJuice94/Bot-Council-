@@ -30,9 +30,9 @@ The Railway Docker deployment uses Next.js standalone output and starts with `no
 
 Extract the ZIP and upload the contents of Bot-War-Room-V3-FULL to the repository root. Keep existing Railway environment variables and Redis unchanged.
 
-The source remains in normal app/, components/, lib/, and public/ folders. The Docker build now fails clearly if any required source folder is missing; it cannot silently restore an older embedded source archive.
+The source remains in normal app/, components/, lib/, and public/ folders. An upload-safe deployment archive contains an exact copy of those current folders because some browser-based repository uploads omit directory trees. Docker extracts that current copy authoritatively before every build, preventing either missing folders or stale root files from being deployed.
 
-Use the included Dockerfile. No prepare-structure script, V2 patch chain or deployment-source fallback is used.
+Use the included Dockerfile. No prepare-structure script or V2 patch chain is used. When changing source in the future, deployment-source.tar.gz must be regenerated from the same final source before packaging.
 
 ## Persistence
 
