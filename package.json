@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.7.0-filing-cabinet-curator",
+  "version": "3.6.0-reserve-backed-exits",
   "private": true,
   "scripts": {
     "dev": "next dev",

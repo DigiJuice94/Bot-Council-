@@ -1,13 +1,5 @@
 # Bot War Room V3
 
-## V3.7 Filing Cabinet Curator
-
-The Filing Cabinet Curator is a background advisor, not a tenth Council vote. Before a Council decision it reads the Runner/Dumper case files, trajectory sequences, adaptive performance records, all nine entities' retained private memories, Sellability Investigator cases and verified PAPER outcomes. It audits whether every entity is writing decisions/outcomes, ranks the ten strongest learned techniques by evidence significance and sends the exact visible brief to the Runner CIO.
-
-The CIO may consider this brief through a deliberately small, capped ±3-point context adjustment. The Curator cannot vote, veto, bypass deterministic safety/execution blocks or force a trade. Its objective is maximizing real, executable profit; unconfirmed exits and zero-liquidity marks cannot become positive learning evidence.
-
-Repeatedly supported techniques can graduate into a separate 50-slot **Never Forget Vault** stored at `bot-war-room:filing-cabinet-curator:v1:never-forget`. One-off wins do not qualify. Vault entries survive PAPER wallet resets and retain their evidence sample, confirmation count and first/last confirmation dates. The Research / Filing Cabinet tab displays the top ten, the exact CIO brief, every bot's current job audit and the contents of the vault.
-
 ## V3.6 reserve-backed PAPER exits
 
 PAPER sells now fail closed when the fresh snapshot has `$0` liquidity or no executable price. Nonzero-liquidity sells use constant-product reserve math against the observed quote-side DEX reserve, so a manipulated token price can never create sale proceeds larger than the pool could plausibly pay. Full Guardian exits may still accept distressed slippage to recycle capital, but the credited cash is reserve-capped instead of using the old forced-percentage liquidation model. Entry, profit-taking and strategy thresholds are unchanged.
@@ -74,7 +66,7 @@ Use the included Dockerfile. No prepare-structure script or V2 patch chain is us
 
 ## Persistence
 
-Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-time portfolio history, Runner Genome/Filing Cabinet research, Trajectory Observer research, private Council entity memories, Sellability Investigator cases and the Curator's Never Forget Vault. Existing Redis key namespaces remain unchanged from V2.29.4; V3.4 added `bot-war-room:sellability-investigator:v1:cases`, and V3.7 adds `bot-war-room:filing-cabinet-curator:v1:never-forget` without migrating or deleting prior data.
+Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-time portfolio history, Runner Genome/Filing Cabinet research, Trajectory Observer research, private Council entity memories and Sellability Investigator cases. Existing Redis key namespaces remain unchanged from V2.29.4; V3.4 adds a separate `bot-war-room:sellability-investigator:v1:cases` research key without migrating or deleting prior data.
 
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 
