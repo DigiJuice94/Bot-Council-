@@ -513,7 +513,7 @@ function distinctTokenKey(position: ManagedPosition) {
 
 export async function ingestClosedPositions(positions: ManagedPosition[]) {
   const meta = await readMeta();
-  const closed = positions.filter((position) => position.status === "closed");
+  const closed = positions.filter((position) => position.status === "closed" || position.status === "unsellable");
   const seenClosed = new Set(meta.closedTradeTokens);
   const freshWinTokens = new Set(meta.freshWinTokens);
   const maxFreshMc = Math.max(10_000, Number(process.env.RESEARCH_FRESH_ENTRY_MAX_MC ?? 50_000));
@@ -871,7 +871,7 @@ function providerCoverage(providers: Array<{ configured: boolean; ok: boolean }>
 }
 
 function tradingStats(positions: ManagedPosition[]) {
-  const closed = positions.filter((position) => position.status === "closed");
+  const closed = positions.filter((position) => position.status === "closed" || position.status === "unsellable");
   const returns = closed.map((position) => finite(position.pnlPct));
   const profits = closed.filter((position) => position.realizedPnlUsd > 0).reduce((sum, position) => sum + position.realizedPnlUsd, 0);
   const losses = Math.abs(closed.filter((position) => position.realizedPnlUsd < 0).reduce((sum, position) => sum + position.realizedPnlUsd, 0));

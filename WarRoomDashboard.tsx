@@ -86,13 +86,13 @@ function shortCa(address?: string) {
 }
 
 function positionPnlUsd(position: ManagedPosition) {
-  if (position.status === "closed") return position.realizedPnlUsd ?? 0;
+  if (position.status === "closed" || position.status === "unsellable") return position.realizedPnlUsd ?? 0;
   const openValue = Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0);
   return (position.realizedProceedsUsd ?? 0) + openValue - (position.entryNotionalUsd ?? 0);
 }
 
 function isMoonBag(position: ManagedPosition) {
-  if (position.status === "closed") return false;
+  if (position.status === "closed" || position.status === "unsellable") return false;
   if (position.winnerState === "moonbag") return true;
   // A confirmed partial SELL means the main trade has already banked capital
   // and the remaining quantity is the runner remainder shown as a Moon Bag.
@@ -535,7 +535,8 @@ export default function WarRoomDashboard() {
   const positions = [...(livePositions ?? status?.positions ?? [])].sort((a, b) =>
     (b.openedAt ?? b.updatedAt ?? "").localeCompare(a.openedAt ?? a.updatedAt ?? "")
   );
-  const openPositions = positions.filter((position) => position.status !== "closed");
+  const openPositions = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
+  const unsellablePositions = positions.filter((position) => position.status === "unsellable");
   const moonBagPositions = openPositions.filter(isMoonBag);
   const activePositions = openPositions.filter((position) => !isMoonBag(position));
   // The server snapshot includes every open PAPER position; the UI list is display-capped.
@@ -696,6 +697,7 @@ export default function WarRoomDashboard() {
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
         <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
+        <button type="button" onClick={() => scrollToSection("unsellable-capital")}>UNSELLABLE</button>
         <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
       </nav>
       <section id="live" className="council-stage">
@@ -745,6 +747,8 @@ export default function WarRoomDashboard() {
           <span><small>Unrealized P/L</small><b className={unrealizedPnl >= 0 ? "positive" : "negative"}>{unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}</b></span>
           <span><small>Realized P/L</small><b className={realizedPnl >= 0 ? "positive" : "negative"}>{realizedPnl >= 0 ? "+" : ""}${realizedPnl.toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
+          <span><small>Locked Capital Loss</small><b className="negative">-${(status?.paperWallet?.lockedCapitalLossUsd ?? 0).toFixed(2)}</b></span>
+          <span><small>Unsellable Trades</small><b>{status?.paperWallet?.unsellablePositions ?? 0}</b></span>
         </div>
 
         <div className="exit-strategist-live">
@@ -873,6 +877,27 @@ export default function WarRoomDashboard() {
         {moonBagPositions.length > 24 && <small className="active-trades-more">Showing 24 of {moonBagPositions.length} Moon Bags. Portfolio totals include every holding.</small>}
       </section>
 
+      <section id="unsellable-capital" className="unsellable-panel page-panel">
+        <div className="wide-panel-head"><div><h2>⚠ Unsellable / Locked Capital</h2><p>Tokens the Guardian could not sell. No proceeds are credited; remaining cost is counted as a loss and retained for learning.</p></div><span className="unsellable-chip">{unsellablePositions.length} lost trade{unsellablePositions.length === 1 ? "" : "s"}</span></div>
+        <div className="unsellable-grid">
+          {unsellablePositions.length ? unsellablePositions.slice(0, 24).map((position) => {
+            const lockedLoss = Math.max(0, position.lockedCapitalLossUsd ?? (position.entryNotionalUsd - position.realizedCostUsd));
+            return <article className="unsellable-card" key={position.id}>
+              <div className="unsellable-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em>UNSELLABLE</em></div>
+              <div className="unsellable-values">
+                <span><small>LOCKED / LOST</small><b className="negative">-${lockedLoss.toFixed(2)}</b></span>
+                <span><small>TOKENS STUCK</small><b>{tokenAmount(position.remainingQuantity ?? 0)}</b></span>
+                <span><small>ORIGINAL ENTRY</small><b>{price(position.entryPrice)}</b></span>
+                <span><small>REALIZED BEFORE LOCK</small><b>${Math.max(0, position.realizedProceedsUsd ?? 0).toFixed(2)}</b></span>
+              </div>
+              <p>{position.unsellableReason ?? position.lastReason}</p>
+              <small className="active-trade-meta">{position.chain} · CA {shortCa(position.tokenAddress)} · {ago(position.unsellableAt ?? position.updatedAt)}</small>
+            </article>;
+          }) : <div className="empty-row">No unsellable PAPER trades in this run.</div>}
+        </div>
+        {unsellablePositions.length > 24 && <small className="active-trades-more">Showing 24 of {unsellablePositions.length} unsellable trades. Wallet totals include every locked-capital loss.</small>}
+      </section>
+
       <section id="detailed-trade-log" className="detailed-log-panel page-panel">
         <div className="wide-panel-head">
           <div><h2>☷ Detailed Trade Ledger</h2><p>Exact entry, scale, trim and exit fills with verified post-trade portfolio accounting.</p></div>
@@ -937,7 +962,7 @@ export default function WarRoomDashboard() {
               <strong className="trade-buy-size">${(grossBuyUsd || position.entryNotionalUsd || 0).toFixed(2)}</strong>
               <span>{price(position.entryPrice)}</span>
               <span>{price(position.markPrice)}</span>
-              <span><em className={`status-${position.status}`}>{position.status === "closed" ? "Closed" : position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></span>
+              <span><em className={`status-${position.status}`}>{position.status === "closed" ? "Closed" : position.status === "unsellable" ? "Unsellable" : position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></span>
               <strong className={pnlUsd >= 0 ? "positive trade-pnl" : "negative trade-pnl"}>
                 <span>{position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(1)}%</span>
                 <small>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</small>

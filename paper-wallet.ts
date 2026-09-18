@@ -179,7 +179,8 @@ async function calculateSnapshot(
   const positions = positionOverride
     ? storedPositions.map((position) => position.id === positionOverride.id ? { ...position, ...positionOverride } : position)
     : storedPositions;
-  const open = positions.filter((position) => position.status !== "closed");
+  const open = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
+  const unsellable = positions.filter((position) => position.status === "unsellable");
   const cents = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const cashUsd = cents(Math.max(0, state.cashUsd));
   const openExposureUsd = cents(open.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0));
@@ -221,6 +222,8 @@ async function calculateSnapshot(
       : 0,
     dailyPnlPct: state.dayStartEquityUsd > 0 ? Number(((equityUsd - state.dayStartEquityUsd) / state.dayStartEquityUsd * 100).toFixed(3)) : 0,
     openPositions: open.length,
+    unsellablePositions: unsellable.length,
+    lockedCapitalLossUsd: cents(unsellable.reduce((sum, position) => sum + Math.max(0, position.lockedCapitalLossUsd ?? (position.entryNotionalUsd - position.realizedCostUsd)), 0)),
     storage,
     accountingVerified: true,
     accountingVerifiedAt: new Date().toISOString(),
@@ -272,7 +275,7 @@ export async function resetPaperWalletPreserveLearning(reason = "Manual dashboar
     const { state: current, storage } = await readState();
     const positions = await listManagedPositions();
     const paperPositions = positions.filter((position) => position.mode === "paper");
-    const open = paperPositions.filter((position) => position.status !== "closed");
+    const open = paperPositions.filter((position) => position.status === "open" || position.status === "exit_pending");
     const openValue = open.reduce(
       (sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice),
       0,
@@ -408,7 +411,7 @@ export async function ensurePaperWalletResearchFunds(): Promise<{
 
 export async function getPaperPortfolioContext(chain: Chain): Promise<PortfolioRiskContext> {
   const wallet = await getPaperWallet();
-  const positions = (await listManagedPositions()).filter((position) => position.status !== "closed");
+  const positions = (await listManagedPositions()).filter((position) => position.status === "open" || position.status === "exit_pending");
   const chainExposureUsd = positions
     .filter((position) => position.chain === chain)
     .reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
@@ -470,9 +473,9 @@ export async function applyPaperFillToWallet(args: {
     const positions = await listManagedPositions();
     const currentPosition = args.positionId ? positions.find((position) => position.id === args.positionId) : undefined;
     const openExposureBefore = positions
-      .filter((position) => position.status !== "closed")
+      .filter((position) => position.status === "open" || position.status === "exit_pending")
       .reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
-    const currentPositionExposure = currentPosition && currentPosition.status !== "closed"
+    const currentPositionExposure = currentPosition && (currentPosition.status === "open" || currentPosition.status === "exit_pending")
       ? Math.max(0, currentPosition.remainingQuantity * currentPosition.markPrice)
       : 0;
     const adjustedPositionExposure = typeof args.remainingQuantityAfter === "number"

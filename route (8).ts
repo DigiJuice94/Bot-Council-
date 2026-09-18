@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
-import { getAutopilotStatus } from "@/lib/autopilot";
+import { NextRequest, NextResponse } from "next/server";
+import { classifyMarketRegime } from "@/lib/regime";
+import { getLearningSnapshot } from "@/lib/learning-store";
+import type { MarketSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const status = await getAutopilotStatus();
-  const { chat: _chat, ...dashboardStatus } = status;
-  return NextResponse.json({
-    ...dashboardStatus,
-    paperWallet: { ...dashboardStatus.paperWallet, recentFills: dashboardStatus.paperWallet.recentFills.slice(0, 40) },
-  }, { headers: { "Cache-Control": "no-store" } });
+export async function POST(request: NextRequest) {
+  const body = await request.json() as { snapshot?: MarketSnapshot };
+  if (!body.snapshot) return NextResponse.json({ error: "snapshot is required" }, { status: 400 });
+  const regime = classifyMarketRegime(body.snapshot);
+  return NextResponse.json(await getLearningSnapshot(regime, body.snapshot), { headers: { "Cache-Control": "no-store" } });
 }

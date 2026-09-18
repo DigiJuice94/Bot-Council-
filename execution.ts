@@ -44,6 +44,12 @@ export function buildExecutionPlan(args: {
 export async function executePaper(request: ExecutionRequest, snapshot: MarketSnapshot): Promise<PaperFill> {
   if (request.mode !== "paper") throw new Error("Paper executor only accepts paper requests");
   getChainConfig(request.chain);
+  // Final execution backstop: no caller can create a PAPER position from a
+  // market snapshot reporting zero liquidity, even if an upstream provider or
+  // Council field is inconsistent.
+  if (request.side === "BUY" && (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0)) {
+    throw new Error("Paper BUY rejected: token reports zero executable liquidity.");
+  }
 
   // Linear impact could exceed 100% on thin pools and permanently trap paper exits.
   // Use a bounded constant-product-style impact curve instead: small trades behave

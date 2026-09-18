@@ -112,7 +112,7 @@ async function markOutcomeRecorded(positionId: string) {
 
 export async function recordIndependentCouncilOutcome(position: ManagedPosition) {
   const council = position.entryContext?.independentCouncil;
-  if (!council || position.status !== "closed") return;
+  if (!council || (position.status !== "closed" && position.status !== "unsellable")) return;
   if (await outcomeAlreadyRecorded(position.id)) return;
 
   const finalOpinions = council.meetingOpinions.length ? council.meetingOpinions : council.initialOpinions;

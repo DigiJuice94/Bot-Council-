@@ -452,7 +452,7 @@ export type PositionScaleFill = {
 };
 
 export type PositionAction = "HOLD" | "SCALE_IN" | "TRIM" | "EXIT";
-export type PositionStatus = "open" | "exit_pending" | "closed";
+export type PositionStatus = "open" | "exit_pending" | "unsellable" | "closed";
 
 export type ManagedPosition = {
   id: string;
@@ -485,6 +485,9 @@ export type ManagedPosition = {
   openedAt: string;
   updatedAt: string;
   closedAt?: string;
+  unsellableAt?: string;
+  unsellableReason?: string;
+  lockedCapitalLossUsd?: number;
   lastMarketDataAt?: string;
   lastAction: PositionAction;
   lastReason: string;
@@ -577,6 +580,8 @@ export type PaperWalletSnapshot = PaperWalletState & {
   totalReturnPct: number;
   dailyPnlPct: number;
   openPositions: number;
+  unsellablePositions: number;
+  lockedCapitalLossUsd: number;
   storage: "redis" | "memory";
   accountingVerified: boolean;
   accountingVerifiedAt: string;

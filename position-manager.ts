@@ -69,18 +69,21 @@ export async function assessPaperEntryEligibility(args: {
   entryContext?: PositionEntryContext;
 }): Promise<{ allowed: boolean; isReentry: boolean; reentryCount: number; reason: string }> {
   const { request, snapshot, entryContext } = args;
+  if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
+    return { allowed: false, isReentry: false, reentryCount: 0, reason: "Entry blocked: token reports zero executable liquidity." };
+  }
   const affordability = await canAffordPaperBuy(request.notionalUsd);
   if (!affordability.allowed) return { allowed: false, isReentry: false, reentryCount: 0, reason: affordability.reason ?? "Paper wallet cannot fund this entry." };
   const positions = (await listManagedPositions()).map(normalizedPosition);
   const sameToken = positions.filter((position) => position.chain === request.chain && position.tokenAddress === request.tokenAddress);
-  const open = sameToken.find((position) => position.status !== "closed");
+  const open = sameToken.find((position) => position.status === "open" || position.status === "exit_pending");
   if (open) return { allowed: false, isReentry: false, reentryCount: open.reentryCount ?? 0, reason: "Position Guardian already owns an open position in this token; V2.8 scales winners internally instead of opening duplicates." };
 
   if (!snapshot.sellable || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25 || (snapshot.chainFamily === "solana" && (snapshot.mintAuthority || snapshot.freezeAuthority))) {
     return { allowed: false, isReentry: false, reentryCount: 0, reason: "Re-entry blocked by deterministic contract/security conditions." };
   }
 
-  const closed = sameToken.filter((position) => position.status === "closed").sort((a, b) => (b.closedAt ?? b.updatedAt).localeCompare(a.closedAt ?? a.updatedAt));
+  const closed = sameToken.filter((position) => position.status === "closed" || position.status === "unsellable").sort((a, b) => (b.closedAt ?? b.unsellableAt ?? b.updatedAt).localeCompare(a.closedAt ?? a.unsellableAt ?? a.updatedAt));
   if (!closed.length) return { allowed: true, isReentry: false, reentryCount: 0, reason: "Fresh position; no prior closed trade requires re-entry checks." };
 
   const latest = closed[0];
@@ -513,6 +516,30 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
   };
 }
 
+function markUnsellable(position: ManagedPosition, snapshot: MarketSnapshot, reason: string): ManagedPosition {
+  const lockedCapitalLossUsd = Math.max(0, position.entryNotionalUsd - position.realizedCostUsd);
+  const realizedPnlUsd = position.realizedProceedsUsd - position.entryNotionalUsd;
+  const realizedReturnPct = position.entryNotionalUsd > 0 ? realizedPnlUsd / position.entryNotionalUsd * 100 : -100;
+  const now = new Date().toISOString();
+  return {
+    ...position,
+    status: "unsellable",
+    markPrice: 0,
+    remainingNotionalUsd: lockedCapitalLossUsd,
+    realizedPnlUsd,
+    pnlPct: Number(realizedReturnPct.toFixed(3)),
+    closedAt: now,
+    unsellableAt: now,
+    unsellableReason: reason,
+    lockedCapitalLossUsd,
+    updatedAt: now,
+    lastMarketDataAt: now,
+    lastAction: "EXIT",
+    pendingScaleLabel: undefined,
+    lastReason: `${reason} No PAPER sale proceeds were credited; $${lockedCapitalLossUsd.toFixed(2)} remaining cost is recorded as locked/lost capital.`,
+  };
+}
+
 const guardianGlobal = globalThis as typeof globalThis & {
   __botWarRoomGuardianTimer?: ReturnType<typeof setInterval>;
   __botWarRoomGuardianBusy?: boolean;
@@ -531,7 +558,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
     return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };
   }
   guardianGlobal.__botWarRoomGuardianBusy = true;
-  const positions = (await listManagedPositions()).filter((position) => position.status !== "closed").map(normalizedPosition);
+  const positions = (await listManagedPositions()).filter((position) => position.status === "open" || position.status === "exit_pending").map(normalizedPosition);
   const refreshed: ManagedPosition[] = [];
   let staleCount = 0;
   try {
@@ -541,17 +568,24 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
       if (!releaseLease) continue;
       try {
         const latest = (await listManagedPositions()).find((row) => row.id === position.id);
-        if (!latest || latest.status === "closed") continue;
+        if (!latest || latest.status === "closed" || latest.status === "unsellable") continue;
         next = normalizedPosition(latest);
         const snapshot = await fetchLivePositionSnapshot(next);
         if (snapshot) {
           const portfolio = await getPaperPortfolioContext(next.chain);
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
-          // A previously flagged exit must never become permanently pending. In
-          // particular, emergency exits can be triggered by a sellability or
-          // honeypot failure, so those conditions cannot block the follow-up
-          // paper sell.
-          if (next.status === "exit_pending" && next.mode === "paper") {
+          const confirmedUnsellable = !snapshot.sellable || snapshot.honeypot || snapshot.liquidity <= 0 ||
+            (snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
+          if (next.status === "exit_pending" && next.mode === "paper" && confirmedUnsellable) {
+            const reason = snapshot.liquidity <= 0
+              ? "Guardian confirmed zero executable liquidity while attempting to exit."
+              : snapshot.honeypot
+              ? "Guardian confirmed a honeypot condition while attempting to exit."
+              : snapshot.freezeAuthority
+                ? "Guardian confirmed the token can freeze transfers while attempting to exit."
+                : "Guardian confirmed the token is not sellable while attempting to exit.";
+            next = markUnsellable(next, snapshot, reason);
+          } else if (next.status === "exit_pending" && next.mode === "paper") {
             next = await executeFullExit(next, snapshot);
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
@@ -566,7 +600,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
               next = await executeFullExit(next, snapshot);
             }
           }
-          if (next.status === "closed" && !next.learningRecorded) {
+          if ((next.status === "closed" || next.status === "unsellable") && !next.learningRecorded) {
             await reflectOnClosedPosition(next, snapshot);
             next = { ...next, learningRecorded: true };
           }
@@ -584,7 +618,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
     }
 
     const storage = await positionStorageMode();
-    const activePositions = refreshed.filter((position) => position.status !== "closed");
+    const activePositions = refreshed.filter((position) => position.status === "open" || position.status === "exit_pending");
     return {
       storage,
       openCount: activePositions.length,
