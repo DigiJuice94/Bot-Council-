@@ -1,10 +1,10 @@
 # Bot War Room V3
 
-## Always-live chat and one-time fresh bankroll
+## Fast dashboard, Moon Bags and one-time fresh bankroll
 
 This release automatically starts one fresh PAPER run at server startup, before runtime loops start. It uses the existing configured starting balance (default $1,000), clears the PAPER trade log/positions/fills and starts a new portfolio history marker. Runner Genome, Filing Cabinet, Trajectory Observer and private agent research are retained. Keep REDIS_URL connected to the same existing database: the completed release marker is stored in wallet reset metadata so subsequent restarts do not restart the run. Do not clear that metadata. This startup migration is intended for a single app replica; stop the previous deployment before starting this release to avoid old workers writing positions during the reset.
 
-Chat has no pause state or pause/resume controls. New messages keep appearing and scrolling follows new messages even after the 60-message display limit. Current specialist names now map to distinct colors. Council seats, voting, entry/exit thresholds and the background-only observer are unchanged.
+The visible Council chat has been removed from the browser while the local Council, its private/meeting rounds, memories and trading decisions continue running unchanged. One shared status poll now feeds the dashboard panels. Open positions are separated into Active Trades and Moon Bags; the latter reconcile realized profit, remaining-position P/L and total trade P/L without double-counting.
 
 ## Wallet reset repair
 
@@ -26,21 +26,13 @@ npm run build
 
 The Railway Docker deployment uses Next.js standalone output and starts with `node server.js`.
 
-## Upload-safe deployment
+## Railway deployment
 
-Extract the ZIP and upload the contents of Bot-War-Room-V3-FULL to the repository root, including deployment-source.tar.gz. Keep existing Railway environment variables and Redis unchanged.
+Extract the ZIP and upload the contents of Bot-War-Room-V3-FULL to the repository root. Keep existing Railway environment variables and Redis unchanged.
 
-The source remains in normal app/, components/, lib/, and public/ folders. deployment-source.tar.gz is a transport copy of those exact folders, not a patch chain. If a file upload omits the directories, Docker unpacks that copy before building. With the normal folders present, Docker builds them directly.
+The source remains in normal app/, components/, lib/, and public/ folders. The Docker build now fails clearly if any required source folder is missing; it cannot silently restore an older embedded source archive.
 
-After editing source for a future release, refresh the transport copy from the project root:
-
-```bash
-tar -czf deployment-source.tar.gz app components lib public instrumentation.ts
-```
-
-Use the included Dockerfile. This fallback does not apply to a custom build command that bypasses Docker. No old prepare-structure or V2 patch scripts are used.
-
-Validation of this deployment repair: source folders were deliberately omitted from a temporary build directory, then restored with the Dockerfile's extraction logic. Restored folders matched the packaged normal source byte-for-byte. TypeScript checking and the Next production build passed using the existing installed dependencies. The standalone server returned HTTP 200 for the homepage and POST /api/paper-reset, with $1,000 cash in an isolated in-memory wallet. These smoke checks do not establish preservation of populated Redis history. Docker/Railway execution and long-running memory stability were not tested here. No app/, components/, lib/, or public/ source changed in this deployment repair.
+Use the included Dockerfile. No prepare-structure script, V2 patch chain or deployment-source fallback is used.
 
 ## Persistence
 

@@ -632,7 +632,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · MOON BAGS</small></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
