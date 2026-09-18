@@ -15,7 +15,7 @@ import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import { assessSellabilityRisk, getSellabilityLearningSnapshot, recordLearnedSellabilityBlock } from "./sellability-investigator";
 import { ensureReleaseFreshStart } from "./release-fresh-start";
-import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
+import type { Chain, ExecutionRequest, ManagedPosition, MarketSnapshot, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -365,7 +365,7 @@ async function reviewOneShadowDecision() {
   }
 }
 
-async function scanOneChain(chain: Chain) {
+async function scanOneChain(chain: Chain, candidate: Promise<MarketSnapshot | null>, reviewResearch: boolean) {
   const current = state();
   current.currentChain = chain;
   current.lastScanAt = new Date().toISOString();
@@ -380,9 +380,14 @@ async function scanOneChain(chain: Chain) {
   if (bankroll.resetPerformed) {
     addChat("System", `Research bankroll automatically restarted at $${bankroll.wallet.startingCashUsd.toFixed(2)} after reaching zero. Reset #${bankroll.resetMeta.resets}; prior losses remain in the research record.`, "system");
   }
-  await refreshOneResearchCase(fetchLiveTokenSnapshot);
-  await reviewOneShadowDecision();
-  const snapshot = await fetchLiveCandidate(chain);
+  // Start discovery immediately; keep research and shadow reviews every cycle.
+  const [snapshot] = await Promise.all([
+    candidate,
+    reviewResearch ? (async () => {
+      await refreshOneResearchCase(fetchLiveTokenSnapshot);
+      await reviewOneShadowDecision();
+    })() : Promise.resolve(),
+  ]);
   if (!snapshot) {
     if (current.scanCount % CHAINS.length === 0) addChat("Launch Scout", `${chain}: no new qualifying real candidate. Provider waterfall is continuing automatically.`, "system");
     return;
@@ -460,9 +465,28 @@ export async function runAutonomousTick() {
     releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
     if (!releaseLease) return;
     const cursor = globalState.__botWarRoomAutopilotCursorV14 ?? 0;
-    const chain = CHAINS[cursor % CHAINS.length];
-    globalState.__botWarRoomAutopilotCursorV14 = (cursor + 1) % CHAINS.length;
-    await scanOneChain(chain);
+    const firstChain = CHAINS[cursor % CHAINS.length];
+    const secondChain = CHAINS[(cursor + 1) % CHAINS.length];
+    globalState.__botWarRoomAutopilotCursorV14 = (cursor + 2) % CHAINS.length;
+    // Scan two different chains together, then process their Council decisions
+    // in order under the same lease so PAPER wallet writes cannot overlap.
+    const firstCandidate = fetchLiveCandidate(firstChain).catch((error: unknown) => {
+      console.error(`[autopilot] discovery failed on ${firstChain}`, error);
+      return null;
+    });
+    const secondCandidate = fetchLiveCandidate(secondChain).catch((error: unknown) => {
+      console.error(`[autopilot] discovery failed on ${secondChain}`, error);
+      return null;
+    });
+    await scanOneChain(firstChain, firstCandidate, true);
+    const secondForEvaluation = secondCandidate.then(async (snapshot) => {
+      if (!snapshot) return null;
+      const fetchedAt = Date.parse(snapshot.dataProvenance?.fetchedAt ?? "");
+      if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt < 10_000) return snapshot;
+      // Council must see a current mark if the first evaluation took time.
+      return fetchLiveTokenSnapshot(secondChain, snapshot.tokenAddress);
+    });
+    await scanOneChain(secondChain, secondForEvaluation, false);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const current = state();

@@ -97,6 +97,8 @@ type SecurityResult = {
 
 type MarketDataGlobal = typeof globalThis & {
   __bwrDexDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
+  __bwrDexLatestAll?: { at: number; rows: any[] };
+  __bwrDexLatestPending?: Promise<any[]>;
   __bwrGeckoDiscoveryCache?: Map<string, { at: number; tokens: DiscoveryToken[] }>;
   __bwrSecurityCacheV12?: Map<string, { at: number; value: SecurityResult }>;
   __bwrCandidateSeen?: Map<string, number>;
@@ -280,13 +282,26 @@ async function birdeyeNewListings(chain: Chain): Promise<DiscoveryToken[]> {
   return nestedArray(payload).map((row) => discoveryRow(row, DEX_CHAIN[chain], "birdeye")).filter(Boolean) as DiscoveryToken[];
 }
 
+async function latestDexListings(): Promise<any[]> {
+  const cached = globalCache.__bwrDexLatestAll;
+  if (cached && Date.now() - cached.at < 15_000) return cached.rows;
+  if (globalCache.__bwrDexLatestPending) return globalCache.__bwrDexLatestPending;
+  const endpoints = ["token-profiles/latest/v1", "token-boosts/latest/v1", "community-takeovers/latest/v1"];
+  const pending = Promise.all(endpoints.map((path) => fetchJson<any[]>(`${DEX_BASE}/${path}`, "dexscreener")))
+    .then((results) => {
+      const rows = results.flatMap((value) => Array.isArray(value) ? value : []);
+      globalCache.__bwrDexLatestAll = { at: Date.now(), rows };
+      return rows;
+    }).finally(() => { globalCache.__bwrDexLatestPending = undefined; });
+  globalCache.__bwrDexLatestPending = pending;
+  return pending;
+}
+
 async function dexDiscoveryTokens(chain: Chain): Promise<DiscoveryToken[]> {
   const dexChain = DEX_CHAIN[chain];
   const cached = dexDiscoveryCache.get(dexChain);
   if (cached && Date.now() - cached.at < 15_000) return cached.tokens;
-  const endpoints = ["token-profiles/latest/v1", "token-boosts/latest/v1", "community-takeovers/latest/v1"];
-  const results = await Promise.all(endpoints.map((path) => fetchJson<any[]>(`${DEX_BASE}/${path}`, "dexscreener")));
-  const combined = results.flatMap((rows) => Array.isArray(rows) ? rows : [])
+  const combined = (await latestDexListings())
     .filter((row) => row?.chainId === dexChain)
     .map((row) => discoveryRow({ ...row, address: row.tokenAddress }, dexChain, "dexscreener"))
     .filter(Boolean) as DiscoveryToken[];

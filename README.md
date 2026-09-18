@@ -1,5 +1,15 @@
 # Bot War Room V3
 
+## V3.6.2 parallel discovery
+
+Each cycle starts discovery on two different chains at once. The Council evaluates any resulting candidates in order under one execution lease, so PAPER wallet updates cannot overlap. If the second candidate waited over 10 seconds, its snapshot is refreshed before Council review. DEX Screener's chain-independent latest listing requests are shared between parallel scans for 15 seconds to avoid duplicate traffic. This increases listing coverage per cycle, though a cycle can still take longer than its two-second timer when provider calls or Council work are slow. Buy decisions continue to require a fresh token check before a PAPER fill.
+
+## V3.6.1 faster scans and honest provider status
+
+Fresh candidate discovery starts alongside the existing research and shadow reviews instead of waiting for both. Relevant Solana RPC, Moralis and Bitquery checks also run together; the Council still awaits their results before deciding, and the buy path still refreshes the token and applies its existing safety checks. Council scoring, buy thresholds, wallet state and accounting are unchanged.
+
+Provider badges now distinguish LIVE (successful request), IDLE (configured but no successful or failed request in this process), ERROR (last request failed) and OFF (not configured). Providers used only for a relevant chain or route can remain IDLE. These badges are process-local diagnostics; they do not certify that a paper fill could execute in a real wallet.
+
 ## V3.6 reserve-backed PAPER exits
 
 PAPER sells now fail closed when the fresh snapshot has `$0` liquidity or no executable price. Nonzero-liquidity sells use constant-product reserve math against the observed quote-side DEX reserve, so a manipulated token price can never create sale proceeds larger than the pool could plausibly pay. Full Guardian exits may still accept distressed slippage to recycle capital, but the credited cash is reserve-capped instead of using the old forced-percentage liquidation model. Entry, profit-taking and strategy thresholds are unchanged.
