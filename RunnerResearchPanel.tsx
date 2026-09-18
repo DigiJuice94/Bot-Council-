@@ -62,6 +62,34 @@ type Research = {
 type Payload = {
   research?: Research;
   paperWalletResetMeta?: { resets: number; totalInjectedUsd: number; lastResetAt?: string };
+  sellabilityLearning?: {
+    casesFiled: number;
+    chainCoverage: number;
+    totalLockedLossUsd: number;
+    learnedCandidatesBlocked: number;
+    latestCaseAt?: string;
+    latestCaseSymbol?: string;
+    latestBlockAt?: string;
+    latestBlockSymbol?: string;
+  };
+  filingCabinetCurator?: {
+    role: "advisory-only";
+    storage: "redis" | "memory";
+    persistenceVerified: boolean;
+    recordsRead: number;
+    botsReporting: number;
+    totalBots: 9;
+    allBotsReporting: boolean;
+    cioBrief: string;
+    cioAdjustment: number;
+    evidenceSampleSize: number;
+    generatedAt: string;
+    neverForgetCount: number;
+    neverForgetCapacity: 50;
+    topTechniques: Array<{ id: string; rank: number; title: string; instruction: string; evidence: string; significanceScore: number; source: string; direction: "positive" | "caution" | "neutral" }>;
+    neverForgetTechniques: Array<{ id: string; rank: number; title: string; instruction: string; evidence: string; significanceScore: number; source: string; direction: "positive" | "caution" | "neutral"; confirmations: number; evidenceSampleSize: number; firstFiledAt: string; lastConfirmedAt: string }>;
+    botAudit: Array<{ agentId: string; name: string; status: "ACTIVE" | "BUILDING" | "STALE"; recordsRead: number; decisions: number; outcomes: number; trajectories: number; lastWriteAt?: string; finding: string }>;
+  };
 };
 
 function compactUsd(value: number) {
@@ -98,6 +126,8 @@ export default function RunnerResearchPanel() {
   const requirementRows = r?.requirements ?? [];
   const caseRows = r?.recentCases ?? [];
   const lessons = useMemo(() => (r?.recentBotLessons ?? []).slice(0, 8), [r?.recentBotLessons]);
+  const sellability = payload?.sellabilityLearning;
+  const curator = payload?.filingCabinetCurator;
 
   return (
     <section className="v214-research page-panel" id="filing-cabinet">
@@ -115,6 +145,51 @@ export default function RunnerResearchPanel() {
         <div className="v214-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><i style={{ width: `${progress}%` }} /></div>
         <div className="v214-progress-labels"><span>Collecting evidence</span><span>Testing hypotheses</span><span>Validating edge</span><span>CODE DECIPHERED</span></div>
       </div>
+
+      <article className="filing-curator-card">
+        <div className="filing-curator-head">
+          <div><span>FILING CABINET CURATOR · BACKGROUND ADVISOR · NO VOTE</span><h3>Reads the full cabinet, audits every bot and briefs the CIO.</h3><p>The CIO may consider this evidence, but the Curator cannot force a BUY, SKIP or veto. Its sole scoring goal is improving real, sellable paper profit—not inflating results with exits that could not execute.</p></div>
+          <strong className={curator?.persistenceVerified ? "verified" : "fallback"}>{curator?.persistenceVerified ? "PERSISTENT" : "MEMORY FALLBACK"}<small>{curator?.botsReporting ?? 0}/9 bots reporting</small></strong>
+        </div>
+        <div className="filing-curator-brief">
+          <span>EXACT ADVISORY SENT TO CIO</span>
+          <blockquote>{curator?.cioBrief ?? "The Curator is reading the Filing Cabinet before issuing its first advisory."}</blockquote>
+          <small>CIO context adjustment: <b>{(curator?.cioAdjustment ?? 0) >= 0 ? "+" : ""}{(curator?.cioAdjustment ?? 0).toFixed(1)} points</b> · hard safety rules remain unchanged · {curator?.recordsRead ?? 0} stored records read</small>
+        </div>
+        <div className="filing-curator-columns">
+          <section>
+            <div className="filing-curator-title"><div><b>TOP 10 LEARNED TECHNIQUES</b><small>Re-ranked as evidence changes</small></div><em>{curator?.topTechniques.length ?? 0}/10</em></div>
+            <div className="filing-techniques">{curator?.topTechniques.length ? curator.topTechniques.map((row) => <div key={row.id} className={`filing-technique ${row.direction}`}>
+              <strong>#{row.rank}</strong><span><b>{row.title}</b><p>{row.instruction}</p><small>{row.evidence}</small></span><em>{row.significanceScore}</em>
+            </div>) : <p className="v214-muted">Waiting for enough completed evidence to rank a technique. The Curator will not invent one to fill a slot.</p>}</div>
+          </section>
+          <section>
+            <div className="filing-curator-title"><div><b>BOT JOB AUDIT</b><small>Private decisions, outcomes and trajectory work</small></div><em>{curator?.botsReporting ?? 0}/9</em></div>
+            <div className="filing-bot-audit">{curator?.botAudit.map((row) => <div key={row.agentId}><i className={row.status.toLowerCase()}>{row.status}</i><span><b>{row.name}</b><small>{row.finding}</small></span><time>{timeAgo(row.lastWriteAt)}</time></div>) ?? <p className="v214-muted">Audit is initializing.</p>}</div>
+          </section>
+        </div>
+        <div className="never-forget-vault">
+          <div className="filing-curator-title"><div><b>NEVER FORGET VAULT</b><small>Only repeatedly evidenced profit or loss-avoidance techniques survive wallet resets</small></div><em>{curator?.neverForgetCount ?? 0}/{curator?.neverForgetCapacity ?? 50}</em></div>
+          <div className="never-forget-scroll">{curator?.neverForgetTechniques.length ? curator.neverForgetTechniques.map((row) => <div key={row.id}><strong>#{row.rank} {row.title}</strong><span>{row.instruction}</span><small>{row.confirmations} confirmations · evidence sample {row.evidenceSampleSize} · {row.source}</small></div>) : <p>No technique has crossed the repeated-evidence threshold yet. This vault never promotes a one-off win.</p>}</div>
+        </div>
+      </article>
+
+      <article className="sellability-learning-card">
+        <div className="sellability-learning-head">
+          <div><span>SELLABILITY INVESTIGATOR · PERSISTENT LEARNING</span><h3>Locked-capital patterns are being filed and checked before future buys.</h3><p>Counts below come from the persistent Sellability case library, not from the visible trade-card limit.</p></div>
+          <strong>{sellability?.casesFiled ?? 0}<small>cases filed</small></strong>
+        </div>
+        <div className="sellability-learning-grid">
+          <div><small>Unsellable cases learned</small><b>{sellability?.casesFiled ?? 0}</b></div>
+          <div><small>Chains represented</small><b>{sellability?.chainCoverage ?? 0}</b></div>
+          <div><small>Locked loss studied</small><b>-${(sellability?.totalLockedLossUsd ?? 0).toFixed(2)}</b></div>
+          <div><small>Unique learned blocks</small><b>{sellability?.learnedCandidatesBlocked ?? 0}</b></div>
+        </div>
+        <div className="sellability-learning-foot">
+          <span>Latest filed: <b>{sellability?.latestCaseSymbol ? `$${sellability.latestCaseSymbol}` : "waiting"}</b>{sellability?.latestCaseAt ? ` · ${timeAgo(sellability.latestCaseAt)}` : ""}</span>
+          <span>Latest learned block: <b>{sellability?.latestBlockSymbol ? `$${sellability.latestBlockSymbol}` : "none yet"}</b>{sellability?.latestBlockAt ? ` · ${timeAgo(sellability.latestBlockAt)}` : ""}</span>
+        </div>
+      </article>
 
       <div className="v214-stat-grid">
         <div><strong>{r?.casesStudied ?? 0}</strong><span>coin case files</span></div>

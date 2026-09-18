@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { acquireRuntimeLease, listManagedPositions, removeManagedPosition } from "./position-store";
+import { acquireRuntimeLease, listManagedPositions, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
@@ -32,6 +32,13 @@ export type PaperWalletResetMeta = {
   lastResetAt?: string;
   lastReason?: string;
   completedFreshStartReleases?: string[];
+  completedLedgerRepairs?: string[];
+};
+
+export type ImpossibleExitRepairResult = {
+  repairedFills: number;
+  reversedProceedsUsd: number;
+  repairedPositions: number;
 };
 
 function configuredStartingCash() {
@@ -248,6 +255,108 @@ export async function getPaperWallet(): Promise<PaperWalletSnapshot> {
 
 export async function getPaperWalletResetMeta(): Promise<PaperWalletResetMeta> {
   return readResetMeta();
+}
+
+export async function repairImpossiblePaperExitCredits(onceRepairId: string): Promise<ImpossibleExitRepairResult> {
+  let result: ImpossibleExitRepairResult = { repairedFills: 0, reversedProceedsUsd: 0, repairedPositions: 0 };
+  const task = mutationLock.then(async () => {
+    const releaseLease = await acquireWalletLedgerLease();
+    try {
+      if (process.env.REDIS_URL && !(await getRedis())) {
+        throw new Error("Cannot verify impossible-exit ledger repair without the configured Redis connection.");
+      }
+      const meta = await readResetMeta();
+      if (meta.completedLedgerRepairs?.includes(onceRepairId)) return;
+      const { state: current } = await readState();
+      const magnitudeFloor = Math.max(10_000, current.startingCashUsd * 10);
+      const suspicious = current.recentFills.filter((fill) =>
+        fill.side === "SELL" &&
+        (fill.action === "EXIT" || fill.remainingQuantityAfter === 0) &&
+        fill.slippageBps >= 6_000 &&
+        fill.filledUsd >= magnitudeFloor
+      );
+
+      if (suspicious.length) {
+        const positions = await listManagedPositions();
+        let repairedPositions = 0;
+        for (const fill of suspicious) {
+          const position = fill.positionId ? positions.find((row) => row.id === fill.positionId) : undefined;
+          if (!position) continue;
+          const soldQuantity = Math.max(0, fill.quantity ?? position.initialQuantity ?? position.quantity ?? 0);
+          const soldCostUsd = soldQuantity * Math.max(0, position.entryPrice);
+          const priorRealizedCostUsd = Math.max(0, (position.realizedCostUsd ?? 0) - soldCostUsd);
+          const priorRealizedProceedsUsd = Math.max(0, (position.realizedProceedsUsd ?? 0) - fill.filledUsd);
+          const lockedCapitalLossUsd = Math.max(0, position.entryNotionalUsd - priorRealizedCostUsd);
+          const realizedPnlUsd = priorRealizedProceedsUsd - position.entryNotionalUsd;
+          const now = new Date().toISOString();
+          await saveManagedPosition({
+            ...position,
+            status: "unsellable",
+            remainingQuantity: soldQuantity,
+            remainingNotionalUsd: lockedCapitalLossUsd,
+            markPrice: 0,
+            realizedProceedsUsd: priorRealizedProceedsUsd,
+            realizedCostUsd: priorRealizedCostUsd,
+            realizedPnlUsd,
+            pnlPct: position.entryNotionalUsd > 0 ? Number((realizedPnlUsd / position.entryNotionalUsd * 100).toFixed(3)) : -100,
+            lockedCapitalLossUsd,
+            unsellableAt: now,
+            closedAt: now,
+            updatedAt: now,
+            lastAction: "EXIT",
+            lastReason: "Ledger repair: prior PAPER exit used an impossible spike price with distressed liquidity. No proceeds are credited; remaining capital is classified as unsellable/locked.",
+            unsellableReason: "Impossible PAPER exit credit removed because the quoted sale exceeded executable liquidity.",
+            learningRecorded: false,
+          });
+          repairedPositions += 1;
+        }
+
+        const suspiciousIds = new Set(suspicious.map((fill) => fill.id));
+        const reversedProceedsUsd = suspicious.reduce((sum, fill) => sum + fill.filledUsd, 0);
+        const reversedFeesUsd = suspicious.reduce((sum, fill) => sum + fill.feeUsd, 0);
+        const earliestBadAt = Math.min(...suspicious.map((fill) => Date.parse(fill.createdAt)).filter(Number.isFinite));
+        const retainedHistory = (current.equityHistory ?? []).filter((point) => !Number.isFinite(earliestBadAt) || point.at < earliestBadAt);
+        const correctedCashUsd = Math.max(0, current.cashUsd - reversedProceedsUsd);
+        const repairedPositionIds = new Set(suspicious.map((fill) => fill.positionId).filter(Boolean));
+        const openValueUsd = positions
+          .filter((position) => (position.status === "open" || position.status === "exit_pending") && !repairedPositionIds.has(position.id))
+          .reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0);
+        const nowMs = Date.now();
+        const correctedPoint = { at: nowMs, equity: Number((correctedCashUsd + openValueUsd).toFixed(2)), cash: Number(correctedCashUsd.toFixed(2)), openValue: Number(openValueUsd.toFixed(2)), event: "mark" as const };
+        const correctedHistory = [...retainedHistory, correctedPoint].slice(-MAX_EQUITY_HISTORY);
+        const historyEquities = correctedHistory.map((point) => point.equity);
+        const high = Math.max(current.startingCashUsd, ...historyEquities);
+        const low = Math.min(current.startingCashUsd, ...historyEquities);
+        await writeState({
+          ...current,
+          cashUsd: Number(correctedCashUsd.toFixed(2)),
+          totalFeesUsd: Number(Math.max(0, current.totalFeesUsd - reversedFeesUsd).toFixed(4)),
+          sellFills: Math.max(0, current.sellFills - suspicious.length),
+          recentFills: current.recentFills.filter((fill) => !suspiciousIds.has(fill.id)),
+          equityHistory: correctedHistory,
+          allTimeHighEquityUsd: Number(high.toFixed(2)),
+          allTimeHighAt: correctedHistory.find((point) => point.equity === high)?.at ? new Date(correctedHistory.find((point) => point.equity === high)!.at).toISOString() : current.startedAt,
+          allTimeLowEquityUsd: Number(low.toFixed(2)),
+          allTimeLowAt: correctedHistory.find((point) => point.equity === low)?.at ? new Date(correctedHistory.find((point) => point.equity === low)!.at).toISOString() : current.startedAt,
+          updatedAt: new Date(nowMs).toISOString(),
+        });
+        result = { repairedFills: suspicious.length, reversedProceedsUsd: Number(reversedProceedsUsd.toFixed(2)), repairedPositions };
+      }
+
+      await writeResetMeta({
+        ...meta,
+        completedLedgerRepairs: [...(meta.completedLedgerRepairs ?? []), onceRepairId],
+        lastReason: result.repairedFills
+          ? `Removed ${result.repairedFills} impossible distressed PAPER exit credit(s) totaling $${result.reversedProceedsUsd.toFixed(2)}; affected positions reclassified as unsellable without erasing learning.`
+          : meta.lastReason,
+      });
+    } finally {
+      await releaseLease().catch(() => undefined);
+    }
+  });
+  mutationLock = task.then(() => undefined, () => undefined);
+  await task;
+  return result;
 }
 
 export async function resetPaperWalletPreserveLearning(reason = "Manual dashboard reset", onceRelease?: string): Promise<{

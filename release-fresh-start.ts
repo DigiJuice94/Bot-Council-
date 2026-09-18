@@ -1,7 +1,8 @@
-import { resetPaperWalletPreserveLearning } from "./paper-wallet";
+import { repairImpossiblePaperExitCredits, resetPaperWalletPreserveLearning } from "./paper-wallet";
 
 const RELEASE_RESET_ID = "v3.4-sellability-investigator-reset-retry-20260918";
 const RELEASE_RESET_REASON = "One-time fresh PAPER ledger retry for the V3.4 Sellability Investigator release";
+const IMPOSSIBLE_EXIT_REPAIR_ID = "v3.6-reserve-backed-exit-repair-20260918";
 
 const releaseState = globalThis as typeof globalThis & {
   __botWarRoomReleaseFreshStartV34?: Promise<void>;
@@ -17,6 +18,7 @@ export function ensureReleaseFreshStart(): Promise<void> {
   }
 
   const reset = resetPaperWalletPreserveLearning(RELEASE_RESET_REASON, RELEASE_RESET_ID)
+    .then(() => repairImpossiblePaperExitCredits(IMPOSSIBLE_EXIT_REPAIR_ID))
     .then(() => undefined)
     .catch((error) => {
       // A transient Redis/startup failure must not permanently poison this

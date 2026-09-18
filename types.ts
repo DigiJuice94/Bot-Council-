@@ -639,6 +639,56 @@ export type LearningSnapshot = {
   generatedAt: string;
 };
 
+export type FilingCabinetTechnique = {
+  id: string;
+  rank: number;
+  title: string;
+  instruction: string;
+  evidence: string;
+  significanceScore: number;
+  source: "runner-genome" | "dumper-contrast" | "trajectory" | "agent-memory" | "sellability" | "paper-results";
+  direction: "positive" | "caution" | "neutral";
+};
+
+export type FilingCabinetPermanentTechnique = FilingCabinetTechnique & {
+  firstFiledAt: string;
+  lastConfirmedAt: string;
+  confirmations: number;
+  evidenceSampleSize: number;
+};
+
+export type FilingCabinetBotAudit = {
+  agentId: CouncilEntityId;
+  name: string;
+  status: "ACTIVE" | "BUILDING" | "STALE";
+  recordsRead: number;
+  decisions: number;
+  outcomes: number;
+  trajectories: number;
+  lastWriteAt?: string;
+  finding: string;
+};
+
+export type FilingCabinetReport = {
+  role: "advisory-only";
+  storage: "redis" | "memory";
+  persistenceVerified: boolean;
+  sourcesRead: string[];
+  recordsRead: number;
+  botsReporting: number;
+  totalBots: 9;
+  allBotsReporting: boolean;
+  botAudit: FilingCabinetBotAudit[];
+  topTechniques: FilingCabinetTechnique[];
+  neverForgetTechniques: FilingCabinetPermanentTechnique[];
+  neverForgetCount: number;
+  neverForgetCapacity: 50;
+  cioBrief: string;
+  cioAdjustment: number;
+  evidenceSampleSize: number;
+  generatedAt: string;
+};
+
 export type HistoricalMark = {
   timestamp: string;
   price: number;
@@ -674,6 +724,7 @@ export type WarRoomResult = {
   runnerGenome: RunnerGenomeGuidance;
   independentCouncil?: IndependentCouncilTrace;
   sellabilityInvestigation?: SellabilityInvestigation;
+  filingCabinetReport?: FilingCabinetReport;
   councilProcess: CouncilProcess;
   alpha: AlphaSignal;
   preMeeting: IndependentAgentRead[];

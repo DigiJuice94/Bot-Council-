@@ -13,9 +13,11 @@ import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositio
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import { assessSellabilityRisk } from "./sellability-investigator";
+import { assessSellabilityRisk, getSellabilityLearningSnapshot, recordLearnedSellabilityBlock } from "./sellability-investigator";
 import { ensureReleaseFreshStart } from "./release-fresh-start";
-import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
+import { getFilingCabinetReport } from "./filing-cabinet-curator";
+import type { RunnerResearchSnapshot } from "./runner-research";
+import type { Chain, ExecutionRequest, FilingCabinetReport, ManagedPosition, MarketRegime, MarketSnapshot, PortfolioRiskContext, PositionEntryContext, ProfitabilityMetrics, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -88,6 +90,7 @@ type AutopilotGlobal = typeof globalThis & {
   __botWarRoomAutopilotCursorV14?: number;
   __botWarRoomLastErrorMessageV227?: string;
   __botWarRoomLastErrorAtV227?: number;
+  __botWarRoomFilingCabinetV37?: { report: FilingCabinetReport; research: RunnerResearchSnapshot; regimeId: string; at: number };
 };
 const globalState = globalThis as AutopilotGlobal;
 
@@ -136,6 +139,21 @@ function recordRejection(reason: string) {
   const key = reason.slice(0, 110);
   const funnel = state().funnel;
   funnel.rejections[key] = (funnel.rejections[key] ?? 0) + 1;
+}
+
+async function filingCabinetContext(regime: MarketRegime, snapshot: MarketSnapshot, profitability: ProfitabilityMetrics | null) {
+  const cached = globalState.__botWarRoomFilingCabinetV37;
+  if (cached && cached.regimeId === regime.id && Date.now() - cached.at < 30_000) return cached;
+  const [positions, resetMeta] = await Promise.all([listManagedPositions(), getPaperWalletResetMeta()]);
+  const research = await getRunnerResearchSnapshot({
+    positions,
+    providers: [...getProviderHealth(), ...getWaterfallProviderHealth()],
+    walletResetCount: resetMeta.resets,
+  });
+  const report = await getFilingCabinetReport({ research, regime, snapshot, profitability });
+  const next = { report, research, regimeId: regime.id, at: Date.now() };
+  globalState.__botWarRoomFilingCabinetV37 = next;
+  return next;
 }
 
 function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): PositionEntryContext {
@@ -400,6 +418,7 @@ async function scanOneChain(chain: Chain) {
     getPaperPortfolioContext(snapshot.chain),
     getRunnerGenomeGuidance(snapshot),
   ]);
+  const filingCabinet = await filingCabinetContext(regime, snapshot, profitability);
 
   const result = await runIndependentCouncil(snapshot, {
     mode: "paper",
@@ -410,10 +429,15 @@ async function scanOneChain(chain: Chain) {
     profitability,
     portfolio,
     runnerGenome,
+    filingCabinetReport: filingCabinet.report,
   });
 
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
+  }
+
+  if (result.sellabilityInvestigation?.learnedBlock) {
+    await recordLearnedSellabilityBlock(snapshot, result.sellabilityInvestigation);
   }
 
   await observeCouncilResult(result);
@@ -502,6 +526,16 @@ export async function getAutopilotStatus() {
   const resetMeta = await getPaperWalletResetMeta();
   const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
+  const sellabilityLearning = await getSellabilityLearningSnapshot();
+  const filingRegime = state().latestResult?.regime ?? classifyMarketRegime(state().latestResult?.snapshot ?? {
+    symbol: "CABINET", name: "Filing Cabinet", tokenAddress: "cabinet", chain: "Solana", chainFamily: "solana", venue: "internal",
+    price: 0, priceChange24h: 0, marketCap: 0, liquidity: 0, volume5m: 0, volume24h: 0, holders: 0, ageMinutes: 0,
+    buySellRatio: 1, smartMoneyBuys: 0, smartMoneySells: 0, socialVelocityPct: 0, top10Pct: 0, bundledPct: 0, devRugHistory: 0,
+    volatility: 0, sellable: false, honeypot: false, buyTaxPct: 0, sellTaxPct: 0, liquidityLocked: false, mintAuthority: false,
+    freezeAuthority: false, ownershipRenounced: false, proxyContract: false,
+  });
+  const filingCabinetCurator = await getFilingCabinetReport({ research, regime: filingRegime, snapshot: state().latestResult?.snapshot, profitability: await loadLatestProfitability() });
+  globalState.__botWarRoomFilingCabinetV37 = { report: filingCabinetCurator, research, regimeId: filingRegime.id, at: Date.now() };
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
   return {
@@ -510,6 +544,8 @@ export async function getAutopilotStatus() {
     paperWalletResetMeta: resetMeta,
     providers,
     research,
+    sellabilityLearning,
+    filingCabinetCurator,
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };

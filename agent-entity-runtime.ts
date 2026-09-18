@@ -5,6 +5,7 @@ import { assessSellabilityRisk } from "./sellability-investigator";
 import type {
   AgentOpinion,
   CouncilEntityId,
+  FilingCabinetReport,
   IndependentCouncilTrace,
   IndependentEntityOpinion,
   MarketRegime,
@@ -29,6 +30,7 @@ type CouncilOptions = {
   learningSource?: "defaults" | "regime" | "learned";
   profitability?: ProfitabilityMetrics | null;
   runnerGenome?: RunnerGenomeGuidance;
+  filingCabinetReport?: FilingCabinetReport;
 };
 
 type EntitySpec = {
@@ -96,7 +98,7 @@ type EntityMemoryLite = {
   lesson: string;
 };
 
-function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio: PortfolioRiskContext, sellabilityInvestigation: NonNullable<WarRoomResult["sellabilityInvestigation"]>) {
+function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio: PortfolioRiskContext, sellabilityInvestigation: NonNullable<WarRoomResult["sellabilityInvestigation"]>, filingCabinetReport?: FilingCabinetReport) {
   const g = base.runnerGenome;
   return {
     token: {
@@ -168,6 +170,13 @@ function compactPacket(snapshot: MarketSnapshot, base: WarRoomResult, portfolio:
       executorFeasibility: base.councilProcess.executorVote,
     },
     sellabilityInvestigation,
+    filingCabinetReport: filingCabinetReport ? {
+      role: filingCabinetReport.role,
+      cioBrief: filingCabinetReport.cioBrief,
+      cioAdjustment: filingCabinetReport.cioAdjustment,
+      evidenceSampleSize: filingCabinetReport.evidenceSampleSize,
+      topTechniques: filingCabinetReport.topTechniques.slice(0, 10),
+    } : null,
     paperPortfolio: {
       equityUsd: portfolio.equityUsd,
       cashUsd: portfolio.cashUsd,
@@ -485,7 +494,9 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
 
   const normalized = totalWeight > 0 ? weightedSupport / totalWeight : 0;
   const genomeBoost = (packet.runnerGenome.entryScore * 0.72 + packet.runnerGenome.trajectoryScore * 0.28 - packet.runnerGenome.dumperRiskScore * 0.25 - packet.runnerGenome.trajectoryDumperRiskScore * 0.10) / 100;
-  const composite = clamp(normalized * 72 + genomeBoost * 28);
+  const compositeBeforeCabinet = clamp(normalized * 72 + genomeBoost * 28);
+  const filingCabinetAdjustment = clamp(packet.filingCabinetReport?.cioAdjustment ?? 0, -3, 3);
+  const composite = clamp(compositeBeforeCabinet + filingCabinetAdjustment);
 
   const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK" || packet.sellabilityInvestigation.verifiedBlock || packet.sellabilityInvestigation.learnedBlock;
   const vote: "BUY" | "WATCH" | "SKIP" = hardBlocked
@@ -515,6 +526,9 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
     evidence: [
       `Council composite ${composite.toFixed(0)}/100.`,
       `Runner Genome ${packet.runnerGenome.entryScore.toFixed(0)}/100 vs dumper risk ${packet.runnerGenome.dumperRiskScore.toFixed(0)}/100.`,
+      packet.filingCabinetReport
+        ? `Filing Cabinet Curator advisory ${filingCabinetAdjustment >= 0 ? "+" : ""}${filingCabinetAdjustment.toFixed(1)} points (advisory only, never a rule or veto): ${packet.filingCabinetReport.cioBrief}`
+        : "Filing Cabinet Curator has not produced an advisory brief yet.",
     ],
     risks: packet.commonAnalytics.hardBlocks.slice(0, 5),
     suggestedTradeUsd,
@@ -546,7 +560,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   const base = runWarRoom(snapshot, options);
   const portfolio = options.portfolio!;
   const sellabilityInvestigation = await assessSellabilityRisk(snapshot);
-  const packet = compactPacket(snapshot, base, portfolio, sellabilityInvestigation);
+  const packet = compactPacket(snapshot, base, portfolio, sellabilityInvestigation, options.filingCabinetReport);
   const sessionId = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
   const privateRoundStartedAt = now();
 
@@ -598,6 +612,9 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
       `Runner CIO separately synthesized the completed meeting at ${cioOpinion.confidence}% confidence.`,
       "No OpenAI/ChatGPT API call is used anywhere in this Council runtime.",
       "Trajectory Observer is background research only: it supplies sequence evidence and private lessons but has no Council vote.",
+      options.filingCabinetReport
+        ? `Filing Cabinet Curator supplied an advisory-only ${options.filingCabinetReport.cioAdjustment >= 0 ? "+" : ""}${options.filingCabinetReport.cioAdjustment.toFixed(1)}-point context adjustment; it has no vote or veto.`
+        : "Filing Cabinet Curator advisory was unavailable for this cycle; Council logic continued without it.",
     ],
   };
 
@@ -677,6 +694,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   return {
     ...base,
     sellabilityInvestigation,
+    filingCabinetReport: options.filingCabinetReport,
     runnerGenome,
     councilProcess,
     preMeeting,
