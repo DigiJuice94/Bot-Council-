@@ -7,6 +7,7 @@ import { effectiveGuardianControls, confirmationScore, determineWinnerState, max
 import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
+import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance } from "./runner-research";
 import { confirmedSellabilityFailure, sellabilityUnverified } from "./security-evidence";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
@@ -15,6 +16,13 @@ const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Numbe
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
 
 function normalizedPosition(position: ManagedPosition): ManagedPosition {
+  const entryLiquidity = position.entryContext?.snapshot?.liquidity;
+  const strategy = profitFirstExitStrategy(position.exitStrategy);
+  // Repair the old $15k floor only when the stored entry itself was a valid
+  // thin early-runner pool. Preserve higher floors for mature pools.
+  const exitStrategy = Number.isFinite(entryLiquidity) && Number(entryLiquidity) >= 500 && Number(entryLiquidity) < 15_000 && strategy.liquidityFloorUsd >= 15_000
+    ? { ...strategy, liquidityFloorUsd: entryLiquidityExitFloor(Number(entryLiquidity), true) }
+    : strategy;
   return {
     ...position,
     remainingQuantity: safe(position.remainingQuantity, position.quantity),
@@ -35,7 +43,7 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     maxGrossExposurePct: safe(position.maxGrossExposurePct, Math.max(5, Math.min(20, Number(process.env.PAPER_WINNER_MAX_GROSS_PCT ?? 15)))),
     reentryCount: Math.max(0, Math.round(safe(position.reentryCount))),
     breakEvenArmed: Boolean(position.breakEvenArmed),
-    exitStrategy: profitFirstExitStrategy(position.exitStrategy),
+    exitStrategy,
     lastHighWaterAt: position.lastHighWaterAt ?? position.openedAt,
     peakPnlPct: safe(position.peakPnlPct, position.maxFavorableExcursionPct),
     exitStrategistScore: safe(position.exitStrategistScore),
@@ -262,7 +270,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const breakEvenTriggered = breakEvenArmed && rawMovePct <= breakEvenFloorPct;
   const trailTriggered = rawMovePct > 0 && drawdownFromHigh >= activeTrailingStopPct;
   const liquidityTriggered = snapshot.liquidity < position.exitStrategy.liquidityFloorUsd;
-  const securityTriggered = !snapshot.sellable || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25;
+  const securityTriggered = confirmedSellabilityFailure(snapshot) || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25;
   const authorityTriggered = snapshot.chainFamily === "solana" && (snapshot.mintAuthority || snapshot.freezeAuthority);
   const timeTriggered = heldMinutes >= activeMaxHoldMinutes;
   const tp = nextTakeProfit(position, rawMovePct);
@@ -587,9 +595,17 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
                 : "Guardian confirmed the token is not sellable while attempting to exit.";
             next = markUnsellable(next, snapshot, reason);
           } else if (next.status === "exit_pending" && next.mode === "paper") {
-            next = sellabilityUnverified(snapshot)
-              ? { ...next, lastReason: "Exit pending: sellability provider has not verified an exit; no PAPER proceeds or loss credited.", updatedAt: new Date().toISOString() }
-              : await executeFullExit(next, snapshot);
+            if (sellabilityUnverified(snapshot)) {
+              // Reassess older pending positions using the real exit rules.
+              // Unknown sellability alone previously created a pending exit;
+              // when no genuine exit trigger remains, restore the open state.
+              const reassessed = evaluatePosition({ ...next, status: "open", lastAction: "HOLD" }, snapshot, portfolio, exitGenome);
+              next = reassessed.status === "exit_pending"
+                ? { ...reassessed, lastReason: `${reassessed.lastReason} Sellability unverified; no PAPER sale or proceeds recorded.` }
+                : { ...reassessed, lastReason: "No exit trigger remains; the position is open while sellability evidence is unverified." };
+            } else {
+              next = await executeFullExit(next, snapshot);
+            }
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
           }

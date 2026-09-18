@@ -1,5 +1,11 @@
 # Bot War Room V3
 
+## V3.3.2 pending-exit repair and buy diagnostics
+
+The Guardian no longer treats missing sellability verification as an emergency exit signal. The old strategy also set a $15,000 emergency-exit liquidity floor for early runners that were explicitly allowed to enter smaller pools. New early-runner exits use a floor tied to their entry liquidity; previously opened trades with a recorded sub-$15,000 entry pool get the corrected floor when Guardian reviews them. On each cycle it re-evaluates previously pending positions against actual exit reasons: if no exit trigger remains, the position returns to Open; if a real stop, security change or hold limit still calls for an exit, it remains pending until a verified sale or loss can be recorded. No sale proceeds are invented and no PAPER wallet balance is reset. Pending cards display their recorded reason.
+
+The top navigation now links to the existing Decision Funnel under "WHY TRADES STOP". That panel reports the number of candidates, BUY signals and actual PAPER fills, plus the leading rejection reasons. The independent Liquidity Auditor from V3.3.1 still requires confirmation from the second pool provider; an unavailable or unmatched second provider will block new buys and appear in those rejection counts. This may reduce trading during provider outages. The Council's buy thresholds and trade sizing remain unchanged.
+
 ## V3.3.1 Liquidity Auditor
 
 This release builds directly on the V3.3.0 locked-capital buy strategy. The Council's candidate scoring, BUY/WATCH thresholds, scan cycle and position sizing are unchanged. Immediately before a PAPER buy, the Liquidity Auditor queries GeckoTerminal for the exact pool address selected by the existing DEX Screener execution snapshot, verifies its base token address, and requires an independent positive pool reserve. If the second provider cannot confirm the same pool, has no data, shows less than half the original liquidity, or shows insufficient reserves for the order, it blocks the entry and records the reason. The existing last-minute DEX check and simulated slippage check still run. The second lookup adds up to five seconds to a prospective buy, not to scans that have no buy candidate.

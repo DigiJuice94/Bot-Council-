@@ -2,6 +2,10 @@ import type { ExitStrategy, MarketRegime, MarketSnapshot, RiskCheck } from "./ty
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
+export function entryLiquidityExitFloor(liquidityUsd: number, earlyRunner: boolean): number {
+  return Math.max(earlyRunner ? 500 : 15_000, Math.round(liquidityUsd * 0.4));
+}
+
 export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, risk: RiskCheck, regime?: MarketRegime): ExitStrategy {
   const volPct = snapshot.volatility * 100;
   const favorable = regime?.id === "meme_expansion" || regime?.id === "new_chain_mania" || regime?.id === "risk_on_trend";
@@ -10,6 +14,7 @@ export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, 
   const stopLossPct = Number(clamp(8 + volPct * 0.08 + Math.max(0, 70 - risk.riskScore) * 0.05 + regimeStopBonus, 7, 20).toFixed(1));
   const trailingStopPct = Number(clamp(10 + volPct * 0.09 + regimeTrailBonus, 9, 26).toFixed(1));
   const maxHoldMinutes = snapshot.ageMinutes < 90 ? 360 : regime?.id === "sideways_chop" ? 480 : 720;
+  const earlyRunnerPool = snapshot.marketCap >= 8_000 && snapshot.marketCap <= 80_000 && snapshot.ageMinutes <= 1_440;
   const firstTarget = conviction >= 88 ? 28 : conviction >= 80 ? 23 : conviction >= 72 ? 18 : 15;
 
   // V2.8: never force-distribute 100% of a confirmed winner through staged TPs.
@@ -30,7 +35,7 @@ export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, 
       { gainPct: Math.round(firstTarget * 6), sellPct: runnerSellPct, label: "Runner" },
     ],
     maxHoldMinutes,
-    liquidityFloorUsd: Math.max(15_000, Math.round(snapshot.liquidity * 0.4)),
+    liquidityFloorUsd: entryLiquidityExitFloor(snapshot.liquidity, earlyRunnerPool),
     moonbagPct,
     winnerActivationPct: Number(Math.max(6, firstTarget * 0.4).toFixed(1)),
     winnerTrailingStopPct,
