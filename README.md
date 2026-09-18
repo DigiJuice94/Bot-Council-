@@ -1,5 +1,11 @@
 # Bot War Room V3
 
+## V3.3.1 Liquidity Auditor
+
+This release builds directly on the V3.3.0 locked-capital buy strategy. The Council's candidate scoring, BUY/WATCH thresholds, scan cycle and position sizing are unchanged. Immediately before a PAPER buy, the Liquidity Auditor queries GeckoTerminal for the exact pool address selected by the existing DEX Screener execution snapshot, verifies its base token address, and requires an independent positive pool reserve. If the second provider cannot confirm the same pool, has no data, shows less than half the original liquidity, or shows insufficient reserves for the order, it blocks the entry and records the reason. The existing last-minute DEX check and simulated slippage check still run. The second lookup adds up to five seconds to a prospective buy, not to scans that have no buy candidate.
+
+Pool reserve is an estimate, not proof that a token can be sold. The Guardian now requires verified sellability before labeling a pending exit an unsellable loss. If live sellability evidence is missing, it keeps the position pending without inventing sale proceeds or booking a proven loss. Already recorded losses are preserved; the new check cannot establish whether a past sell was possible. No paper wallet reset is triggered by this release. A failed or unsupported independent pool lookup blocks the buy rather than silently accepting one provider's report.
+
 ## V3.3 locked-capital accounting
 
 When Guardian confirms that an owned PAPER token is not sellable, is a honeypot, or can freeze transfers, the position is moved to **Unsellable / Locked Capital**. No simulated sale proceeds are credited. The remaining cost is counted as a loss in verified portfolio accounting, the stuck token remains visible, and the completed failure is retained by specialist learning. Entry rules, Council thresholds, profit-taking levels, and Moon Bag behavior are unchanged.

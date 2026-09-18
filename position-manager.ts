@@ -8,6 +8,7 @@ import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeM
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { getRunnerExitGuidance } from "./runner-research";
+import { confirmedSellabilityFailure, sellabilityUnverified } from "./security-evidence";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
@@ -574,7 +575,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
         if (snapshot) {
           const portfolio = await getPaperPortfolioContext(next.chain);
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
-          const confirmedUnsellable = !snapshot.sellable || snapshot.honeypot || snapshot.liquidity <= 0 ||
+          const confirmedUnsellable = confirmedSellabilityFailure(snapshot) || snapshot.honeypot || snapshot.liquidity <= 0 ||
             (snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
           if (next.status === "exit_pending" && next.mode === "paper" && confirmedUnsellable) {
             const reason = snapshot.liquidity <= 0
@@ -586,7 +587,9 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
                 : "Guardian confirmed the token is not sellable while attempting to exit.";
             next = markUnsellable(next, snapshot, reason);
           } else if (next.status === "exit_pending" && next.mode === "paper") {
-            next = await executeFullExit(next, snapshot);
+            next = sellabilityUnverified(snapshot)
+              ? { ...next, lastReason: "Exit pending: sellability provider has not verified an exit; no PAPER proceeds or loss credited.", updatedAt: new Date().toISOString() }
+              : await executeFullExit(next, snapshot);
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
           }

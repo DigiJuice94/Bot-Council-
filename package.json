@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.3.0-locked-capital",
+  "version": "3.3.1-liquidity-auditor",
   "private": true,
   "scripts": {
     "dev": "next dev",

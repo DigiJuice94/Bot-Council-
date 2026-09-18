@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
-import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
-import { listManagedPositions } from "@/lib/position-store";
+import { NextRequest, NextResponse } from "next/server";
+import { classifyMarketRegime } from "@/lib/regime";
+import { getLearningSnapshot } from "@/lib/learning-store";
+import type { MarketSnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  // The dashboard's trade table uses this lightweight path so research/status
-  // generation cannot hold back visible position updates.
-  if (new URL(request.url).searchParams.get("light") === "1") {
-    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
-  }
-  ensurePositionGuardianLoop();
-  const report = await refreshPositionGuardian();
-  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
+export async function POST(request: NextRequest) {
+  const body = await request.json() as { snapshot?: MarketSnapshot };
+  if (!body.snapshot) return NextResponse.json({ error: "snapshot is required" }, { status: 400 });
+  const regime = classifyMarketRegime(body.snapshot);
+  return NextResponse.json(await getLearningSnapshot(regime, body.snapshot), { headers: { "Cache-Control": "no-store" } });
 }

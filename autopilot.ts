@@ -11,6 +11,7 @@ import { loadLatestProfitability } from "./profitability-store";
 import { getProviderHealth } from "./provider-health";
 import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
 import { maybeDispatchLiveTrade } from "./live-gate";
+import { auditEntryLiquidity } from "./liquidity-auditor";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
@@ -236,6 +237,17 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
     addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
   }
+  const liquidityAudit = await auditEntryLiquidity(executionSnapshot, request);
+  if (!liquidityAudit.allowed) {
+    const reason = `Liquidity Auditor blocked entry: ${liquidityAudit.reason}. No PAPER buy or wallet debit was recorded.`;
+    recordRejection(reason);
+    addChat("Liquidity Auditor", `$${result.snapshot.symbol}: ${reason}`, "execution");
+    return false;
+  }
+  if (executionSnapshot.dataProvenance) {
+    executionSnapshot.dataProvenance.notes = [...(executionSnapshot.dataProvenance.notes ?? []), `Liquidity Auditor: ${liquidityAudit.reason}. Pool data does not prove a token can be sold.`];
+  }
+  addChat("Liquidity Auditor", `$${result.snapshot.symbol}: ${liquidityAudit.reason}. Entry liquidity check passed.`, "execution");
   context.snapshot = executionSnapshot;
   const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
   const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
