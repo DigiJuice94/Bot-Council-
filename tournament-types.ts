@@ -69,11 +69,13 @@ export type TournamentTeam = {
   thresholdDelta: number;
   sizeMultiplier: number;
   fileCabinet: boolean;
+  rejectionCounts: Record<string, number>;
+  lastRejectionReason?: string;
   draftSources?: Partial<Record<TournamentRole, { teamId: string; teamName: string; rank: number }>>;
 };
 
 export type TournamentState = {
-  version: 1;
+  version: 2;
   phase: TournamentPhase;
   status: "running" | "winner" | "failed";
   createdAt: string;

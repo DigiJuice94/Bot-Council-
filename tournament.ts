@@ -38,14 +38,18 @@ function emptyRoles(): TournamentTeam["rolePerformance"] {
   return Object.fromEntries(TOURNAMENT_ROLES.map((role) => [role, { role, trades: 0, wins: 0, losses: 0, attributedPnlUsd: 0 }])) as TournamentTeam["rolePerformance"];
 }
 function newTeam(variant: Variant): TournamentTeam {
-  return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance: emptyRoles() };
+  return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance: emptyRoles(), rejectionCounts: {} };
 }
 function initialState(now = Date.now()): TournamentState {
-  return { version: 1, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [] };
+  return { version: 2, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [] };
 }
 async function ensureState() {
   const current = await loadTournamentState();
-  if (current) return current;
+  if (current) {
+    for (const team of current.teams) team.rejectionCounts ??= {};
+    for (const team of current.qualifierArchive ?? []) team.rejectionCounts ??= {};
+    return current;
+  }
   const created = initialState();
   await saveTournamentState(created);
   return created;
@@ -73,21 +77,33 @@ function openCost(team: TournamentTeam) {
 function addTrade(team: TournamentTeam, row: TournamentTeam["trades"][number]) {
   team.trades = [row, ...team.trades].slice(0, MAX_TRADE_ROWS);
 }
+function reject(team: TournamentTeam, reason: string) {
+  team.lastRejectionReason = reason;
+  team.rejectionCounts[reason] = (team.rejectionCounts[reason] ?? 0) + 1;
+  return false;
+}
 function eligible(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>) {
   // Tournament wallets own their cash and capacity. Never inherit the sidelined
   // main wallet's execution.allowed/request, because those are calculated from
   // the main wallet's cash. Shared market risk and Executor safety still apply.
-  if (!result.risk.passed || result.councilProcess.executorVote === "BLOCK" || team.cashUsd < 25) return false;
-  if (team.id === "team-1") return result.decision === "BUY";
-  let adjusted = result.conviction;
+  if (!result.risk.passed) return reject(team, `Hard safety: ${result.risk.hardBlocks[0] ?? "risk veto"}`);
+  if (result.councilProcess.executorVote === "BLOCK") return reject(team, "Executor blocked market feasibility");
+  if (team.cashUsd < 25) return reject(team, "Team wallet has less than $25 cash");
+  const riskReaperVeto = result.claudeSurvivalCouncil?.specialists.some((opinion) => opinion.vote === "VETO");
+  if (riskReaperVeto) return reject(team, "Risk Reaper vetoed the opportunity");
+  if (team.id === "team-1") return result.decision === "BUY" || reject(team, `Baseline Council finished ${result.decision}`);
+
+  // Teams 2-10 synthesize the same locked specialist reads with their own small
+  // controlled bias. Previously a shared soft SKIP forced every team to sit out.
+  let adjusted = result.independentCouncil?.cioOpinion.score ?? result.conviction;
   for (const role of TOURNAMENT_ROLES) adjusted += ((scores[role] - 50) / 50) * (team.roleBias[role] ?? 0);
   if (team.fileCabinet) {
     const genome = result.runnerGenome;
-    if (!genome.learned) return result.decision === "BUY";
+    if (!genome.learned) return result.decision === "BUY" || reject(team, "File Cabinet needs learned Runner Genome evidence");
     adjusted += (genome.entryScore - 60) * 0.08 - Math.max(0, genome.dumperRiskScore - 65) * 0.10 + (genome.trajectoryScore - 50) * 0.04;
   }
-  if (result.decision === "BUY") return adjusted >= 50 + team.thresholdDelta;
-  return result.decision === "WATCH" && adjusted >= 58 + team.thresholdDelta;
+  const required = 57 + team.thresholdDelta;
+  return adjusted >= required || reject(team, `Team score ${adjusted.toFixed(1)} below ${required.toFixed(1)}`);
 }
 function positionExists(team: TournamentTeam, snapshot: MarketSnapshot) {
   return team.positions.some((position) => position.status === "open" && position.chain === snapshot.chain && position.tokenAddress === snapshot.tokenAddress);
@@ -169,11 +185,13 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
 }
 function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>, at: string) {
   const snapshot = result.snapshot;
-  if (positionExists(team, snapshot) || team.positions.filter((position) => position.status === "open").length >= MAX_OPEN_POSITIONS) return;
+  if (positionExists(team, snapshot)) return reject(team, "Already holding this token");
+  if (team.positions.filter((position) => position.status === "open").length >= MAX_OPEN_POSITIONS) return reject(team, `Maximum ${MAX_OPEN_POSITIONS} active trades reached`);
   const planned = result.execution.request?.notionalUsd ?? result.runnerGenome.suggestedTradeUsd ?? 50;
   const fileCabinetSize = team.fileCabinet && result.runnerGenome.learned ? result.runnerGenome.suggestedTradeUsd : planned;
   const notional = Math.min(team.cashUsd, 125, Math.max(25, fileCabinetSize * team.sizeMultiplier));
-  if (notional < 25 || snapshot.price <= 0) return;
+  if (notional < 25) return reject(team, "Team wallet cannot fund the $25 minimum");
+  if (snapshot.price <= 0) return reject(team, "Candidate price is not executable");
   const fee = notional * FEE_RATE;
   const spend = notional;
   const quantity = (notional - fee) / snapshot.price;
@@ -189,7 +207,9 @@ function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<Tourn
     maxHoldMinutes: Math.max(5, result.exitStrategy.maxHoldMinutes), roleScores: scores,
   };
   team.positions.push(position);
+  team.lastRejectionReason = undefined;
   addTrade(team, { id: `${position.id}-BUY`, at, symbol: snapshot.symbol, chain: snapshot.chain, action: "BUY", quantity, price: snapshot.price, valueUsd: spend, pnlUsd: -fee, note: team.fileCabinet ? "File Cabinet advisory entry" : "Controlled tournament entry" });
+  return true;
 }
 
 function liquidateRound(team: TournamentTeam, at: string) {
@@ -221,7 +241,7 @@ function draftFinalists(qualifiers: TournamentTeam[], at: string) {
       rolePerformance[role].sourceTeamId = source.id;
       rolePerformance[role].sourceTeamName = source.name;
     }
-    return { id: `final-${rank}`, name: `Final Team ${rank}`, description: `${rank === 1 ? "Best" : rank === 2 ? "Second-best" : "Third-best"} qualifier performer drafted independently for every role.`, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance, roleBias, thresholdDelta, sizeMultiplier, fileCabinet: Object.values(draftSources).some((source) => source.teamId === "team-10"), draftSources } satisfies TournamentTeam;
+    return { id: `final-${rank}`, name: `Final Team ${rank}`, description: `${rank === 1 ? "Best" : rank === 2 ? "Second-best" : "Third-best"} qualifier performer drafted independently for every role.`, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance, roleBias, thresholdDelta, sizeMultiplier, fileCabinet: Object.values(draftSources).some((source) => source.teamId === "team-10"), rejectionCounts: {}, draftSources } satisfies TournamentTeam;
   });
 }
 function advanceIfDue(state: TournamentState, now = Date.now()) {
@@ -266,7 +286,8 @@ export async function observeTournamentOpportunity(result: WarRoomResult): Promi
     for (const team of state.teams) {
       const existing = team.positions.find((position) => position.status === "open" && position.chain === result.snapshot.chain && position.tokenAddress === result.snapshot.tokenAddress);
       if (existing) applyMark(team, existing, result.snapshot, state.lastOpportunityAt);
-      if (!unsafe && eligible(team, result, scores)) enter(team, result, scores, state.lastOpportunityAt);
+      if (unsafe) reject(team, immediateSafetyFailure(result.snapshot) ?? "Confirmed sellability failure");
+      else if (eligible(team, result, scores)) enter(team, result, scores, state.lastOpportunityAt);
     }
     if (result.runnerGenome.learned) state.fileCabinetEvidence = [...result.runnerGenome.runnerEvidence.slice(0, 3), ...result.runnerGenome.dumperEvidence.slice(0, 2)].slice(0, 5);
     await saveTournamentState(state);
