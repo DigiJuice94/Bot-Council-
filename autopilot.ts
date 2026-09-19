@@ -15,7 +15,7 @@ import { auditEntryLiquidity } from "./liquidity-auditor";
 import { applyClaudeSurvivalCouncil, getClaudeSurvivalCouncilStatus } from "./claude-survival-council";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import { ensureTournamentRuntime, observeTournamentOpportunity } from "./tournament";
+import { ensureTournamentRuntime, isTournamentActive, observeTournamentOpportunity } from "./tournament";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -79,6 +79,7 @@ export type AutopilotStatus = {
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   chat: AutopilotChatRow[];
+  mainWalletPausedForTournament: boolean;
   lastError?: string;
 };
 
@@ -120,6 +121,7 @@ function initialState(): AutopilotStatus {
     latestResult: null,
     recentDecisions: [],
     chat: [],
+    mainWalletPausedForTournament: true,
   };
 }
 
@@ -431,7 +433,16 @@ async function scanOneChain(chain: Chain) {
   await appendDecisionJournal(result);
   // Tournament is a shadow ledger only: it consumes the already-computed result
   // and never feeds back into the locked V3.6.2 scanner, Council or main wallet.
-  await observeTournamentOpportunity(result);
+  // Tournament failures must never terminate the scanner. While the tournament
+  // is active we fail safely by keeping the main wallet sidelined.
+  let tournamentActive = true;
+  try {
+    tournamentActive = await observeTournamentOpportunity(result);
+  } catch (error) {
+    console.error("[tournament] opportunity", error);
+    tournamentActive = await isTournamentActive().catch(() => true);
+  }
+  current.mainWalletPausedForTournament = tournamentActive;
 
   const discussion = buildCouncilDiscussion(result);
   for (const turn of discussion) {
@@ -446,7 +457,10 @@ async function scanOneChain(chain: Chain) {
   addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned; Claude Risk Reaper ${result.claudeSurvivalCouncil ? "completed" : "not summoned"}. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
-  if (result.decision === "BUY") {
+  if (tournamentActive) {
+    // Guardian keeps managing any legacy main-wallet holdings, but no new main
+    // PAPER position is opened until the final tournament round completes.
+  } else if (result.decision === "BUY") {
     if (!result.risk.passed) recordRejection(result.risk.hardBlocks[0] ?? "Deterministic risk veto");
     else if (!result.execution.allowed || !result.execution.request) recordRejection(result.execution.reason);
     else executed = await autoExecute(result, portfolio);
@@ -515,6 +529,7 @@ export async function getAutopilotStatus() {
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
+  state().mainWalletPausedForTournament = await isTournamentActive().catch(() => true);
   return {
     ...state(),
     paperWallet: bankroll.wallet,

@@ -7,6 +7,7 @@ This package adds an isolated two-stage Council tournament without changing the 
 - Qualifier: Teams 1–9 use deliberately small role/threshold/sizing variations. Team 10 is **Team File Cabinet**, which uses the existing Runner Genome, trajectory, winner/dumper and missed-runner evidence as advisory input only.
 - Fair input: all teams receive the same single Council result and market snapshot. The Council and provider stack are not re-run ten times.
 - Wallet isolation: every team starts with its own $1,000 shadow PAPER wallet. Tournament balances never touch the primary PAPER wallet.
+- Main-wallet sideline: the primary PAPER wallet opens no new positions during either tournament round. Guardian continues managing any existing holdings, and normal entries resume only after the tournament completes.
 - Global safety: confirmed zero liquidity, honeypots, Solana freeze authority and positively confirmed unsellability apply identically to every team. UNKNOWN provider coverage remains observational, matching V3.6.2.
 - Draft: after 24 hours, the best, second-best and third-best performer for each of the eight Council roles are drafted into Final Teams 1–3. Each finalist starts a new $1,000 wallet.
 - Final: the drafted teams compete for 24 hours by default. If every finalist ends below $1,000, the experiment is marked failed; otherwise the highest-equity council wins.

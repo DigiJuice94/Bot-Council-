@@ -74,7 +74,10 @@ function addTrade(team: TournamentTeam, row: TournamentTeam["trades"][number]) {
   team.trades = [row, ...team.trades].slice(0, MAX_TRADE_ROWS);
 }
 function eligible(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>) {
-  if (!result.risk.passed || !result.execution.allowed || !result.execution.request || result.councilProcess.executorVote === "BLOCK") return false;
+  // Tournament wallets own their cash and capacity. Never inherit the sidelined
+  // main wallet's execution.allowed/request, because those are calculated from
+  // the main wallet's cash. Shared market risk and Executor safety still apply.
+  if (!result.risk.passed || result.councilProcess.executorVote === "BLOCK" || team.cashUsd < 25) return false;
   if (team.id === "team-1") return result.decision === "BUY";
   let adjusted = result.conviction;
   for (const role of TOURNAMENT_ROLES) adjusted += ((scores[role] - 50) / 50) * (team.roleBias[role] ?? 0);
@@ -247,14 +250,15 @@ function advanceIfDue(state: TournamentState, now = Date.now()) {
   }
 }
 
-export async function observeTournamentOpportunity(result: WarRoomResult) {
+export async function observeTournamentOpportunity(result: WarRoomResult): Promise<boolean> {
   const unsafe = immediateSafetyFailure(result.snapshot) || hasPositiveSellabilityFailure(result.snapshot);
   const release = await acquireRuntimeLease("tournament-state", 45_000);
-  if (!release) return;
+  if (!release) return (await ensureState()).phase !== "complete";
   try {
     const state = await ensureState();
     advanceIfDue(state);
-    if (state.phase === "complete" || state.processedOpportunityIds.includes(result.decisionId)) return;
+    if (state.phase === "complete") return false;
+    if (state.processedOpportunityIds.includes(result.decisionId)) return true;
     state.processedOpportunityIds = [...state.processedOpportunityIds.slice(-(MAX_PROCESSED_IDS - 1)), result.decisionId];
     state.opportunityCount += 1;
     state.lastOpportunityAt = iso();
@@ -266,26 +270,36 @@ export async function observeTournamentOpportunity(result: WarRoomResult) {
     }
     if (result.runnerGenome.learned) state.fileCabinetEvidence = [...result.runnerGenome.runnerEvidence.slice(0, 3), ...result.runnerGenome.dumperEvidence.slice(0, 2)].slice(0, 5);
     await saveTournamentState(state);
+    return true;
   } finally {
     await release().catch(() => undefined);
   }
 }
 
+export async function isTournamentActive() {
+  return (await ensureState()).phase !== "complete";
+}
+
 export async function refreshTournamentMarks(limit = 4) {
+  // Fetch prices without holding the state lock. Provider latency can otherwise
+  // collide with a new candidate and make the whole tournament miss it.
+  const preview = await ensureState();
+  if (preview.phase === "complete") return;
+  const unique = new Map<string, TournamentPosition>();
+  for (const team of preview.teams) for (const position of team.positions) if (position.status === "open") unique.set(`${position.chain}:${position.tokenAddress}`, position);
+  const rows = [...unique.values()];
+  if (!rows.length) return;
+  const cursor = tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 ?? 0;
+  const selected = Array.from({ length: Math.min(limit, rows.length) }, (_, index) => rows[(cursor + index) % rows.length]);
+  tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 = (cursor + selected.length) % rows.length;
+  const snapshots = await Promise.all(selected.map((position) => fetchLiveTokenSnapshot(position.chain, position.tokenAddress).catch(() => null)));
+
   const release = await acquireRuntimeLease("tournament-state", 45_000);
   if (!release) return;
   try {
     const state = await ensureState();
     advanceIfDue(state);
     if (state.phase === "complete") { await saveTournamentState(state); return; }
-    const unique = new Map<string, TournamentPosition>();
-    for (const team of state.teams) for (const position of team.positions) if (position.status === "open") unique.set(`${position.chain}:${position.tokenAddress}`, position);
-    const rows = [...unique.values()];
-    if (!rows.length) { await saveTournamentState(state); return; }
-    const cursor = tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 ?? 0;
-    const selected = Array.from({ length: Math.min(limit, rows.length) }, (_, index) => rows[(cursor + index) % rows.length]);
-    tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 = (cursor + selected.length) % rows.length;
-    const snapshots = await Promise.all(selected.map((position) => fetchLiveTokenSnapshot(position.chain, position.tokenAddress).catch(() => null)));
     const at = iso();
     snapshots.forEach((snapshot) => {
       if (!snapshot) return;

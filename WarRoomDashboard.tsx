@@ -40,6 +40,7 @@ type AutopilotPayload = {
   positions: ManagedPosition[];
   lastError?: string;
   generatedAt: string;
+  mainWalletPausedForTournament?: boolean;
 };
 
 type DetailedTradeRow = PaperWalletFillRecord & {
@@ -732,6 +733,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section className="autonomy-band">
+        {status?.mainWalletPausedForTournament && <div className="main-wallet-paused"><b>MAIN WALLET SIDELINED</b><span>New entries are paused while the Council Tournament runs. Existing holdings remain protected by Guardian.</span></div>}
         <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market while the dedicated Exit Strategist banks profits, kills dead trades, recycles stale capital and returns simulated proceeds to cash.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
