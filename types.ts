@@ -94,6 +94,7 @@ export type MarketSnapshot = {
   freezeAuthority: boolean;
   ownershipRenounced: boolean;
   proxyContract: boolean;
+  tokenDecimals?: number;
   volumeAccelerationPct?: number;
   holderGrowthPct?: number;
   liquidityChangePct?: number;
@@ -541,6 +542,13 @@ export type ManagedPosition = {
   profitOptimizerContextKey?: string;
   profitOptimizerReviewedAt?: string;
   profitOptimizerError?: string;
+  sellAuditStatus?: "pass" | "fail" | "unknown";
+  sellAuditProvider?: "jupiter" | "zeroex" | "security" | "unsupported";
+  sellAuditCheckedAt?: string;
+  sellAuditReason?: string;
+  sellAuditPriceImpactPct?: number;
+  sellAuditExpectedOutUsd?: number;
+  sellAuditConsecutiveFailures?: number;
   pendingScaleLabel?: string;
   learningRecorded?: boolean;
   exitStrategy: ExitStrategy;

@@ -81,3 +81,9 @@ Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-ti
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 
 The fast specialist Council remains local and does not require OpenAI. V3.5 uses the configured Anthropic key for the four-seat Claude Survival Council on qualifying BUY/WATCH candidates and for the bounded post-entry Profit Optimizer. No OpenAI/ChatGPT API is required.
+
+## V3.5.1 Audit-only repair
+
+**Exit hotfix:** Audit Bot is no longer allowed to hold a trade in `exit_pending` merely because its independent quote provider returns `UNKNOWN`. `UNKNOWN` is recorded for diagnostics and the normal PAPER close proceeds. Only two back-to-back hard `FAIL` results classify capital as locked/unsellable.
+
+This patch does one thing: when Guardian is actually trying to SELL (trim or full exit), Audit Bot independently reverse-quotes the remaining token amount. Audit Bot is observational, not a sell gate: PASS and UNKNOWN both allow the normal PAPER sell to settle, so missing provider keys, unsupported chains, or temporary quote outages cannot freeze exits. Only a hard FAIL is rechecked once; two consecutive hard FAIL results classify the position as Unsellable / Locked Capital with no fake proceeds credited. This patch does not block entries, alter Council votes, add credit watching, or change Claude behavior.

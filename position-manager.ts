@@ -10,7 +10,8 @@ import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy
 import { applyClaudeProfitOptimizer } from "./claude-profit-optimizer";
 import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance } from "./runner-research";
-import { confirmedSellabilityFailure, sellabilityUnverified } from "./security-evidence";
+import { auditPositionSellability, type SellabilityAudit } from "./sellability-auditor";
+import { confirmedSellabilityFailure } from "./security-evidence";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
@@ -58,6 +59,12 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     profitOptimizerContextKey: position.profitOptimizerContextKey,
     profitOptimizerReviewedAt: position.profitOptimizerReviewedAt,
     profitOptimizerError: position.profitOptimizerError,
+    sellAuditStatus: position.sellAuditStatus,
+    sellAuditProvider: position.sellAuditProvider,
+    sellAuditCheckedAt: position.sellAuditCheckedAt,
+    sellAuditReason: position.sellAuditReason,
+    sellAuditPriceImpactPct: safe(position.sellAuditPriceImpactPct),
+    sellAuditExpectedOutUsd: safe(position.sellAuditExpectedOutUsd),
   };
 }
 
@@ -562,6 +569,26 @@ function markUnsellable(position: ManagedPosition, snapshot: MarketSnapshot, rea
   };
 }
 
+function applySellAudit(position: ManagedPosition, audit: SellabilityAudit, failures: number): ManagedPosition {
+  return {
+    ...position,
+    sellAuditStatus: audit.status,
+    sellAuditProvider: audit.provider,
+    sellAuditCheckedAt: audit.checkedAt,
+    sellAuditReason: audit.reason,
+    sellAuditPriceImpactPct: audit.priceImpactPct,
+    sellAuditExpectedOutUsd: audit.expectedOutUsd,
+    sellAuditConsecutiveFailures: failures,
+  };
+}
+
+async function verifySellAttempt(position: ManagedPosition, snapshot: MarketSnapshot) {
+  const audit = await auditPositionSellability(position, snapshot);
+  const previousFailures = position.sellAuditConsecutiveFailures ?? 0;
+  const failures = audit.status === "fail" ? previousFailures + 1 : 0;
+  return { audit, position: applySellAudit(position, audit, failures), failures };
+}
+
 const guardianGlobal = globalThis as typeof globalThis & {
   __botWarRoomGuardianTimer?: ReturnType<typeof setInterval>;
   __botWarRoomGuardianBusy?: boolean;
@@ -596,41 +623,61 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
         if (snapshot) {
           const portfolio = await getPaperPortfolioContext(next.chain);
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
-          const confirmedUnsellable = confirmedSellabilityFailure(snapshot) || snapshot.honeypot || snapshot.liquidity <= 0 ||
-            (snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
-          if (next.status === "exit_pending" && next.mode === "paper" && confirmedUnsellable) {
-            const reason = snapshot.liquidity <= 0
-              ? "Guardian confirmed zero executable liquidity while attempting to exit."
-              : snapshot.honeypot
-              ? "Guardian confirmed a honeypot condition while attempting to exit."
-              : snapshot.freezeAuthority
-                ? "Guardian confirmed the token can freeze transfers while attempting to exit."
-                : "Guardian confirmed the token is not sellable while attempting to exit.";
-            next = markUnsellable(next, snapshot, reason);
-          } else if (next.status === "exit_pending" && next.mode === "paper") {
-            if (sellabilityUnverified(snapshot)) {
-              // Reassess older pending positions using the real exit rules.
-              // Unknown sellability alone previously created a pending exit;
-              // when no genuine exit trigger remains, restore the open state.
-              const reassessed = evaluatePosition({ ...next, status: "open", lastAction: "HOLD" }, snapshot, portfolio, exitGenome);
-              next = reassessed.status === "exit_pending"
-                ? { ...reassessed, lastReason: `${reassessed.lastReason} Sellability unverified; no PAPER sale or proceeds recorded.` }
-                : { ...reassessed, lastReason: "No exit trigger remains; the position is open while sellability evidence is unverified." };
-            } else {
-              next = await executeFullExit(next, snapshot);
-            }
-          } else {
+
+          // Audit Bot is intentionally sell-side only. It never blocks entries, votes,
+          // scans, or creates an exit. It is called only after Guardian/Claude already
+          // wants to SELL so PAPER accounting cannot invent proceeds for locked capital.
+          if (next.status !== "exit_pending") {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
             next = await applyClaudeProfitOptimizer({ position: next, snapshot, portfolio, exitGenome });
           }
-          if (next.mode === "paper" && snapshot.sellable && !snapshot.honeypot) {
-            if (next.lastAction === "SCALE_IN") {
+
+          if (next.mode === "paper") {
+            if (next.lastAction === "SCALE_IN" && snapshot.sellable && !snapshot.honeypot) {
               next = await executeScaleIn(next, snapshot, portfolio);
             } else if (next.lastAction === "TRIM") {
               const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
-              if (level) next = await executeTrim(next, snapshot, level, next.profitOptimizerAction === "HOLD" ? undefined : next.profitOptimizerSellPct);
-            } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
-              next = await executeFullExit(next, snapshot);
+              if (level) {
+                const verified = await verifySellAttempt(next, snapshot);
+                next = verified.position;
+                if (verified.audit.status === "fail" && verified.failures >= 2) {
+                  next = markUnsellable(next, snapshot, `Audit Bot confirmed locked capital on two consecutive sell checks. ${verified.audit.reason}`);
+                } else if (verified.audit.status === "fail") {
+                  // A single hard failure gets one fast recheck before we declare capital locked.
+                  // This is the only case where Audit Bot may briefly delay a paper sell.
+                  next = {
+                    ...next,
+                    status: "open",
+                    lastAction: "HOLD",
+                    updatedAt: new Date().toISOString(),
+                    lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} Guardian will recheck on the next cycle before classifying locked capital.`,
+                  };
+                } else {
+                  // PASS and UNKNOWN are observational only. UNKNOWN must never freeze a paper exit
+                  // just because a quote provider/key/chain is unavailable.
+                  next = await executeTrim(next, snapshot, level, next.profitOptimizerAction === "HOLD" ? undefined : next.profitOptimizerSellPct);
+                }
+              }
+            } else if ((next.status === "exit_pending" || next.lastAction === "EXIT") && next.remainingQuantity > 0) {
+              const verified = await verifySellAttempt(next, snapshot);
+              next = verified.position;
+              if (verified.audit.status === "fail" && verified.failures >= 2) {
+                next = markUnsellable(next, snapshot, `Audit Bot confirmed locked capital on two consecutive sell checks. ${verified.audit.reason}`);
+              } else if (verified.audit.status === "fail") {
+                // Require one confirmation before calling capital locked, but do not allow an
+                // indefinite pending state: the next Guardian cycle will re-audit immediately.
+                next = {
+                  ...next,
+                  status: "exit_pending",
+                  lastAction: "EXIT",
+                  updatedAt: new Date().toISOString(),
+                  lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} Guardian will recheck on the next cycle before classifying locked capital.`,
+                };
+              } else {
+                // PASS or UNKNOWN: normal paper accounting closes the trade. Audit Bot records
+                // what it observed but does not gate Guardian/Claude sell decisions.
+                next = await executeFullExit(next, snapshot);
+              }
             }
           }
           if ((next.status === "closed" || next.status === "unsellable") && !next.learningRecorded) {

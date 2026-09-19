@@ -91,6 +91,7 @@ type SecurityResult = {
   freezeAuthority?: boolean;
   ownershipRenounced?: boolean;
   proxyContract?: boolean;
+  tokenDecimals?: number;
   quality: DataQuality;
   notes: string[];
 };
@@ -384,6 +385,8 @@ async function birdeyeSecurity(chain: Chain, address: string): Promise<SecurityR
 
   const holderCount = firstNumber(row, ["holderCount", "holder_count", "holders"]);
   if (holderCount !== undefined) { out.holders = holderCount; q.holders = true; }
+  const tokenDecimals = firstNumber(row, ["decimals", "tokenDecimals", "token_decimals"]);
+  if (tokenDecimals !== undefined && tokenDecimals >= 0 && tokenDecimals <= 30) out.tokenDecimals = Math.round(tokenDecimals);
   const top10 = firstNumber(row, ["top10HolderPercent", "top10_holder_percent", "top10HolderPercentage", "top10_holder_percentage"]);
   if (top10 !== undefined) { out.top10Pct = clamp(pctValue(top10), 0, 100); q.top10 = true; }
 
@@ -453,6 +456,8 @@ async function goPlusSecurity(chain: Chain, address: string): Promise<SecurityRe
   if (top10.verified) { out.top10Pct = top10.value; q.top10 = true; }
   const holderCount = firstNumber(row, ["holder_count", "holderCount"]);
   if (holderCount !== undefined && holderCount > 0) { out.holders = holderCount; q.holders = true; }
+  const tokenDecimals = firstNumber(row, ["token_decimals", "tokenDecimals", "decimals"]);
+  if (tokenDecimals !== undefined && tokenDecimals >= 0 && tokenDecimals <= 30) out.tokenDecimals = Math.round(tokenDecimals);
 
   if (chain === "Solana") {
     const hasTransferabilityEvidence = hasOwn(row, "non_transferable") || (row?.transfer_hook && typeof row.transfer_hook === "object");
@@ -532,6 +537,8 @@ async function heliusSecurity(address: string): Promise<SecurityResult> {
     out.ownershipRenounced = !out.mintAuthority;
     q.authorities = true; q.ownership = true;
   }
+  const supplyDecimals = optionalNum(supply?.result?.value?.decimals);
+  if (supplyDecimals !== undefined && supplyDecimals >= 0 && supplyDecimals <= 30) out.tokenDecimals = Math.round(supplyDecimals);
   const supplyRaw = optionalNum(supply?.result?.value?.amount);
   const largestRows = largest?.result?.value;
   if (supplyRaw && Array.isArray(largestRows)) {
@@ -607,6 +614,7 @@ function mergeSecurity(results: SecurityResult[], holderProfile?: Partial<Securi
   out.bundledPct = holderProfile?.bundledPct ?? choose("bundledPct");
   out.liquidityLocked = choose("liquidityLocked"); out.mintAuthority = choose("mintAuthority");
   out.freezeAuthority = choose("freezeAuthority"); out.ownershipRenounced = choose("ownershipRenounced"); out.proxyContract = choose("proxyContract");
+  out.tokenDecimals = choose("tokenDecimals");
   out.quality = blankQuality();
   for (const key of Object.keys(out.quality) as Array<keyof DataQuality>) {
     out.quality[key] = usable.some((result) => Boolean(result.quality[key])) as never;
@@ -692,7 +700,7 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
     volatility: deriveVolatility(pair), sellable: security.sellable ?? false, honeypot: security.honeypot ?? false,
     buyTaxPct: security.buyTaxPct ?? 0, sellTaxPct: security.sellTaxPct ?? 0, liquidityLocked: security.liquidityLocked ?? false,
     mintAuthority: security.mintAuthority ?? false, freezeAuthority: security.freezeAuthority ?? false,
-    ownershipRenounced: security.ownershipRenounced ?? false, proxyContract: security.proxyContract ?? false,
+    ownershipRenounced: security.ownershipRenounced ?? false, proxyContract: security.proxyContract ?? false, tokenDecimals: security.tokenDecimals,
     volumeAccelerationPct, marketCapChange5mPct: priceChangeBucket(pair, "m5"),
     assetClass: inferredAssetClass(pair, chain, ageMinutes, marketCap, volume24h),
     launchMetrics: {
