@@ -12,7 +12,6 @@ import { getProviderHealth } from "./provider-health";
 import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
-import { applyClaudeSurvivalCouncil, getClaudeSurvivalCouncilStatus } from "./claude-survival-council";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import { ensureTournamentRuntime, isTournamentActive, observeTournamentOpportunity } from "./tournament";
@@ -230,7 +229,6 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   const context = entryContext(result, portfolio);
   context.runnerGenome = result.runnerGenome;
   context.independentCouncil = result.independentCouncil;
-  context.claudeSurvivalCouncil = result.claudeSurvivalCouncil;
   context.initialAllocationPct = portfolio.equityUsd > 0 ? request.notionalUsd / portfolio.equityUsd * 100 : 0;
 
   // Last-mile entry verification: Council decisions can take long enough for a
@@ -422,8 +420,6 @@ async function scanOneChain(chain: Chain) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
   }
 
-  result = await applyClaudeSurvivalCouncil(result, portfolio);
-
   await observeCouncilResult(result);
   current.latestResult = result;
   current.recentDecisions = [result, ...current.recentDecisions.filter((row) => row.decisionId !== result.decisionId)].slice(0, MAX_DECISIONS);
@@ -451,12 +447,7 @@ async function scanOneChain(chain: Chain) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  if (result.claudeSurvivalCouncil) {
-    for (const opinion of result.claudeSurvivalCouncil.specialists) {
-      addChat(opinion.agentName, `${opinion.vote} · ${opinion.confidence.toFixed(0)}% · ${opinion.reason}`, "council", opinion.formedAt);
-    }
-  }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned; Claude Risk Reaper ${result.claudeSurvivalCouncil ? "completed" : "not summoned"}. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Deterministic safety and Executor checks complete. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (tournamentActive) {
@@ -535,7 +526,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3.6.2 Local Council + permanent Claude Risk Reaper started. The three retired Claude seats remain removed. Audit Watch is observational only: UNKNOWN coverage never blocks a buy, sell, or chain; only confirmed locked-capital evidence is classified unsellable.`, "system");
+  addChat("System", `V3.6.2 Local Council started with three bounded scan lanes. Claude Risk Reaper is removed. Deterministic liquidity, honeypot, sellability, authority and Executor protections remain active. Audit Watch is observational only when coverage is UNKNOWN.`, "system");
 }
 
 export async function getAutopilotStatus() {
@@ -555,7 +546,6 @@ export async function getAutopilotStatus() {
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    claudeSurvivalCouncil: await getClaudeSurvivalCouncilStatus(),
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };

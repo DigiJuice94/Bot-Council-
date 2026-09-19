@@ -228,34 +228,6 @@ export type AgentId =
 
 export type ResearchAgentId = Exclude<AgentId, "cio" | "executor" | "portfolio">;
 
-export type ClaudeSurvivalAgentId = "risk_reaper";
-export type ClaudeSurvivalVote = "PASS" | "VETO";
-
-export type ClaudeSurvivalOpinion = {
-  agentId: ClaudeSurvivalAgentId;
-  agentName: string;
-  vote: ClaudeSurvivalVote;
-  confidence: number;
-  reason: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-  formedAt: string;
-};
-
-export type ClaudeSurvivalCouncilTrace = {
-  sessionId: string;
-  model: string;
-  startedAt: string;
-  completedAt: string;
-  localDecision: Decision;
-  finalDecision: Decision;
-  specialists: ClaudeSurvivalOpinion[];
-  cioOpinion?: ClaudeSurvivalOpinion;
-  skippedReason?: string;
-};
-
 
 export type CouncilEntityId = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "portfolio" | "cio";
 
@@ -464,7 +436,6 @@ export type PositionEntryContext = {
   conviction: number;
   runnerGenome?: RunnerGenomeGuidance;
   independentCouncil?: IndependentCouncilTrace;
-  claudeSurvivalCouncil?: ClaudeSurvivalCouncilTrace;
   riskMaxPositionPct?: number;
   initialAllocationPct?: number;
   portfolioEquityUsd?: number;
@@ -695,7 +666,6 @@ export type WarRoomResult = {
   memeRegime: MemeRegime;
   runnerGenome: RunnerGenomeGuidance;
   independentCouncil?: IndependentCouncilTrace;
-  claudeSurvivalCouncil?: ClaudeSurvivalCouncilTrace;
   councilProcess: CouncilProcess;
   alpha: AlphaSignal;
   preMeeting: IndependentAgentRead[];

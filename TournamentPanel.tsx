@@ -61,7 +61,7 @@ export default function TournamentPanel() {
     <div className="tournament-rankings">
       <div className="tournament-row tournament-row-head"><span>Rank / Team</span><span>Wallet value</span><span>Realized P/L</span><span>Active</span><span>Total trades</span><span>Return</span></div>
       {view?.teams.map((team) => <article className={`tournament-row ${team.rank <= 3 ? "podium" : ""}`} key={team.id}>
-        <span className="tournament-team"><i>{team.rank}</i><span><b>{team.name}</b><small>{team.lastRejectionReason ? `Latest pass: ${team.lastRejectionReason}` : team.description}</small></span></span>
+        <span className="tournament-team"><i>{team.rank}</i><span><b>{team.name}</b><small>{team.lastRejectionReason ? `Latest pass: ${team.lastRejectionReason} · ${Object.values(team.rejectionCounts).reduce((sum, count) => sum + count, 0)} total passes` : team.description}</small></span></span>
         <strong>{money(team.equityUsd)}</strong>
         <strong className={team.realizedPnlUsd >= 0 ? "positive" : "negative"}>{money(team.realizedPnlUsd, true)}</strong>
         <strong>{team.activeTrades}</strong><strong>{team.totalTrades}</strong>

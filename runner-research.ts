@@ -1,7 +1,6 @@
 import { createClient } from "redis";
 import type { ManagedPosition, MarketSnapshot, WarRoomResult } from "./types";
 import { recordIndependentCouncilOutcome } from "./agent-entity-store";
-import { recordClaudeSurvivalOutcome } from "./claude-survival-store";
 import { distributeTrajectoryOutcomeLesson, getTrajectoryGuidance, getTrajectoryObserverSnapshot, snapshotToTrajectoryObservation, type TrajectoryObserverSnapshot } from "./trajectory-observer";
 
 const CASES_KEY = "bot-war-room:runner-research:v214:cases";
@@ -547,7 +546,6 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
       await writeCase(row);
     }
     await recordIndependentCouncilOutcome(position).catch((error) => console.error("[runner-research] entity outcome memory", error));
-    await recordClaudeSurvivalOutcome(position).catch((error) => console.error("[runner-research] claude survival outcome", error));
     seenClosed.add(tokenKey);
   }
   meta.closedTradeTokens = [...seenClosed].slice(-5_000);

@@ -16,15 +16,15 @@ const TP_LEVELS = [{ pct: 25, portion: 0.20 }, { pct: 50, portion: 0.20 }, { pct
 type Variant = Pick<TournamentTeam, "id" | "name" | "description" | "roleBias" | "thresholdDelta" | "sizeMultiplier" | "fileCabinet">;
 const VARIANTS: Variant[] = [
   { id: "team-1", name: "Team 1 · Baseline", description: "Exact V3.6.2 BUY decisions; no tournament bias.", roleBias: {}, thresholdDelta: 0, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-2", name: "Team 2 · Launch +2", description: "Small Early Runner Scout emphasis.", roleBias: { launch: 2 }, thresholdDelta: -1, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-3", name: "Team 3 · Narrative +2", description: "Small Narrative Ignition Scout emphasis.", roleBias: { social: 2 }, thresholdDelta: -1, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-4", name: "Team 4 · Flow +2", description: "Small Early Flow Analyst emphasis.", roleBias: { wallet: 2 }, thresholdDelta: -1, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-5", name: "Team 5 · Quant +2", description: "Small Runner Pattern Quant emphasis.", roleBias: { quant: 2 }, thresholdDelta: -1, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-6", name: "Team 6 · Safety +2", description: "Slightly stricter Fast Safety Gate weighting.", roleBias: { contract: 2 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
-  { id: "team-7", name: "Team 7 · Bear +2", description: "Slightly stronger Dumper Specialist defense.", roleBias: { bear: 2 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
-  { id: "team-8", name: "Team 8 · Portfolio +2", description: "Small Portfolio Strategist sizing emphasis.", roleBias: { portfolio: 2 }, thresholdDelta: 0, sizeMultiplier: 1.05, fileCabinet: false },
-  { id: "team-9", name: "Team 9 · CIO +2", description: "Small Runner CIO conviction emphasis.", roleBias: { cio: 2 }, thresholdDelta: -1, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-10", name: "Team File Cabinet", description: "Uses stored Runner Genome, trajectory, winner/dumper and missed-runner evidence as advisory input.", roleBias: {}, thresholdDelta: 0, sizeMultiplier: 1, fileCabinet: true },
+  { id: "team-2", name: "Team 2 · Launch +4", description: "Aggressive Early Runner Scout selection; 52-point base entry threshold.", roleBias: { launch: 4 }, thresholdDelta: -5, sizeMultiplier: 1, fileCabinet: false },
+  { id: "team-3", name: "Team 3 · Narrative +4", description: "Narrative-led selection; 53-point base entry threshold.", roleBias: { social: 4 }, thresholdDelta: -4, sizeMultiplier: 1, fileCabinet: false },
+  { id: "team-4", name: "Team 4 · Flow +4", description: "Aggressive wallet-flow selection; 52-point base entry threshold.", roleBias: { wallet: 4 }, thresholdDelta: -5, sizeMultiplier: 1, fileCabinet: false },
+  { id: "team-5", name: "Team 5 · Quant +4", description: "Pattern-led selection; 54-point base entry threshold.", roleBias: { quant: 4 }, thresholdDelta: -3, sizeMultiplier: 1, fileCabinet: false },
+  { id: "team-6", name: "Team 6 · Safety +4", description: "Defensive Fast Safety Gate weighting; 58-point base entry threshold.", roleBias: { contract: 4 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
+  { id: "team-7", name: "Team 7 · Bear +4", description: "Defensive Dumper Specialist weighting; 58-point base entry threshold.", roleBias: { bear: 4 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
+  { id: "team-8", name: "Team 8 · Portfolio +4", description: "Portfolio-led selection and sizing; 55-point base entry threshold.", roleBias: { portfolio: 4 }, thresholdDelta: -2, sizeMultiplier: 1.05, fileCabinet: false },
+  { id: "team-9", name: "Team 9 · CIO +4", description: "Runner CIO conviction emphasis; 53-point base entry threshold.", roleBias: { cio: 4 }, thresholdDelta: -4, sizeMultiplier: 1, fileCabinet: false },
+  { id: "team-10", name: "Team File Cabinet", description: "Learned evidence adjusts a 54-point base entry threshold; research remains advisory.", roleBias: {}, thresholdDelta: -3, sizeMultiplier: 1, fileCabinet: true },
 ];
 
 const tournamentGlobal = globalThis as typeof globalThis & {
@@ -56,7 +56,17 @@ function initialState(now = Date.now()): TournamentState {
 async function ensureState() {
   const current = await loadTournamentState();
   if (current) {
-    for (const team of current.teams) team.rejectionCounts ??= {};
+    const variants = new Map(VARIANTS.map((variant) => [variant.id, variant]));
+    for (const team of current.teams) {
+      team.rejectionCounts ??= {};
+      // Qualifier wallets survive deployments, but strategy configuration must
+      // track the current tournament build. Otherwise Redis would preserve the
+      // obsolete near-identical thresholds that caused the no-buy behavior.
+      if (current.phase === "qualifier") {
+        const variant = variants.get(team.id);
+        if (variant) Object.assign(team, variant);
+      }
+    }
     for (const team of current.qualifierArchive ?? []) team.rejectionCounts ??= {};
     return current;
   }
@@ -99,8 +109,6 @@ function eligible(team: TournamentTeam, result: WarRoomResult, scores: Record<To
   if (!result.risk.passed) return reject(team, `Hard safety: ${result.risk.hardBlocks[0] ?? "risk veto"}`);
   if (result.councilProcess.executorVote === "BLOCK") return reject(team, "Executor blocked market feasibility");
   if (team.cashUsd < 25) return reject(team, "Team wallet has less than $25 cash");
-  const riskReaperVeto = result.claudeSurvivalCouncil?.specialists.some((opinion) => opinion.vote === "VETO");
-  if (riskReaperVeto) return reject(team, "Risk Reaper vetoed the opportunity");
   if (team.id === "team-1") return result.decision === "BUY" || reject(team, `Baseline Council finished ${result.decision}`);
 
   // Teams 2-10 synthesize the same locked specialist reads with their own small
