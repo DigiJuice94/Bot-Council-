@@ -1,5 +1,23 @@
 # Bot War Room V3
 
+## Tournament extension (locked V3.6.2 baseline)
+
+This package adds an isolated two-stage Council tournament without changing the V3.6.2 scanner, hard-risk rules, execution rules, main PAPER wallet, Guardian exits, Risk Reaper, or Audit Watch behavior. The only runtime hook passes each already-computed Council result to a separate tournament ledger after the normal decision journal is written.
+
+- Qualifier: Teams 1–9 use deliberately small role/threshold/sizing variations. Team 10 is **Team File Cabinet**, which uses the existing Runner Genome, trajectory, winner/dumper and missed-runner evidence as advisory input only.
+- Fair input: all teams receive the same single Council result and market snapshot. The Council and provider stack are not re-run ten times.
+- Wallet isolation: every team starts with its own $1,000 shadow PAPER wallet. Tournament balances never touch the primary PAPER wallet.
+- Global safety: confirmed zero liquidity, honeypots, Solana freeze authority and positively confirmed unsellability apply identically to every team. UNKNOWN provider coverage remains observational, matching V3.6.2.
+- Draft: after 24 hours, the best, second-best and third-best performer for each of the eight Council roles are drafted into Final Teams 1–3. Each finalist starts a new $1,000 wallet.
+- Final: the drafted teams compete for 24 hours by default. If every finalist ends below $1,000, the experiment is marked failed; otherwise the highest-equity council wins.
+- Efficiency: one compact Redis document stores capped shadow ledgers, one shared opportunity is evaluated once, live marks are deduplicated by token, and only four unique open assets are refreshed per 10-second pass.
+
+The live **TOURNAMENT** tab reports moving rank, equity, realized P/L, active trades, total trades, return, role leaders, File Cabinet evidence, and the final role draft.
+
+Optional controls: `TOURNAMENT_QUALIFIER_HOURS` (default `24`), `TOURNAMENT_FINAL_HOURS` (default `24`), `TOURNAMENT_MAX_OPEN_POSITIONS` (default `12` per team), and `TOURNAMENT_PAPER_FEE_BPS` (default `25`).
+
+See `BASELINE-INTEGRITY.md` for the locked trading-file hashes.
+
 ## V3.6.2 Risk Reaper Immortal + Audit Watch
 
 V3.6.2 keeps the V3.6.1 trading and Audit Watch behavior unchanged, but makes **Risk Reaper a permanent Claude seat**. Its API cost, settled trades, wins/losses, attributed value, and net value are still tracked for accountability, but those metrics can no longer move it to PROBATION or DEAD and can never stop its Claude calls. Any legacy Redis ledger previously stored as DEAD is normalized back to ALIVE at read/write time.

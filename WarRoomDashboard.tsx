@@ -710,6 +710,7 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <nav className="war-room-top-tabs" aria-label="War Room sections">
         <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
+        <button type="button" onClick={() => scrollToSection("tournament")}>TOURNAMENT</button>
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
         <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>

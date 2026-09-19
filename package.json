@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.6.2",
+  "version": "3.6.2-tournament.1",
   "private": true,
   "scripts": {
     "dev": "next dev",

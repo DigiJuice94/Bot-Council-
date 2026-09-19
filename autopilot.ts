@@ -15,6 +15,7 @@ import { auditEntryLiquidity } from "./liquidity-auditor";
 import { applyClaudeSurvivalCouncil, getClaudeSurvivalCouncilStatus } from "./claude-survival-council";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
+import { ensureTournamentRuntime, observeTournamentOpportunity } from "./tournament";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -428,6 +429,9 @@ async function scanOneChain(chain: Chain) {
   else if (result.decision === "WATCH") current.funnel.watches += 1;
   else current.funnel.skips += 1;
   await appendDecisionJournal(result);
+  // Tournament is a shadow ledger only: it consumes the already-computed result
+  // and never feeds back into the locked V3.6.2 scanner, Council or main wallet.
+  await observeTournamentOpportunity(result);
 
   const discussion = buildCouncilDiscussion(result);
   for (const turn of discussion) {
@@ -489,6 +493,7 @@ export async function runAutonomousTick() {
 
 export function ensureAutonomousWarRoom() {
   ensurePositionGuardianLoop();
+  ensureTournamentRuntime();
   const current = state();
   current.running = true;
   current.intervalMs = intervalMs();
