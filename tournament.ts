@@ -34,6 +34,16 @@ const tournamentGlobal = globalThis as typeof globalThis & {
 
 function iso(ms = Date.now()) { return new Date(ms).toISOString(); }
 function roundUsd(value: number) { return Number(value.toFixed(6)); }
+async function acquireTournamentOpportunityLease() {
+  // Parallel lanes can complete together. Wait briefly for the shared ledger
+  // instead of silently dropping the second valid opportunity.
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const release = await acquireRuntimeLease("tournament-state", 45_000);
+    if (release) return release;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return null;
+}
 function emptyRoles(): TournamentTeam["rolePerformance"] {
   return Object.fromEntries(TOURNAMENT_ROLES.map((role) => [role, { role, trades: 0, wins: 0, losses: 0, attributedPnlUsd: 0 }])) as TournamentTeam["rolePerformance"];
 }
@@ -272,7 +282,7 @@ function advanceIfDue(state: TournamentState, now = Date.now()) {
 
 export async function observeTournamentOpportunity(result: WarRoomResult): Promise<boolean> {
   const unsafe = immediateSafetyFailure(result.snapshot) || hasPositiveSellabilityFailure(result.snapshot);
-  const release = await acquireRuntimeLease("tournament-state", 45_000);
+  const release = await acquireTournamentOpportunityLease();
   if (!release) return (await ensureState()).phase !== "complete";
   try {
     const state = await ensureState();

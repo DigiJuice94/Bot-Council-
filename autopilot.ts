@@ -20,6 +20,7 @@ import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, Po
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
+const DEFAULT_SCAN_WORKERS = 3;
 const MAX_CHAT_ROWS = 120;
 const MAX_DECISIONS = 60;
 const MAX_SHADOW_ROWS = 80;
@@ -64,6 +65,7 @@ export type AutopilotStatus = {
   mode: "paper";
   dataMode: "adapter" | "birdeye" | "dexscreener";
   intervalMs: number;
+  scanWorkers: number;
   scanningChains: Chain[];
   chainStats: Record<Chain, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>;
   currentChain: Chain;
@@ -98,6 +100,11 @@ function intervalMs() {
   return Math.max(1_500, Math.min(60_000, Number.isFinite(raw) ? raw : DEFAULT_INTERVAL_MS));
 }
 
+function scanWorkers() {
+  const raw = Number(process.env.WAR_ROOM_SCAN_WORKERS ?? DEFAULT_SCAN_WORKERS);
+  return Math.max(1, Math.min(3, Number.isFinite(raw) ? Math.round(raw) : DEFAULT_SCAN_WORKERS));
+}
+
 function initialFunnel(): DecisionFunnel {
   return { candidates: 0, riskPassed: 0, watches: 0, buySignals: 0, skips: 0, paperBuys: 0, explorationBuys: 0, rejections: {} };
 }
@@ -108,6 +115,7 @@ function initialState(): AutopilotStatus {
     mode: "paper",
     dataMode: liveMarketDataMode(),
     intervalMs: intervalMs(),
+    scanWorkers: scanWorkers(),
     scanningChains: CHAINS,
     chainStats: Object.fromEntries(CHAINS.map((chain) => [chain, { scans: 0, candidates: 0 }])) as Record<Chain, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>,
     currentChain: CHAINS[0],
@@ -380,12 +388,6 @@ async function scanOneChain(chain: Chain) {
   chainStat.scans += 1;
   chainStat.lastScanAt = current.lastScanAt;
 
-  const bankroll = await ensurePaperWalletResearchFunds();
-  if (bankroll.resetPerformed) {
-    addChat("System", `Research bankroll automatically restarted at $${bankroll.wallet.startingCashUsd.toFixed(2)} after reaching zero. Reset #${bankroll.resetMeta.resets}; prior losses remain in the research record.`, "system");
-  }
-  await refreshOneResearchCase(fetchLiveTokenSnapshot);
-  await reviewOneShadowDecision();
   const snapshot = await fetchLiveCandidate(chain);
   if (!snapshot) {
     if (current.scanCount % CHAINS.length === 0) addChat("Launch Scout", `${chain}: no new qualifying real candidate. Provider waterfall is continuing automatically.`, "system");
@@ -474,6 +476,18 @@ async function scanOneChain(chain: Chain) {
   if (!executed) addShadowDecision(result);
 }
 
+async function runScannerMaintenance() {
+  // These tasks are global rather than chain-specific. Run them once per
+  // bounded batch so parallel discovery never duplicates wallet locks or
+  // research maintenance.
+  const bankroll = await ensurePaperWalletResearchFunds();
+  if (bankroll.resetPerformed) {
+    addChat("System", `Research bankroll automatically restarted at $${bankroll.wallet.startingCashUsd.toFixed(2)} after reaching zero. Reset #${bankroll.resetMeta.resets}; prior losses remain in the research record.`, "system");
+  }
+  await refreshOneResearchCase(fetchLiveTokenSnapshot);
+  await reviewOneShadowDecision();
+}
+
 export async function runAutonomousTick() {
   if (globalState.__botWarRoomAutopilotBusyV14) return;
   globalState.__botWarRoomAutopilotBusyV14 = true;
@@ -481,10 +495,14 @@ export async function runAutonomousTick() {
   try {
     releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
     if (!releaseLease) return;
+    await runScannerMaintenance();
     const cursor = globalState.__botWarRoomAutopilotCursorV14 ?? 0;
-    const chain = CHAINS[cursor % CHAINS.length];
-    globalState.__botWarRoomAutopilotCursorV14 = (cursor + 1) % CHAINS.length;
-    await scanOneChain(chain);
+    const workers = scanWorkers();
+    const chains = Array.from({ length: workers }, (_, index) => CHAINS[(cursor + index) % CHAINS.length]);
+    globalState.__botWarRoomAutopilotCursorV14 = (cursor + workers) % CHAINS.length;
+    // Two bounded lanes overlap provider/Council latency without creating an
+    // unbounded worker pool or changing any candidate or safety decision.
+    await Promise.all(chains.map((chain) => scanOneChain(chain)));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const current = state();
@@ -511,6 +529,7 @@ export function ensureAutonomousWarRoom() {
   const current = state();
   current.running = true;
   current.intervalMs = intervalMs();
+  current.scanWorkers = scanWorkers();
   current.dataMode = liveMarketDataMode();
   if (globalState.__botWarRoomAutopilotTimerV14) return;
 

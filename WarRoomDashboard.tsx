@@ -9,6 +9,7 @@ type AutopilotPayload = {
   mode: "paper";
   dataMode: "adapter" | "birdeye" | "dexscreener";
   intervalMs: number;
+  scanWorkers?: number;
   scanningChains: string[];
   chainStats?: Record<string, { scans: number; candidates: number; lastScanAt?: string; lastCandidateAt?: string }>;
   currentChain: string;
@@ -747,7 +748,7 @@ export default function WarRoomDashboard() {
           </button>
         </div>
         {paperResetMessage && <p className="paper-reset-message">{paperResetMessage}</p>}
-        <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 7}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>rotation cadence</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
+        <div className="autonomy-stats"><span><b>{status?.scanningChains?.length ?? 7}</b><small>chains</small></span><span><b>{status ? `${Math.round(status.intervalMs / 1000)}s` : "2s"}</b><small>batch cadence</small></span><span><b>{status?.scanWorkers ?? 3}</b><small>parallel lanes</small></span><span><b>{status?.candidateCount ?? 0}</b><small>real candidates</small></span><span><b>{status?.buyCount ?? 0}</b><small>paper buys</small></span></div>
         <div className="sizing-policy-strip"><span><b>$50+ meaningful training</b><small>If Council approves a BUY or qualified probe, soft sizing warnings cannot shrink it below $50 · only real cash/exposure capacity can delay it</small></span><span className="sizing-live-note">Hard safety vetoes still block · exits/trims may stay smaller</span></div>
         <div className="chain-scan-grid">{(status?.scanningChains ?? ["Solana","Ethereum","Base","BNB Chain","Monad","HyperEVM","Robinhood Chain"]).map((chain) => { const stats = status?.chainStats?.[chain]; const active = status?.currentChain === chain; return <span key={chain} className={active ? "chain-scan active" : "chain-scan"}><i /><b>{chain}</b><small>{stats?.scans ?? 0} scans · {stats?.candidates ?? 0} candidates</small></span>; })}</div>
         <div className="provider-health-row">{(status?.providers ?? []).map((provider) => <span key={provider.name} className={provider.ok ? "provider-ok" : provider.configured ? "provider-warn" : "provider-off"}><i />{provider.name.toUpperCase()} <small>{provider.ok ? "LIVE" : provider.configured ? "WAIT" : "OFF"}</small></span>)}</div>
