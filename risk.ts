@@ -28,9 +28,6 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const unknown = (message: string) => paperCanExploreUnknowns ? warnings.push(`${message}; PAPER mode reduced to exploration sizing`) : hardBlocks.push(message);
 
   if (directLive && q) {
-    // Missing provider evidence may continue to the final async Sellability Gate,
-    // but an explicit negative still hard-blocks here. No PAPER wallet debit can
-    // occur until a reverse route is positively verified at execution time.
     if (!q.sellability) unknown("Sellability verification unavailable from live security provider");
     else check(m.sellable, "Sellability verified", "Sellability check failed");
 

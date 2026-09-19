@@ -771,7 +771,7 @@ export default function WarRoomDashboard() {
         <div className="exit-strategist-live">
           <b>CLAUDE RISK REAPER · {!status ? "CHECKING" : status.claudeSurvivalCouncil?.enabled ? `LIVE · ${status.claudeSurvivalCouncil.model}` : status.claudeSurvivalCouncil?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
           <span>Risk Reaper is the only Claude seat. It can PASS or VETO entries, never upgrade a WATCH, increase size, or override deterministic sellability/security rules.</span>
-          <small>Its API cost and settled value are tracked under a fresh V3.6 ledger. Hard sellability, liquidity, security, stop-loss and execution rules always outrank Claude.</small>
+          <small>Its API cost and settled value are tracked under a fresh Risk Reaper ledger. Hard sellability, liquidity, security, stop-loss and execution rules always outrank Claude.</small>
         </div>
         <div className="claude-survival-grid">
           {(status?.claudeSurvivalCouncil?.scoreboard ?? []).map((seat) => <span key={seat.agentId} className={`claude-survival-seat ${seat.state}`}>

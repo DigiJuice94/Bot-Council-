@@ -72,7 +72,7 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
       url.searchParams.set("amount", amount);
       url.searchParams.set("slippageBps", "5000");
       url.searchParams.set("restrictIntermediateTokens", "false");
-      const headers: Record<string, string> = { Accept: "application/json", "User-Agent": "Bot-War-Room/3.6.0" };
+      const headers: Record<string, string> = { Accept: "application/json", "User-Agent": "Bot-War-Room/3.6.1" };
       if (apiKey && endpoint.includes("api.jup.ag")) headers["x-api-key"] = apiKey;
       const response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(5_000) });
       const text = await response.text();
@@ -80,17 +80,10 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
       try { payload = text ? JSON.parse(text) : null; } catch { /* leave null */ }
 
       if (!response.ok) {
-        if (response.status >= 500 || response.status === 408 || response.status === 429) {
-          lastProviderError = `Jupiter provider returned HTTP ${response.status}.`;
-          continue;
-        }
-        return {
-          status: "fail",
-          provider: "jupiter",
-          checkedAt,
-          routeVerified: true,
-          reason: `Jupiter rejected the token→USDC sell quote (HTTP ${response.status}${payload?.error ? `: ${String(payload.error).slice(0, 120)}` : ""}).`,
-        };
+        // Provider/API errors are coverage failures, not proof that the token is locked.
+        // Audit is observational: UNKNOWN must never become a chain/buy/sell blocker.
+        lastProviderError = `Jupiter provider returned HTTP ${response.status}${payload?.error ? `: ${String(payload.error).slice(0, 120)}` : ""}.`;
+        continue;
       }
 
       const outAmount = finite(payload?.outAmount);
@@ -134,7 +127,7 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
     url.searchParams.set("buyToken", config.stable);
     url.searchParams.set("sellAmount", amount);
     const response = await fetch(url, {
-      headers: { Accept: "application/json", "0x-api-key": apiKey, "0x-version": "v2", "User-Agent": "Bot-War-Room/3.6.0" },
+      headers: { Accept: "application/json", "0x-api-key": apiKey, "0x-version": "v2", "User-Agent": "Bot-War-Room/3.6.1" },
       cache: "no-store",
       signal: AbortSignal.timeout(5_000),
     });
@@ -143,16 +136,8 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
     try { payload = text ? JSON.parse(text) : null; } catch { /* leave null */ }
 
     if (!response.ok) {
-      if (response.status >= 500 || response.status === 408 || response.status === 429) {
-        return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: `0x sell-route verification unavailable (HTTP ${response.status}).` };
-      }
-      return {
-        status: "fail",
-        provider: "zeroex",
-        checkedAt,
-        routeVerified: true,
-        reason: `0x rejected the token→stable sell quote (HTTP ${response.status}${payload?.reason ? `: ${String(payload.reason).slice(0, 120)}` : ""}).`,
-      };
+      // A request/provider error is not positive evidence that capital is locked.
+      return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: `0x sell-route verification unavailable (HTTP ${response.status}${payload?.reason ? `: ${String(payload.reason).slice(0, 120)}` : ""}).` };
     }
     if (payload?.liquidityAvailable === false) {
       return { status: "fail", provider: "zeroex", checkedAt, routeVerified: true, reason: "0x explicitly reports liquidityAvailable=false." };

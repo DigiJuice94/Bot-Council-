@@ -1,14 +1,16 @@
 # Bot War Room V3
 
-## V3.6.0 Risk Reaper + Verified Sellability
+## V3.6.1 Risk Reaper + Audit Watch
 
-V3.6 removes the retired Claude **Alpha Hunter**, **Profit Optimizer**, and **Survival CIO** seats. **Risk Reaper is the only Claude seat left.** It can only PASS or VETO a local BUY/WATCH candidate; it cannot upgrade WATCH to BUY, increase size, control exits, or override deterministic safety. Its survival ledger uses a new V3.6 namespace so the prior scorecard—corrupted by unverified paper profits—does not keep the surviving seat dead on deploy.
+V3.6.1 rolls back the V3.6.0 sellability **trading gate**. The Audit Bot no longer requires a supported reverse-route provider before entry, no longer blocks Monad/HyperEVM/Robinhood Chain, and never turns missing coverage into a trading restriction. Existing scanner, Council, sizing, chain coverage, and normal PAPER buy behavior are preserved.
 
-Sellability is now fail-closed at the money boundary. Immediately before every PAPER buy, the bot performs a reverse sell-route preflight on the approximate position quantity. **PASS with a real executable route is required before any paper-wallet debit.** Solana uses Jupiter token→USDC reverse quotes. Ethereum/Base/BNB use 0x when `ZEROEX_API_KEY` is configured. Chains without a supported reverse-route provider are blocked from new PAPER entries rather than assumed sellable. A pool/liquidity number alone is never treated as proof that capital can exit.
+**Risk Reaper remains the only Claude seat**, as approved. Alpha Hunter, Profit Optimizer, and Survival CIO stay retired. Risk Reaper can PASS or VETO qualifying entry candidates but cannot upgrade WATCH to BUY, increase size, control exits, or override deterministic safety.
 
-Guardian exits are now equally strict. A PAPER trim or full exit is settled only when Audit Bot returns **PASS** with a positive executable quote. The quoted output—not the dashboard mark—is the only amount credited as realized proceeds. **UNKNOWN never creates a sale or profit**; the position remains open/exit-pending with zero new realized proceeds until verification recovers. A hard FAIL is rechecked once; two consecutive hard FAILs move the position to **Unsellable / Locked Capital**, credit no fake proceeds, and count the remaining cost as lost capital.
+The Audit Bot now has one job: detect capital that is actually locked/unsellable. It periodically checks open PAPER positions and also rechecks around a sell attempt. A supported reverse quote or explicit security evidence may return PASS, FAIL, or UNKNOWN. **UNKNOWN is observational only** — unsupported chains, missing provider keys, provider errors, and unavailable route data do not block buying, selling, or any chain.
 
-Paper fill records now persist route-verification metadata (`routeVerified`, provider, and route note) so future accounting can distinguish verified proceeds from modeled marks. Existing historical fills are not rewritten automatically.
+A position is classified as **Unsellable / Locked Capital** only after positive failure evidence is confirmed twice in immediate succession, or when existing live security evidence explicitly confirms a honeypot, zero liquidity, freeze condition, or verified unsellability. No sale proceeds are credited after a confirmed locked-capital classification. Otherwise normal PAPER exits continue exactly as before.
+
+This restores the original objective: catch coins that cannot actually be sold without turning the auditor into another strategy or execution gate.
 
 ## Historical: V3.5.0 Four-Seat Claude Survival Council (retired in V3.6)
 
