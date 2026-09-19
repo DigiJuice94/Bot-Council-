@@ -13,6 +13,7 @@ import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositio
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
 import { getClaudeProfitOptimizerStatus } from "./claude-profit-optimizer";
+import { applyClaudeSurvivalCouncil, getClaudeSurvivalCouncilStatus } from "./claude-survival-council";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
@@ -219,6 +220,7 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   const context = entryContext(result, portfolio);
   context.runnerGenome = result.runnerGenome;
   context.independentCouncil = result.independentCouncil;
+  context.claudeSurvivalCouncil = result.claudeSurvivalCouncil;
   context.initialAllocationPct = portfolio.equityUsd > 0 ? request.notionalUsd / portfolio.equityUsd * 100 : 0;
 
   // Last-mile entry verification: Council decisions can take long enough for a
@@ -400,7 +402,7 @@ async function scanOneChain(chain: Chain) {
     getRunnerGenomeGuidance(snapshot),
   ]);
 
-  const result = await runIndependentCouncil(snapshot, {
+  let result = await runIndependentCouncil(snapshot, {
     mode: "paper",
     regime,
     agentWeights: learning.weights,
@@ -414,6 +416,8 @@ async function scanOneChain(chain: Chain) {
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
   }
+
+  result = await applyClaudeSurvivalCouncil(result, portfolio);
 
   await observeCouncilResult(result);
   current.latestResult = result;
@@ -430,7 +434,16 @@ async function scanOneChain(chain: Chain) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 independent entities aligned after meeting. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
+  if (result.claudeSurvivalCouncil) {
+    for (const opinion of result.claudeSurvivalCouncil.specialists) {
+      addChat(opinion.agentName, `${opinion.vote} · ${opinion.confidence.toFixed(0)}% · ${opinion.reason}`, "council", opinion.formedAt);
+    }
+    if (result.claudeSurvivalCouncil.cioOpinion) {
+      const ai = result.claudeSurvivalCouncil.cioOpinion;
+      addChat(ai.agentName, `${ai.vote} · ${ai.confidence.toFixed(0)}% · ${ai.reason} FINAL ${result.claudeSurvivalCouncil.localDecision} → ${result.claudeSurvivalCouncil.finalDecision}.`, "council", ai.formedAt);
+    }
+  }
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned; Claude Survival Council ${result.claudeSurvivalCouncil ? "completed" : "not summoned"}. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {
@@ -488,7 +501,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3 Local Independent Council started. No OpenAI/ChatGPT API calls. PAPER kill switches OFF. Every fresh candidate becomes a case file; all eight bots file lessons, paper trades continue, and Code Deciphered progress is tracked continuously.`, "system");
+  addChat("System", `V3.5 Local Council + four-seat Claude Survival Council started. No OpenAI/ChatGPT API calls. Claude is summoned only after a hard-risk-passed local BUY/WATCH; PAPER kill switches remain OFF. Every fresh candidate still becomes a case file and Code Deciphered progress continues.`, "system");
 }
 
 export async function getAutopilotStatus() {
@@ -508,6 +521,7 @@ export async function getAutopilotStatus() {
     providers,
     research,
     claudeProfitOptimizer: getClaudeProfitOptimizerStatus(),
+    claudeSurvivalCouncil: await getClaudeSurvivalCouncilStatus(),
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };

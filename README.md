@@ -1,5 +1,15 @@
 # Bot War Room V3
 
+## V3.5.0 Four-Seat Claude Survival Council
+
+V3.5 builds on V3.4 without replacing the fast local Council. Candidates are still discovered and measured locally first. Only PAPER candidates that pass deterministic hard risk and reach local BUY/WATCH summon the Claude layer, keeping obvious junk off the paid path. Three Claude specialists lock independent reads in parallel: **Alpha Hunter** looks for asymmetric early-runner upside, **Risk Reaper** tries to kill weak/distributing setups, and **Profit Optimizer** judges whether the entry has a credible profit-capture path. A fourth seat, **Survival CIO**, sees those locked reads plus the local Council evidence and returns BACK/PASS/VETO. BACK can upgrade a local WATCH to BUY, PASS preserves the local decision, and VETO rejects the entry. Claude can never override hard liquidity, sellability, honeypot/security, stop-loss or execution rules.
+
+The existing V3.4 Profit Optimizer remains active after entry, so the same Profit Optimizer seat participates in the entry meeting and later reviews near-target take profits / soft profitable exits. All four seats share the existing `ANTHROPIC_API_KEY`; separate API keys are not required.
+
+**Make money or lose your seat:** each Claude seat has a persistent Redis-backed scorecard tracking calls, input/output tokens, estimated API cost, settled trades, wins/losses, attributed trade value and net value after API cost. After the configured sample thresholds, an underwater seat moves to PROBATION and then DEAD. A DEAD seat stops receiving paid Claude calls automatically. The local deterministic Council and Guardian remain available if a seat dies or Anthropic fails. Trade-value attribution is intentionally directional rather than a claim of exact counterfactual P/L: BACK owns the realized direction, VETO is rewarded for correctly opposing losses and penalized for opposing winners, and PASS receives small attribution.
+
+The dashboard now exposes all four survival scorecards. Cost is estimated from actual Anthropic input/output token counts using configurable per-million-token prices (`CLAUDE_INPUT_COST_PER_MILLION_USD` and `CLAUDE_OUTPUT_COST_PER_MILLION_USD`), so those values should match the pricing on the Anthropic account/model being used. Defaults are only bookkeeping assumptions and do not change Anthropic billing.
+
 ## V3.4.0 Claude Profit Optimizer
 
 This release adds an optional Claude-powered Profit Optimizer on top of the existing local Quant, Exit Strategist and Position Guardian. Scanning, candidate scoring and the Council remain local and fast. Claude is called only for PAPER positions around profit-management moments, with a per-position review throttle (default 60 seconds) so the 5-second Guardian loop does not turn into an LLM call loop. When a position gets within five percentage points of its next take-profit level, the optimizer can pre-review that TP so a fast move can often use a cached Claude decision instead of waiting at the exact sell trigger.
@@ -70,4 +80,4 @@ Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-ti
 
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 
-The core Council remains local and does not require OpenAI. V3.4 can optionally call Anthropic only for the bounded Claude Profit Optimizer when an Anthropic API key is configured.
+The fast specialist Council remains local and does not require OpenAI. V3.5 uses the configured Anthropic key for the four-seat Claude Survival Council on qualifying BUY/WATCH candidates and for the bounded post-entry Profit Optimizer. No OpenAI/ChatGPT API is required.

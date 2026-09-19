@@ -20,6 +20,22 @@ type AutopilotPayload = {
   paperWallet: PaperWalletSnapshot;
   providers: ProviderHealth[];
   claudeProfitOptimizer?: { configured: boolean; enabled: boolean; model: string; reviewMs: number };
+  claudeSurvivalCouncil?: {
+    configured: boolean;
+    enabled: boolean;
+    model: string;
+    scoreboard: Array<{
+      agentId: "alpha_hunter" | "risk_reaper" | "profit_optimizer" | "survival_cio";
+      calls: number;
+      apiCostUsd: number;
+      settledTrades: number;
+      wins: number;
+      losses: number;
+      attributedValueUsd: number;
+      netValueUsd: number;
+      state: "alive" | "probation" | "dead";
+    }>;
+  };
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   positions: ManagedPosition[];
@@ -754,9 +770,17 @@ export default function WarRoomDashboard() {
         </div>
 
         <div className="exit-strategist-live">
-          <b>EXIT STRATEGIST + CLAUDE PROFIT OPTIMIZER · {!status ? "CHECKING" : status.claudeProfitOptimizer?.enabled ? `CONFIGURED · ${status.claudeProfitOptimizer.model}` : status.claudeProfitOptimizer?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
-          <span>Guardian keeps the hard safety/stop rules · Claude pre-reviews near-target TPs and handles soft profitable strategist exits, never the scanner or hard-exit path.</span>
-          <small>Claude can defer or resize a scheduled profit trim and reconsider only soft profitable exits; liquidity, security and protective exits always stay deterministic.</small>
+          <b>4-SEAT CLAUDE SURVIVAL COUNCIL · {!status ? "CHECKING" : status.claudeSurvivalCouncil?.enabled ? `LIVE · ${status.claudeSurvivalCouncil.model}` : status.claudeSurvivalCouncil?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
+          <span>Alpha Hunter · Risk Reaper · Profit Optimizer · Survival CIO. Each seat must create more settled PAPER value than its estimated API cost or it moves toward PROBATION / DEAD.</span>
+          <small>Hard liquidity, security, stop-loss and execution rules always outrank Claude. Dead seats stop receiving API calls; the local Council remains the fallback.</small>
+        </div>
+        <div className="claude-survival-grid">
+          {(status?.claudeSurvivalCouncil?.scoreboard ?? []).map((seat) => <span key={seat.agentId} className={`claude-survival-seat ${seat.state}`}>
+            <small>{seat.agentId.replaceAll("_", " ").toUpperCase()}</small>
+            <b>{seat.state.toUpperCase()}</b>
+            <em>NET {seat.netValueUsd >= 0 ? "+" : ""}${seat.netValueUsd.toFixed(4)} · COST ${seat.apiCostUsd.toFixed(4)}</em>
+            <i>{seat.settledTrades} settled · {seat.wins}W/{seat.losses}L · {seat.calls} calls</i>
+          </span>)}
         </div>
 
         <div className="portfolio-market-layout">

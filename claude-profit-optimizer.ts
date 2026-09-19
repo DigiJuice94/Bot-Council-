@@ -1,4 +1,5 @@
 import type { ManagedPosition, MarketSnapshot, PortfolioRiskContext, RunnerExitGenomeGuidance } from "./types";
+import { loadClaudeSurvivalLedger, recordClaudeApiSpend } from "./claude-survival-store";
 
 export type ClaudeProfitAction = "HOLD" | "TRIM" | "EXIT";
 
@@ -9,15 +10,25 @@ export type ClaudeProfitReview = {
   reason: string;
   model: string;
   reviewedAt: string;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
 };
 
 type AnthropicMessageResponse = {
   content?: Array<{ type?: string; text?: string }>;
   model?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
   error?: { message?: string };
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+
+function estimateCost(inputTokens: number, outputTokens: number) {
+  const inputPerMillion = Math.max(0, Number(process.env.CLAUDE_INPUT_COST_PER_MILLION_USD ?? 3));
+  const outputPerMillion = Math.max(0, Number(process.env.CLAUDE_OUTPUT_COST_PER_MILLION_USD ?? 15));
+  return Number(((inputTokens / 1_000_000) * inputPerMillion + (outputTokens / 1_000_000) * outputPerMillion).toFixed(8));
+}
 
 function apiKey() {
   return process.env.ANTHROPIC_API_KEY?.trim() || process.env.CLAUDE_API_KEY?.trim() || "";
@@ -93,7 +104,7 @@ function extractJson(text: string): unknown {
   }
 }
 
-function parseReview(raw: unknown, model: string): ClaudeProfitReview {
+function parseReview(raw: unknown, model: string, inputTokens = 0, outputTokens = 0): ClaudeProfitReview {
   if (!raw || typeof raw !== "object") throw new Error("Claude Profit Optimizer response was not an object");
   const row = raw as Record<string, unknown>;
   const action = String(row.action ?? "").toUpperCase();
@@ -101,7 +112,7 @@ function parseReview(raw: unknown, model: string): ClaudeProfitReview {
   const confidence = clamp(Number(row.confidence ?? 50), 0, 100);
   const sellPct = action === "TRIM" ? clamp(Number(row.sellPct ?? 20), 10, 35) : action === "EXIT" ? 100 : 0;
   const reason = String(row.reason ?? "Claude reviewed the live profit-management snapshot.").replace(/\s+/g, " ").trim().slice(0, 360);
-  return { action, confidence: Number(confidence.toFixed(1)), sellPct: Number(sellPct.toFixed(1)), reason, model, reviewedAt: new Date().toISOString() };
+  return { action, confidence: Number(confidence.toFixed(1)), sellPct: Number(sellPct.toFixed(1)), reason, model, reviewedAt: new Date().toISOString(), inputTokens, outputTokens, estimatedCostUsd: estimateCost(inputTokens, outputTokens) };
 }
 
 function promptFor(args: {
@@ -216,7 +227,11 @@ async function callClaude(args: {
     if (!response.ok) throw new Error(payload.error?.message || `Anthropic API HTTP ${response.status}`);
     const text = payload.content?.find((block) => block.type === "text")?.text;
     if (!text) throw new Error("Claude returned no text response");
-    return parseReview(extractJson(text), payload.model || model);
+    const inputTokens = Math.max(0, Number(payload.usage?.input_tokens ?? 0));
+    const outputTokens = Math.max(0, Number(payload.usage?.output_tokens ?? 0));
+    const review = parseReview(extractJson(text), payload.model || model, inputTokens, outputTokens);
+    await recordClaudeApiSpend("profit_optimizer", inputTokens, outputTokens, review.estimatedCostUsd);
+    return review;
   } finally {
     clearTimeout(timeout);
   }
@@ -303,6 +318,9 @@ function applyCachedDecision(position: ManagedPosition): ManagedPosition {
     reason: position.profitOptimizerReason ?? "Recent Claude Profit Optimizer decision remains active.",
     model: position.profitOptimizerModel ?? "claude",
     reviewedAt: position.profitOptimizerReviewedAt,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedCostUsd: 0,
   };
   return applyReview(position, cached);
 }
@@ -315,6 +333,15 @@ export async function applyClaudeProfitOptimizer(args: {
 }): Promise<ManagedPosition> {
   const { position } = args;
   if (!enabled() || position.mode !== "paper" || !optimizerRelevant(position)) return position;
+
+  const survival = await loadClaudeSurvivalLedger("profit_optimizer");
+  if (survival.state === "dead") {
+    return {
+      ...position,
+      profitOptimizerProvider: "claude",
+      profitOptimizerError: "Claude Profit Optimizer seat is DEAD: its settled-trade value failed the survival threshold; deterministic Guardian remains in control.",
+    };
+  }
 
   if (isRecent(position)) return applyCachedDecision(position);
 
