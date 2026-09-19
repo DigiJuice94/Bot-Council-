@@ -64,20 +64,12 @@ function key(agentId: ClaudeSurvivalAgentId) {
   return `${PREFIX}:ledger:${agentId}`;
 }
 
-function thresholds() {
-  const probationTrades = Math.max(3, Number(process.env.CLAUDE_SURVIVAL_PROBATION_TRADES ?? 10));
-  const deathTrades = Math.max(probationTrades + 1, Number(process.env.CLAUDE_SURVIVAL_DEATH_TRADES ?? 20));
-  const minNetUsd = Number(process.env.CLAUDE_SURVIVAL_MIN_NET_USD ?? 0);
-  return { probationTrades, deathTrades, minNetUsd };
-}
-
 function recalc(row: ClaudeSurvivalLedger): ClaudeSurvivalLedger {
-  const { probationTrades, deathTrades, minNetUsd } = thresholds();
+  // V3.6.2: Risk Reaper is a permanent Council seat. Keep performance accounting,
+  // but the ledger can never demote, probate, or kill the agent. This also revives
+  // any legacy Redis row that was previously persisted as PROBATION or DEAD.
   const netValueUsd = row.attributedValueUsd - row.apiCostUsd;
-  let state: ClaudeSurvivalState = "alive";
-  if (row.settledTrades >= deathTrades && netValueUsd < minNetUsd) state = "dead";
-  else if (row.settledTrades >= probationTrades && netValueUsd < minNetUsd) state = "probation";
-  return { ...row, netValueUsd: Number(netValueUsd.toFixed(6)), state, updatedAt: new Date().toISOString() };
+  return { ...row, netValueUsd: Number(netValueUsd.toFixed(6)), state: "alive", updatedAt: new Date().toISOString() };
 }
 
 export async function loadClaudeSurvivalLedger(agentId: ClaudeSurvivalAgentId): Promise<ClaudeSurvivalLedger> {

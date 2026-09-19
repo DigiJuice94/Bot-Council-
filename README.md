@@ -1,5 +1,9 @@
 # Bot War Room V3
 
+## V3.6.2 Risk Reaper Immortal + Audit Watch
+
+V3.6.2 keeps the V3.6.1 trading and Audit Watch behavior unchanged, but makes **Risk Reaper a permanent Claude seat**. Its API cost, settled trades, wins/losses, attributed value, and net value are still tracked for accountability, but those metrics can no longer move it to PROBATION or DEAD and can never stop its Claude calls. Any legacy Redis ledger previously stored as DEAD is normalized back to ALIVE at read/write time.
+
 ## V3.6.1 Risk Reaper + Audit Watch
 
 V3.6.1 rolls back the V3.6.0 sellability **trading gate**. The Audit Bot no longer requires a supported reverse-route provider before entry, no longer blocks Monad/HyperEVM/Robinhood Chain, and never turns missing coverage into a trading restriction. Existing scanner, Council, sizing, chain coverage, and normal PAPER buy behavior are preserved.

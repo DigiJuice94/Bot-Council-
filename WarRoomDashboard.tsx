@@ -771,12 +771,12 @@ export default function WarRoomDashboard() {
         <div className="exit-strategist-live">
           <b>CLAUDE RISK REAPER · {!status ? "CHECKING" : status.claudeSurvivalCouncil?.enabled ? `LIVE · ${status.claudeSurvivalCouncil.model}` : status.claudeSurvivalCouncil?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
           <span>Risk Reaper is the only Claude seat. It can PASS or VETO entries, never upgrade a WATCH, increase size, or override deterministic sellability/security rules.</span>
-          <small>Its API cost and settled value are tracked under a fresh Risk Reaper ledger. Hard sellability, liquidity, security, stop-loss and execution rules always outrank Claude.</small>
+          <small>Its API cost and settled value are tracked for accountability, but Risk Reaper is a permanent seat and can never be killed or disabled by performance. Hard sellability, liquidity, security, stop-loss and execution rules always outrank Claude.</small>
         </div>
         <div className="claude-survival-grid">
           {(status?.claudeSurvivalCouncil?.scoreboard ?? []).map((seat) => <span key={seat.agentId} className={`claude-survival-seat ${seat.state}`}>
             <small>{seat.agentId.replaceAll("_", " ").toUpperCase()}</small>
-            <b>{seat.state.toUpperCase()}</b>
+            <b>{seat.agentId === "risk_reaper" ? "ALIVE · PERMANENT" : seat.state.toUpperCase()}</b>
             <em>NET {seat.netValueUsd >= 0 ? "+" : ""}${seat.netValueUsd.toFixed(4)} · COST ${seat.apiCostUsd.toFixed(4)}</em>
             <i>{seat.settledTrades} settled · {seat.wins}W/{seat.losses}L · {seat.calls} calls</i>
           </span>)}

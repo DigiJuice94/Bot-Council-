@@ -497,7 +497,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3.6.1 Local Council + Claude Risk Reaper started. The three retired Claude seats remain removed. Audit Watch is observational only: UNKNOWN coverage never blocks a buy, sell, or chain; only confirmed locked-capital evidence is classified unsellable.`, "system");
+  addChat("System", `V3.6.2 Local Council + permanent Claude Risk Reaper started. The three retired Claude seats remain removed. Audit Watch is observational only: UNKNOWN coverage never blocks a buy, sell, or chain; only confirmed locked-capital evidence is classified unsellable.`, "system");
 }
 
 export async function getAutopilotStatus() {

@@ -196,7 +196,6 @@ export async function applyClaudeSurvivalCouncil(result: WarRoomResult, portfoli
   if (!result.risk.passed || (result.decision !== "BUY" && result.decision !== "WATCH")) return result;
 
   const ledger = await loadClaudeSurvivalLedger(RISK_REAPER_ID);
-  if (ledger.state === "dead") return result;
 
   const startedAt = new Date().toISOString();
   const sessionId = `RR-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -239,7 +238,7 @@ export async function applyClaudeSurvivalCouncil(result: WarRoomResult, portfoli
     },
     auditTrail: [
       ...result.auditTrail,
-      `CLAUDE RISK REAPER · session ${sessionId} · make-money-or-lose-your-seat accounting active`,
+      `CLAUDE RISK REAPER · session ${sessionId} · permanent seat · performance accounting active`,
       opinion ? `RISK REAPER · ${opinion.vote} · ${opinion.confidence.toFixed(0)}% · ${opinion.reason}` : "RISK REAPER · unavailable; local decision retained",
       `CLAUDE FINAL · ${result.decision} → ${nextDecision}`,
     ],
