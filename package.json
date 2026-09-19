@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -35,14 +35,28 @@ function rawAmount(quantity: number, decimals: number): string | null {
   return integer.toString();
 }
 
+function hardSecurityFailure(snapshot: MarketSnapshot): SellabilityAudit | null {
+  const checkedAt = new Date().toISOString();
+  if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
+    return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Market data reports zero executable liquidity." };
+  }
+  if (snapshot.honeypot) {
+    return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Security evidence flags a honeypot." };
+  }
+  if (snapshot.dataProvenance?.quality?.sellability && snapshot.sellable === false) {
+    return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Verified security evidence explicitly reports the token as unsellable." };
+  }
+  return null;
+}
+
 async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise<SellabilityAudit> {
   const checkedAt = new Date().toISOString();
   const decimals = snapshot.tokenDecimals;
   if (!Number.isInteger(decimals)) {
-    return { status: "unknown", provider: "jupiter", checkedAt, routeVerified: false, reason: "Audit Bot could not determine token decimals for a reverse Jupiter quote." };
+    return { status: "unknown", provider: "jupiter", checkedAt, routeVerified: false, reason: "Sellability verifier could not determine token decimals for a reverse Jupiter quote." };
   }
   const amount = rawAmount(quantity, Number(decimals));
-  if (!amount) return { status: "unknown", provider: "jupiter", checkedAt, routeVerified: false, reason: "Audit Bot could not construct the remaining token amount for a reverse Jupiter quote." };
+  if (!amount) return { status: "unknown", provider: "jupiter", checkedAt, routeVerified: false, reason: "Sellability verifier could not construct the token amount for a reverse Jupiter quote." };
 
   const apiKey = process.env.JUPITER_API_KEY;
   const endpoints = apiKey
@@ -58,7 +72,7 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
       url.searchParams.set("amount", amount);
       url.searchParams.set("slippageBps", "5000");
       url.searchParams.set("restrictIntermediateTokens", "false");
-      const headers: Record<string, string> = { Accept: "application/json", "User-Agent": "Bot-War-Room/3.5.1" };
+      const headers: Record<string, string> = { Accept: "application/json", "User-Agent": "Bot-War-Room/3.6.0" };
       if (apiKey && endpoint.includes("api.jup.ag")) headers["x-api-key"] = apiKey;
       const response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(5_000) });
       const text = await response.text();
@@ -75,7 +89,7 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
           provider: "jupiter",
           checkedAt,
           routeVerified: true,
-          reason: `Jupiter rejected the actual token→USDC sell quote (HTTP ${response.status}${payload?.error ? `: ${String(payload.error).slice(0, 120)}` : ""}).`,
+          reason: `Jupiter rejected the token→USDC sell quote (HTTP ${response.status}${payload?.error ? `: ${String(payload.error).slice(0, 120)}` : ""}).`,
         };
       }
 
@@ -83,7 +97,7 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
       const routePlan = Array.isArray(payload?.routePlan) ? payload.routePlan : [];
       const impact = finite(payload?.priceImpactPct);
       if (!outAmount || outAmount <= 0 || routePlan.length === 0) {
-        return { status: "fail", provider: "jupiter", checkedAt, routeVerified: true, reason: "Jupiter returned no executable token→USDC sell route for the remaining position." };
+        return { status: "fail", provider: "jupiter", checkedAt, routeVerified: true, reason: "Jupiter returned no executable token→USDC sell route." };
       }
       return {
         status: "pass",
@@ -92,7 +106,7 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
         routeVerified: true,
         expectedOutUsd: outAmount / 1_000_000,
         priceImpactPct: impact,
-        reason: "Jupiter confirmed an executable reverse sell route for the remaining position.",
+        reason: "Jupiter confirmed an executable reverse sell route.",
       };
     } catch (error) {
       lastProviderError = error instanceof Error ? error.message : String(error);
@@ -105,13 +119,13 @@ async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise
 async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<SellabilityAudit> {
   const checkedAt = new Date().toISOString();
   const config = EVM_CONFIG[snapshot.chain];
-  if (!config) return { status: "unknown", provider: "unsupported", checkedAt, routeVerified: false, reason: `Audit Bot has no reverse-route provider configured for ${snapshot.chain}.` };
+  if (!config) return { status: "unknown", provider: "unsupported", checkedAt, routeVerified: false, reason: `No executable reverse-route provider is configured for ${snapshot.chain}.` };
   const apiKey = process.env.ZEROEX_API_KEY;
-  if (!apiKey) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "ZEROEX_API_KEY is not configured, so Audit Bot cannot independently prove an EVM sell route." };
+  if (!apiKey) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "ZEROEX_API_KEY is not configured, so the bot cannot prove an executable EVM sell route." };
   const decimals = snapshot.tokenDecimals;
-  if (!Number.isInteger(decimals)) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Audit Bot could not determine token decimals for the 0x reverse quote." };
+  if (!Number.isInteger(decimals)) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Sellability verifier could not determine token decimals for the 0x reverse quote." };
   const amount = rawAmount(quantity, Number(decimals));
-  if (!amount) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Audit Bot could not construct the remaining token amount for the 0x reverse quote." };
+  if (!amount) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Sellability verifier could not construct the token amount for the 0x reverse quote." };
 
   try {
     const url = new URL("https://api.0x.org/swap/allowance-holder/price");
@@ -120,7 +134,7 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
     url.searchParams.set("buyToken", config.stable);
     url.searchParams.set("sellAmount", amount);
     const response = await fetch(url, {
-      headers: { Accept: "application/json", "0x-api-key": apiKey, "0x-version": "v2", "User-Agent": "Bot-War-Room/3.5.1" },
+      headers: { Accept: "application/json", "0x-api-key": apiKey, "0x-version": "v2", "User-Agent": "Bot-War-Room/3.6.0" },
       cache: "no-store",
       signal: AbortSignal.timeout(5_000),
     });
@@ -137,15 +151,15 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
         provider: "zeroex",
         checkedAt,
         routeVerified: true,
-        reason: `0x rejected the actual token→stable sell quote (HTTP ${response.status}${payload?.reason ? `: ${String(payload.reason).slice(0, 120)}` : ""}).`,
+        reason: `0x rejected the token→stable sell quote (HTTP ${response.status}${payload?.reason ? `: ${String(payload.reason).slice(0, 120)}` : ""}).`,
       };
     }
     if (payload?.liquidityAvailable === false) {
-      return { status: "fail", provider: "zeroex", checkedAt, routeVerified: true, reason: "0x explicitly reports liquidityAvailable=false for the remaining position." };
+      return { status: "fail", provider: "zeroex", checkedAt, routeVerified: true, reason: "0x explicitly reports liquidityAvailable=false." };
     }
     const buyAmount = finite(payload?.buyAmount);
     if (!buyAmount || buyAmount <= 0) {
-      return { status: "fail", provider: "zeroex", checkedAt, routeVerified: true, reason: "0x returned no positive output for the remaining position." };
+      return { status: "fail", provider: "zeroex", checkedAt, routeVerified: true, reason: "0x returned no positive output for the sell quote." };
     }
     const expectedOutUsd = buyAmount / 10 ** config.stableDecimals;
     const markedUsd = Math.max(0, quantity * snapshot.price);
@@ -157,25 +171,28 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
       routeVerified: true,
       expectedOutUsd,
       priceImpactPct: impliedImpact,
-      reason: "0x confirmed an executable reverse sell route for the remaining position.",
+      reason: "0x confirmed an executable reverse sell route.",
     };
   } catch (error) {
     return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: `0x sell-route verification unavailable: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
-export async function auditPositionSellability(position: ManagedPosition, snapshot: MarketSnapshot): Promise<SellabilityAudit> {
-  const checkedAt = new Date().toISOString();
-  const quantity = Math.max(0, position.remainingQuantity);
-  if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
-    return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Market data reports zero executable liquidity." };
-  }
-  if (snapshot.honeypot) return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Security evidence flags a honeypot." };
-  if (snapshot.sellable === false && snapshot.dataProvenance?.quality?.sellability) {
-    return { status: "fail", provider: "security", checkedAt, routeVerified: true, reason: "Verified security evidence explicitly reports the token as unsellable." };
-  }
+export async function auditSellQuantity(snapshot: MarketSnapshot, quantity: number): Promise<SellabilityAudit> {
+  const hard = hardSecurityFailure(snapshot);
+  if (hard) return hard;
   if (!Number.isFinite(quantity) || quantity <= 0) {
-    return { status: "unknown", provider: "security", checkedAt, routeVerified: false, reason: "Remaining position quantity is invalid." };
+    return { status: "unknown", provider: "security", checkedAt: new Date().toISOString(), routeVerified: false, reason: "Token quantity is invalid for sell verification." };
   }
   return snapshot.chain === "Solana" ? auditJupiter(snapshot, quantity) : auditZeroEx(snapshot, quantity);
+}
+
+export async function auditEntrySellability(snapshot: MarketSnapshot, notionalUsd: number): Promise<SellabilityAudit> {
+  const quantity = notionalUsd / Math.max(snapshot.price, 1e-12);
+  return auditSellQuantity(snapshot, quantity);
+}
+
+export async function auditPositionSellability(position: ManagedPosition, snapshot: MarketSnapshot, quantityOverride?: number): Promise<SellabilityAudit> {
+  const quantity = quantityOverride ?? Math.max(0, position.remainingQuantity);
+  return auditSellQuantity(snapshot, quantity);
 }

@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 import type { ClaudeSurvivalAgentId, ClaudeSurvivalCouncilTrace, ClaudeSurvivalOpinion, ManagedPosition } from "./types";
 
-const PREFIX = "bot-war-room:claude-survival:v350";
+const PREFIX = "bot-war-room:claude-survival:v360-risk-reaper";
 const OUTCOME_SET_KEY = `${PREFIX}:settled-positions`;
 
 export type ClaudeSurvivalState = "alive" | "probation" | "dead";
@@ -130,14 +130,15 @@ async function markSettled(positionId: string) {
 }
 
 function allOpinions(trace: ClaudeSurvivalCouncilTrace) {
-  return [...trace.specialists, ...(trace.cioOpinion ? [trace.cioOpinion] : [])];
+  // V3.6 only scores the surviving Risk Reaper seat. Legacy traces may still
+  // contain retired seats, but they no longer receive calls or outcome credit.
+  return trace.specialists.filter((opinion) => opinion.agentId === "risk_reaper");
 }
 
 function attributedValue(opinion: ClaudeSurvivalOpinion, realizedPnlUsd: number) {
   // Directional attribution, not a claim of exact counterfactual P/L.
-  // BACK owns the trade direction, VETO earns credit for correctly opposing losses
-  // and is penalized for opposing winners, PASS receives only a small attribution.
-  if (opinion.vote === "BACK") return realizedPnlUsd;
+  // VETO earns credit for correctly opposing losses and is penalized for opposing
+  // winners. PASS receives only a small attribution because it preserved the local call.
   if (opinion.vote === "VETO") return -realizedPnlUsd;
   return realizedPnlUsd * 0.15;
 }
@@ -163,6 +164,5 @@ export async function recordClaudeSurvivalOutcome(position: ManagedPosition) {
 }
 
 export async function getClaudeSurvivalScoreboard() {
-  const ids: ClaudeSurvivalAgentId[] = ["alpha_hunter", "risk_reaper", "profit_optimizer", "survival_cio"];
-  return Promise.all(ids.map(loadClaudeSurvivalLedger));
+  return [await loadClaudeSurvivalLedger("risk_reaper")];
 }

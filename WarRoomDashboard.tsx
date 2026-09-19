@@ -19,13 +19,12 @@ type AutopilotPayload = {
   buyCount: number;
   paperWallet: PaperWalletSnapshot;
   providers: ProviderHealth[];
-  claudeProfitOptimizer?: { configured: boolean; enabled: boolean; model: string; reviewMs: number };
   claudeSurvivalCouncil?: {
     configured: boolean;
     enabled: boolean;
     model: string;
     scoreboard: Array<{
-      agentId: "alpha_hunter" | "risk_reaper" | "profit_optimizer" | "survival_cio";
+      agentId: "risk_reaper";
       calls: number;
       apiCostUsd: number;
       settledTrades: number;
@@ -770,9 +769,9 @@ export default function WarRoomDashboard() {
         </div>
 
         <div className="exit-strategist-live">
-          <b>4-SEAT CLAUDE SURVIVAL COUNCIL · {!status ? "CHECKING" : status.claudeSurvivalCouncil?.enabled ? `LIVE · ${status.claudeSurvivalCouncil.model}` : status.claudeSurvivalCouncil?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
-          <span>Alpha Hunter · Risk Reaper · Profit Optimizer · Survival CIO. Each seat must create more settled PAPER value than its estimated API cost or it moves toward PROBATION / DEAD.</span>
-          <small>Hard liquidity, security, stop-loss and execution rules always outrank Claude. Dead seats stop receiving API calls; the local Council remains the fallback.</small>
+          <b>CLAUDE RISK REAPER · {!status ? "CHECKING" : status.claudeSurvivalCouncil?.enabled ? `LIVE · ${status.claudeSurvivalCouncil.model}` : status.claudeSurvivalCouncil?.configured ? "DISABLED" : "OFF · NO KEY"}</b>
+          <span>Risk Reaper is the only Claude seat. It can PASS or VETO entries, never upgrade a WATCH, increase size, or override deterministic sellability/security rules.</span>
+          <small>Its API cost and settled value are tracked under a fresh V3.6 ledger. Hard sellability, liquidity, security, stop-loss and execution rules always outrank Claude.</small>
         </div>
         <div className="claude-survival-grid">
           {(status?.claudeSurvivalCouncil?.scoreboard ?? []).map((seat) => <span key={seat.agentId} className={`claude-survival-seat ${seat.state}`}>
@@ -870,8 +869,6 @@ export default function WarRoomDashboard() {
               <div className="active-trade-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em className={`status-${position.status}`}>{position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></div>
               <div className="active-trade-values"><span><small>MARK</small><b>{price(position.markPrice)}</b></span><span><small>VALUE</small><b>${(Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0)).toFixed(2)}</b></span><span><small>P/L</small><b className={pnlUsd >= 0 ? "positive" : "negative"}>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</b></span></div>
               <small className="active-trade-meta">{position.chain} · entry {price(position.entryPrice)} · {ago(position.openedAt)}</small>
-              {position.profitOptimizerProvider === "claude" && position.profitOptimizerReviewedAt && <small className="active-trade-reason" title={position.profitOptimizerReason}>CLAUDE PROFIT OPTIMIZER · {position.profitOptimizerAction ?? "REVIEW"} {position.profitOptimizerConfidence ? `${position.profitOptimizerConfidence.toFixed(0)}/100` : ""} · {position.profitOptimizerReason || "reviewed"}</small>}
-              {position.profitOptimizerError && <small className="active-trade-reason" title={position.profitOptimizerError}>CLAUDE OPTIMIZER FALLBACK · local Guardian remains in control</small>}
               {position.status === "exit_pending" && <small className="active-trade-reason" title={position.lastReason}>{position.lastReason}</small>}
             </article>;
           }) : <div className="empty-row">No active PAPER trades. New Council-approved entries will appear here.</div>}
@@ -900,7 +897,6 @@ export default function WarRoomDashboard() {
               </div>
               <div className="moon-bag-total"><span>Total Trade P/L</span><b className={totalPnl >= 0 ? "positive" : "negative"}>{totalPnl >= 0 ? "+" : "-"}${Math.abs(totalPnl).toFixed(2)}</b></div>
               <small className="active-trade-meta">{position.chain} · {position.takenProfitLabels.join(" · ") || "partial profits banked"} · {ago(position.openedAt)}</small>
-              {position.profitOptimizerProvider === "claude" && position.profitOptimizerReviewedAt && <small className="active-trade-reason" title={position.profitOptimizerReason}>CLAUDE PROFIT OPTIMIZER · {position.profitOptimizerAction ?? "REVIEW"} {position.profitOptimizerConfidence ? `${position.profitOptimizerConfidence.toFixed(0)}/100` : ""} · {position.profitOptimizerReason || "reviewed"}</small>}
             </article>;
           }) : <div className="empty-row">No Moon Bags yet. A position moves here automatically as soon as a partial-profit sell is confirmed.</div>}
         </div>

@@ -7,7 +7,6 @@ import { effectiveGuardianControls, confirmationScore, determineWinnerState, max
 import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
-import { applyClaudeProfitOptimizer } from "./claude-profit-optimizer";
 import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance } from "./runner-research";
 import { auditPositionSellability, type SellabilityAudit } from "./sellability-auditor";
@@ -50,21 +49,14 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     peakPnlPct: safe(position.peakPnlPct, position.maxFavorableExcursionPct),
     exitStrategistScore: safe(position.exitStrategistScore),
     exitStrategistReason: position.exitStrategistReason ?? "",
-    profitOptimizerProvider: position.profitOptimizerProvider,
-    profitOptimizerModel: position.profitOptimizerModel,
-    profitOptimizerAction: position.profitOptimizerAction,
-    profitOptimizerConfidence: safe(position.profitOptimizerConfidence),
-    profitOptimizerSellPct: safe(position.profitOptimizerSellPct),
-    profitOptimizerReason: position.profitOptimizerReason ?? "",
-    profitOptimizerContextKey: position.profitOptimizerContextKey,
-    profitOptimizerReviewedAt: position.profitOptimizerReviewedAt,
-    profitOptimizerError: position.profitOptimizerError,
     sellAuditStatus: position.sellAuditStatus,
     sellAuditProvider: position.sellAuditProvider,
     sellAuditCheckedAt: position.sellAuditCheckedAt,
     sellAuditReason: position.sellAuditReason,
     sellAuditPriceImpactPct: safe(position.sellAuditPriceImpactPct),
     sellAuditExpectedOutUsd: safe(position.sellAuditExpectedOutUsd),
+    sellAuditConsecutiveFailures: Math.max(0, Math.round(safe(position.sellAuditConsecutiveFailures))),
+    sellAuditConsecutiveUnknowns: Math.max(0, Math.round(safe(position.sellAuditConsecutiveUnknowns))),
   };
 }
 
@@ -75,7 +67,7 @@ function markToMarketPnlPct(position: ManagedPosition, mark: number) {
   return (totalValue - position.entryNotionalUsd) / position.entryNotionalUsd * 100;
 }
 
-function paperRequest(position: ManagedPosition, side: "BUY" | "SELL", notionalUsd: number, suffix: string): ExecutionRequest {
+function paperRequest(position: ManagedPosition, side: "BUY", notionalUsd: number, suffix: string): ExecutionRequest {
   return {
     mode: "paper",
     chain: position.chain,
@@ -449,14 +441,36 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
   };
 }
 
-async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel, sellPctOverride?: number): Promise<ManagedPosition> {
-  const effectiveSellPct = Number.isFinite(sellPctOverride) && Number(sellPctOverride) > 0
-    ? Math.max(10, Math.min(35, Number(sellPctOverride)))
-    : level.sellPct;
+function auditedSellFill(position: ManagedPosition, snapshot: MarketSnapshot, quantity: number, audit: SellabilityAudit, suffix: string): PaperFill {
+  if (audit.status !== "pass" || !audit.routeVerified || !Number.isFinite(audit.expectedOutUsd) || Number(audit.expectedOutUsd) <= 0) {
+    throw new Error(`Refusing PAPER ${suffix}: no verified executable sell quote.`);
+  }
+  const expectedOutUsd = Number(audit.expectedOutUsd);
+  const markedUsd = Math.max(0, quantity * snapshot.price);
+  const slippageBps = markedUsd > 0 ? Math.max(0, Math.min(9_999, Math.round((1 - expectedOutUsd / markedUsd) * 10_000))) : 0;
+  return {
+    id: `PFV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    chain: position.chain,
+    symbol: position.symbol,
+    side: "SELL",
+    requestedUsd: Number(markedUsd.toFixed(6)),
+    filledUsd: Number(expectedOutUsd.toFixed(6)),
+    fillPrice: Number((expectedOutUsd / Math.max(quantity, 1e-18)).toPrecision(12)),
+    slippageBps,
+    feeUsd: 0,
+    routeVerified: true,
+    routeProvider: audit.provider,
+    routeNote: `VERIFIED PAPER SELL: ${audit.reason}`,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel, audit: SellabilityAudit): Promise<ManagedPosition> {
+  const effectiveSellPct = level.sellPct;
   const originalQtyTarget = position.quantity * (effectiveSellPct / 100);
   const sellQty = Math.min(position.remainingQuantity, originalQtyTarget);
   if (sellQty <= 0) return position;
-  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot);
+  const fill = auditedSellFill(position, snapshot, sellQty, audit, `TRIM ${level.label}`);
   const cost = sellQty * position.entryPrice;
   const remainingQuantity = Math.max(0, position.remainingQuantity - sellQty);
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
@@ -497,16 +511,16 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
     pendingScaleLabel: undefined,
     updatedAt: new Date().toISOString(),
     lastAction: "TRIM",
-    lastReason: `${level.label} filled: sold ${effectiveSellPct.toFixed(1)}% of scaled size @ ${fill.fillPrice}${sellPctOverride ? " under Claude Profit Optimizer sizing" : ""}. ${position.exitStrategy.moonbagPct ?? 0}% target moonbag remains protected by adaptive Guardian rules.`,
+    lastReason: `${level.label} VERIFIED SELL: sold ${effectiveSellPct.toFixed(1)}% of scaled size @ ${fill.fillPrice} via ${audit.provider}. Only the quoted $${fill.filledUsd.toFixed(2)} is credited as realized proceeds.`,
     profitCapturePct: Number(capture.toFixed(2)),
     status: remainingQuantity <= position.quantity * 0.001 ? "closed" : "open",
   };
 }
 
-async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapshot): Promise<ManagedPosition> {
+async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapshot, audit: SellabilityAudit): Promise<ManagedPosition> {
   if (position.remainingQuantity <= 0) return { ...position, status: "closed" };
   const sellQty = position.remainingQuantity;
-  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, "EXIT"), snapshot);
+  const fill = auditedSellFill(position, snapshot, sellQty, audit, "EXIT");
   const cost = sellQty * position.entryPrice;
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
   const realizedCostUsd = position.realizedCostUsd + cost;
@@ -521,7 +535,7 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
     action: "EXIT",
     quantity: sellQty,
     remainingQuantityAfter: 0,
-    markPriceAfter: snapshot.price,
+    markPriceAfter: fill.fillPrice,
     entryNotionalAfterUsd: position.entryNotionalUsd,
     realizedCostAfterUsd: realizedCostUsd,
     positionRealizedPnlAfterUsd: realizedPnlUsd,
@@ -532,6 +546,7 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
     status: "closed",
     remainingQuantity: 0,
     remainingNotionalUsd: 0,
+    markPrice: fill.fillPrice,
     realizedProceedsUsd,
     realizedCostUsd,
     realizedPnlUsd,
@@ -541,7 +556,7 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
     updatedAt: new Date().toISOString(),
     lastAction: "EXIT",
     pendingScaleLabel: undefined,
-    lastReason: `${position.lastReason} Paper exit filled ${fill.filledUsd.toFixed(2)} USD @ ${fill.fillPrice}. Final return ${realizedReturnPct.toFixed(2)}%.`,
+    lastReason: `${position.lastReason} VERIFIED PAPER EXIT filled $${fill.filledUsd.toFixed(2)} @ ${fill.fillPrice} via ${audit.provider}. Final return ${realizedReturnPct.toFixed(2)}%.`,
   };
 }
 
@@ -569,7 +584,7 @@ function markUnsellable(position: ManagedPosition, snapshot: MarketSnapshot, rea
   };
 }
 
-function applySellAudit(position: ManagedPosition, audit: SellabilityAudit, failures: number): ManagedPosition {
+function applySellAudit(position: ManagedPosition, audit: SellabilityAudit, failures: number, unknowns: number): ManagedPosition {
   return {
     ...position,
     sellAuditStatus: audit.status,
@@ -579,14 +594,17 @@ function applySellAudit(position: ManagedPosition, audit: SellabilityAudit, fail
     sellAuditPriceImpactPct: audit.priceImpactPct,
     sellAuditExpectedOutUsd: audit.expectedOutUsd,
     sellAuditConsecutiveFailures: failures,
+    sellAuditConsecutiveUnknowns: unknowns,
   };
 }
 
-async function verifySellAttempt(position: ManagedPosition, snapshot: MarketSnapshot) {
-  const audit = await auditPositionSellability(position, snapshot);
+async function verifySellAttempt(position: ManagedPosition, snapshot: MarketSnapshot, quantityOverride?: number) {
+  const audit = await auditPositionSellability(position, snapshot, quantityOverride);
   const previousFailures = position.sellAuditConsecutiveFailures ?? 0;
+  const previousUnknowns = position.sellAuditConsecutiveUnknowns ?? 0;
   const failures = audit.status === "fail" ? previousFailures + 1 : 0;
-  return { audit, position: applySellAudit(position, audit, failures), failures };
+  const unknowns = audit.status === "unknown" ? previousUnknowns + 1 : 0;
+  return { audit, position: applySellAudit(position, audit, failures, unknowns), failures, unknowns };
 }
 
 const guardianGlobal = globalThis as typeof globalThis & {
@@ -629,7 +647,6 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           // wants to SELL so PAPER accounting cannot invent proceeds for locked capital.
           if (next.status !== "exit_pending") {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
-            next = await applyClaudeProfitOptimizer({ position: next, snapshot, portfolio, exitGenome });
           }
 
           if (next.mode === "paper") {
@@ -638,45 +655,54 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
             } else if (next.lastAction === "TRIM") {
               const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
               if (level) {
-                const verified = await verifySellAttempt(next, snapshot);
+                const sellQty = Math.min(next.remainingQuantity, next.quantity * (level.sellPct / 100));
+                const verified = await verifySellAttempt(next, snapshot, sellQty);
                 next = verified.position;
                 if (verified.audit.status === "fail" && verified.failures >= 2) {
                   next = markUnsellable(next, snapshot, `Audit Bot confirmed locked capital on two consecutive sell checks. ${verified.audit.reason}`);
                 } else if (verified.audit.status === "fail") {
-                  // A single hard failure gets one fast recheck before we declare capital locked.
-                  // This is the only case where Audit Bot may briefly delay a paper sell.
                   next = {
                     ...next,
                     status: "open",
                     lastAction: "HOLD",
                     updatedAt: new Date().toISOString(),
-                    lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} Guardian will recheck on the next cycle before classifying locked capital.`,
+                    lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} No PAPER proceeds were credited. Guardian will recheck before classifying locked capital.`,
+                  };
+                } else if (verified.audit.status === "unknown") {
+                  next = {
+                    ...next,
+                    status: "open",
+                    lastAction: "HOLD",
+                    updatedAt: new Date().toISOString(),
+                    lastReason: `SELL VERIFICATION UNKNOWN ${verified.unknowns}x: ${verified.audit.reason} Profit is NOT realized until an executable sell route is verified.`,
                   };
                 } else {
-                  // PASS and UNKNOWN are observational only. UNKNOWN must never freeze a paper exit
-                  // just because a quote provider/key/chain is unavailable.
-                  next = await executeTrim(next, snapshot, level, next.profitOptimizerAction === "HOLD" ? undefined : next.profitOptimizerSellPct);
+                  next = await executeTrim(next, snapshot, level, verified.audit);
                 }
               }
             } else if ((next.status === "exit_pending" || next.lastAction === "EXIT") && next.remainingQuantity > 0) {
-              const verified = await verifySellAttempt(next, snapshot);
+              const verified = await verifySellAttempt(next, snapshot, next.remainingQuantity);
               next = verified.position;
               if (verified.audit.status === "fail" && verified.failures >= 2) {
                 next = markUnsellable(next, snapshot, `Audit Bot confirmed locked capital on two consecutive sell checks. ${verified.audit.reason}`);
               } else if (verified.audit.status === "fail") {
-                // Require one confirmation before calling capital locked, but do not allow an
-                // indefinite pending state: the next Guardian cycle will re-audit immediately.
                 next = {
                   ...next,
                   status: "exit_pending",
                   lastAction: "EXIT",
                   updatedAt: new Date().toISOString(),
-                  lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} Guardian will recheck on the next cycle before classifying locked capital.`,
+                  lastReason: `AUDIT LOCK CHECK 1/2: ${verified.audit.reason} No PAPER proceeds were credited. Guardian will recheck on the next cycle.`,
+                };
+              } else if (verified.audit.status === "unknown") {
+                next = {
+                  ...next,
+                  status: "exit_pending",
+                  lastAction: "EXIT",
+                  updatedAt: new Date().toISOString(),
+                  lastReason: `SELL VERIFICATION UNKNOWN ${verified.unknowns}x: ${verified.audit.reason} Position stays pending and ZERO realized proceeds are booked until a route is verified.`,
                 };
               } else {
-                // PASS or UNKNOWN: normal paper accounting closes the trade. Audit Bot records
-                // what it observed but does not gate Guardian/Claude sell decisions.
-                next = await executeFullExit(next, snapshot);
+                next = await executeFullExit(next, snapshot, verified.audit);
               }
             }
           }

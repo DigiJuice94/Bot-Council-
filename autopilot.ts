@@ -12,7 +12,7 @@ import { getProviderHealth } from "./provider-health";
 import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
-import { getClaudeProfitOptimizerStatus } from "./claude-profit-optimizer";
+import { auditEntrySellability } from "./sellability-auditor";
 import { applyClaudeSurvivalCouncil, getClaudeSurvivalCouncilStatus } from "./claude-survival-council";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
@@ -172,10 +172,15 @@ function explicitSecurityFailure(result: WarRoomResult) {
 }
 
 async function eligibilityWithPaperUnknownOverride(result: WarRoomResult, request: ExecutionRequest, context: PositionEntryContext) {
+  const q = result.snapshot.dataProvenance?.quality;
+  // Sellability is no longer eligible for the PAPER exploration override. A
+  // candidate must have verified security sellability before it reaches execution.
+  if (!q?.sellability || !result.snapshot.sellable) {
+    return { allowed: false, isReentry: false, reentryCount: 0, reason: "Entry blocked: sellability is not positively verified." };
+  }
   const standard = await assessPaperEntryEligibility({ request, snapshot: result.snapshot, entryContext: context });
   if (standard.allowed) return standard;
-  const q = result.snapshot.dataProvenance?.quality;
-  const missingCriticalEvidence = Boolean(q && (!q.sellability || !q.honeypot || (result.snapshot.chainFamily === "solana" && !q.authorities)));
+  const missingCriticalEvidence = Boolean(q && (!q.honeypot || (result.snapshot.chainFamily === "solana" && !q.authorities)));
   const explicitFailure = explicitSecurityFailure(result);
   if (!missingCriticalEvidence || explicitFailure || !standard.reason.includes("deterministic contract/security conditions")) return standard;
 
@@ -251,6 +256,28 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
     executionSnapshot.dataProvenance.notes = [...(executionSnapshot.dataProvenance.notes ?? []), `Liquidity Auditor: ${liquidityAudit.reason}. Pool data does not prove a token can be sold.`];
   }
   addChat("Liquidity Auditor", `$${result.snapshot.symbol}: ${liquidityAudit.reason}. Entry liquidity check passed.`, "execution");
+
+  // Final sellability preflight: before PAPER spends even one dollar, prove that
+  // the approximate position size has a real reverse route. This is intentionally
+  // stricter than a pool/liquidity check; liquidity alone does not prove capital
+  // can come back out. UNKNOWN fails closed.
+  const sellabilityAudit = await auditEntrySellability(executionSnapshot, request.notionalUsd);
+  if (sellabilityAudit.status !== "pass" || !sellabilityAudit.routeVerified || !sellabilityAudit.expectedOutUsd || sellabilityAudit.expectedOutUsd <= 0) {
+    const reason = `Sellability Gate blocked entry: ${sellabilityAudit.status.toUpperCase()} via ${sellabilityAudit.provider}. ${sellabilityAudit.reason} No PAPER buy or wallet debit was recorded.`;
+    recordRejection(reason);
+    addChat("Sellability Gate", `$${result.snapshot.symbol}: ${reason}`, "execution");
+    return false;
+  }
+  // A real reverse route is stronger sellability evidence than a missing boolean
+  // from a security metadata provider. Promote the execution snapshot only after
+  // the route has actually been verified.
+  executionSnapshot.sellable = true;
+  if (executionSnapshot.dataProvenance) {
+    executionSnapshot.dataProvenance.quality.sellability = true;
+    executionSnapshot.dataProvenance.notes = [...(executionSnapshot.dataProvenance.notes ?? []), `Sellability Gate: ${sellabilityAudit.reason} Approximate reverse value $${sellabilityAudit.expectedOutUsd.toFixed(2)}.`];
+  }
+  addChat("Sellability Gate", `$${result.snapshot.symbol}: PASS via ${sellabilityAudit.provider}. Reverse route verified before entry.`, "execution");
+
   context.snapshot = executionSnapshot;
   const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
   const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
@@ -438,12 +465,8 @@ async function scanOneChain(chain: Chain) {
     for (const opinion of result.claudeSurvivalCouncil.specialists) {
       addChat(opinion.agentName, `${opinion.vote} · ${opinion.confidence.toFixed(0)}% · ${opinion.reason}`, "council", opinion.formedAt);
     }
-    if (result.claudeSurvivalCouncil.cioOpinion) {
-      const ai = result.claudeSurvivalCouncil.cioOpinion;
-      addChat(ai.agentName, `${ai.vote} · ${ai.confidence.toFixed(0)}% · ${ai.reason} FINAL ${result.claudeSurvivalCouncil.localDecision} → ${result.claudeSurvivalCouncil.finalDecision}.`, "council", ai.formedAt);
-    }
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned; Claude Survival Council ${result.claudeSurvivalCouncil ? "completed" : "not summoned"}. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned; Claude Risk Reaper ${result.claudeSurvivalCouncil ? "completed" : "not summoned"}. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {
@@ -501,7 +524,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3.5 Local Council + four-seat Claude Survival Council started. No OpenAI/ChatGPT API calls. Claude is summoned only after a hard-risk-passed local BUY/WATCH; PAPER kill switches remain OFF. Every fresh candidate still becomes a case file and Code Deciphered progress continues.`, "system");
+  addChat("System", `V3.6 Local Council + Claude Risk Reaper started. The three retired Claude seats are removed. Risk Reaper may only PASS or VETO and can never increase risk or upgrade a WATCH. Verified sellability is now mandatory before PAPER capital is committed.`, "system");
 }
 
 export async function getAutopilotStatus() {
@@ -520,7 +543,6 @@ export async function getAutopilotStatus() {
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    claudeProfitOptimizer: getClaudeProfitOptimizerStatus(),
     claudeSurvivalCouncil: await getClaudeSurvivalCouncilStatus(),
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),

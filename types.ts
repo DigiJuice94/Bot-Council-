@@ -228,8 +228,8 @@ export type AgentId =
 
 export type ResearchAgentId = Exclude<AgentId, "cio" | "executor" | "portfolio">;
 
-export type ClaudeSurvivalAgentId = "alpha_hunter" | "risk_reaper" | "profit_optimizer" | "survival_cio";
-export type ClaudeSurvivalVote = "BACK" | "PASS" | "VETO";
+export type ClaudeSurvivalAgentId = "risk_reaper";
+export type ClaudeSurvivalVote = "PASS" | "VETO";
 
 export type ClaudeSurvivalOpinion = {
   agentId: ClaudeSurvivalAgentId;
@@ -430,7 +430,7 @@ export type PaperFill = {
   slippageBps: number;
   feeUsd: number;
   routeVerified?: boolean;
-  routeProvider?: "jupiter" | "liquidity-model";
+  routeProvider?: "jupiter" | "zeroex" | "security" | "unsupported" | "liquidity-model";
   routeNote?: string;
   createdAt: string;
 };
@@ -533,15 +533,6 @@ export type ManagedPosition = {
   peakPnlPct?: number;
   exitStrategistScore?: number;
   exitStrategistReason?: string;
-  profitOptimizerProvider?: "claude";
-  profitOptimizerModel?: string;
-  profitOptimizerAction?: "HOLD" | "TRIM" | "EXIT";
-  profitOptimizerConfidence?: number;
-  profitOptimizerSellPct?: number;
-  profitOptimizerReason?: string;
-  profitOptimizerContextKey?: string;
-  profitOptimizerReviewedAt?: string;
-  profitOptimizerError?: string;
   sellAuditStatus?: "pass" | "fail" | "unknown";
   sellAuditProvider?: "jupiter" | "zeroex" | "security" | "unsupported";
   sellAuditCheckedAt?: string;
@@ -549,6 +540,7 @@ export type ManagedPosition = {
   sellAuditPriceImpactPct?: number;
   sellAuditExpectedOutUsd?: number;
   sellAuditConsecutiveFailures?: number;
+  sellAuditConsecutiveUnknowns?: number;
   pendingScaleLabel?: string;
   learningRecorded?: boolean;
   exitStrategy: ExitStrategy;
@@ -577,6 +569,9 @@ export type PaperWalletFillRecord = {
   fillPrice: number;
   feeUsd: number;
   slippageBps: number;
+  routeVerified?: boolean;
+  routeProvider?: "jupiter" | "zeroex" | "security" | "unsupported" | "liquidity-model";
+  routeNote?: string;
   createdAt: string;
   action?: "ENTRY" | "SCALE_IN" | "TRIM" | "EXIT";
   quantity?: number;

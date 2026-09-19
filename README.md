@@ -1,6 +1,16 @@
 # Bot War Room V3
 
-## V3.5.0 Four-Seat Claude Survival Council
+## V3.6.0 Risk Reaper + Verified Sellability
+
+V3.6 removes the retired Claude **Alpha Hunter**, **Profit Optimizer**, and **Survival CIO** seats. **Risk Reaper is the only Claude seat left.** It can only PASS or VETO a local BUY/WATCH candidate; it cannot upgrade WATCH to BUY, increase size, control exits, or override deterministic safety. Its survival ledger uses a new V3.6 namespace so the prior scorecard—corrupted by unverified paper profits—does not keep the surviving seat dead on deploy.
+
+Sellability is now fail-closed at the money boundary. Immediately before every PAPER buy, the bot performs a reverse sell-route preflight on the approximate position quantity. **PASS with a real executable route is required before any paper-wallet debit.** Solana uses Jupiter token→USDC reverse quotes. Ethereum/Base/BNB use 0x when `ZEROEX_API_KEY` is configured. Chains without a supported reverse-route provider are blocked from new PAPER entries rather than assumed sellable. A pool/liquidity number alone is never treated as proof that capital can exit.
+
+Guardian exits are now equally strict. A PAPER trim or full exit is settled only when Audit Bot returns **PASS** with a positive executable quote. The quoted output—not the dashboard mark—is the only amount credited as realized proceeds. **UNKNOWN never creates a sale or profit**; the position remains open/exit-pending with zero new realized proceeds until verification recovers. A hard FAIL is rechecked once; two consecutive hard FAILs move the position to **Unsellable / Locked Capital**, credit no fake proceeds, and count the remaining cost as lost capital.
+
+Paper fill records now persist route-verification metadata (`routeVerified`, provider, and route note) so future accounting can distinguish verified proceeds from modeled marks. Existing historical fills are not rewritten automatically.
+
+## Historical: V3.5.0 Four-Seat Claude Survival Council (retired in V3.6)
 
 V3.5 builds on V3.4 without replacing the fast local Council. Candidates are still discovered and measured locally first. Only PAPER candidates that pass deterministic hard risk and reach local BUY/WATCH summon the Claude layer, keeping obvious junk off the paid path. Three Claude specialists lock independent reads in parallel: **Alpha Hunter** looks for asymmetric early-runner upside, **Risk Reaper** tries to kill weak/distributing setups, and **Profit Optimizer** judges whether the entry has a credible profit-capture path. A fourth seat, **Survival CIO**, sees those locked reads plus the local Council evidence and returns BACK/PASS/VETO. BACK can upgrade a local WATCH to BUY, PASS preserves the local decision, and VETO rejects the entry. Claude can never override hard liquidity, sellability, honeypot/security, stop-loss or execution rules.
 
@@ -10,7 +20,7 @@ The existing V3.4 Profit Optimizer remains active after entry, so the same Profi
 
 The dashboard now exposes all four survival scorecards. Cost is estimated from actual Anthropic input/output token counts using configurable per-million-token prices (`CLAUDE_INPUT_COST_PER_MILLION_USD` and `CLAUDE_OUTPUT_COST_PER_MILLION_USD`), so those values should match the pricing on the Anthropic account/model being used. Defaults are only bookkeeping assumptions and do not change Anthropic billing.
 
-## V3.4.0 Claude Profit Optimizer
+## Historical: V3.4.0 Claude Profit Optimizer (retired in V3.6)
 
 This release adds an optional Claude-powered Profit Optimizer on top of the existing local Quant, Exit Strategist and Position Guardian. Scanning, candidate scoring and the Council remain local and fast. Claude is called only for PAPER positions around profit-management moments, with a per-position review throttle (default 60 seconds) so the 5-second Guardian loop does not turn into an LLM call loop. When a position gets within five percentage points of its next take-profit level, the optimizer can pre-review that TP so a fast move can often use a cached Claude decision instead of waiting at the exact sell trigger.
 
@@ -80,10 +90,8 @@ Set `REDIS_URL` to preserve the existing paper wallet, managed positions, all-ti
 
 `PAPER_STARTING_CASH_USD` controls the reset bankroll and defaults to `$1,000`.
 
-The fast specialist Council remains local and does not require OpenAI. V3.5 uses the configured Anthropic key for the four-seat Claude Survival Council on qualifying BUY/WATCH candidates and for the bounded post-entry Profit Optimizer. No OpenAI/ChatGPT API is required.
+The fast specialist Council remains local and does not require OpenAI. V3.6 uses the configured Anthropic key only for Claude Risk Reaper on qualifying BUY/WATCH candidates. The three other Claude seats and the post-entry Profit Optimizer are retired. No OpenAI/ChatGPT API is required.
 
-## V3.5.1 Audit-only repair
+## Historical: V3.5.1 Audit-only repair (superseded by V3.6)
 
-**Exit hotfix:** Audit Bot is no longer allowed to hold a trade in `exit_pending` merely because its independent quote provider returns `UNKNOWN`. `UNKNOWN` is recorded for diagnostics and the normal PAPER close proceeds. Only two back-to-back hard `FAIL` results classify capital as locked/unsellable.
-
-This patch does one thing: when Guardian is actually trying to SELL (trim or full exit), Audit Bot independently reverse-quotes the remaining token amount. Audit Bot is observational, not a sell gate: PASS and UNKNOWN both allow the normal PAPER sell to settle, so missing provider keys, unsupported chains, or temporary quote outages cannot freeze exits. Only a hard FAIL is rechecked once; two consecutive hard FAIL results classify the position as Unsellable / Locked Capital with no fake proceeds credited. This patch does not block entries, alter Council votes, add credit watching, or change Claude behavior.
+V3.5.1 briefly allowed an `UNKNOWN` independent sell audit to fall back to a modeled PAPER close so positions would not remain pending. **That behavior is removed in V3.6 because it could manufacture realized profit when real sellability was not proven.** V3.6 requires a verified reverse route before either entry capital is committed or sell proceeds are credited.
