@@ -716,7 +716,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section className="autonomy-band">
-        <div><span className="green-live"><i /> LIVE</span><strong>Team File Cabinet · main paper wallet</strong><p>The tournament is retired. Its best-performing File Cabinet council now controls the persistent main wallet using the same eight independent roles and its private learned memory. Approved BUYs, trims and exits flow through Guardian, the detailed ledger and reconciled wallet accounting.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Exact Tournament Team File Cabinet</strong><p>The winning qualifier team now controls the main wallet with its original Team 10 memory, 54-point BUY line, 0.97 sizing, $25–$125 entries and 12-position limit. Only BUY decisions execute; WATCH and SKIP remain observational. Global safety, Guardian exits and reconciled accounting remain active.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>

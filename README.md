@@ -1,6 +1,8 @@
 # Bot War Room V3.6.2 · File Cabinet Main Council
 
-The tournament is retired. Team File Cabinet—the best qualifier performer—is promoted to the persistent main PAPER wallet.
+The tournament is retired. The exact qualifier Team File Cabinet now controls the persistent main PAPER wallet.
+
+Its tournament configuration is locked: Team 10 memory namespace, no role bias, -3 threshold delta (54-point BUY line), 0.97 sizing multiplier, $25–$125 entries, 12-position maximum, and BUY-only execution. WATCH and SKIP decisions are recorded but never purchased. Global liquidity/sellability protection, reconciled accounting, Guardian exits, Filing Cabinet learning, and live provider scanning remain shared utilities rather than strategy overrides.
 
 ## Main council
 
