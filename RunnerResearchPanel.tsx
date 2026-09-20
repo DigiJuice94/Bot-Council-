@@ -11,6 +11,9 @@ type Research = {
   dumperCases: number;
   neutralCases: number;
   openCases: number;
+  rugCases: number;
+  rugStorage: "REDIS" | "MEMORY";
+  recentRugCases: Array<{ symbol: string; chain: string; reason: string; recordedAt: string; entryMarketCap: number; entryLiquidity: number }>;
   observations: number;
   paperTrades: number;
   paperWins: number;
@@ -173,6 +176,25 @@ export default function RunnerResearchPanel() {
         <div className="v229-observer-lessons">
           <b>LATEST TRAJECTORY LESSONS</b>
           {(r?.trajectoryObserver?.latestLessons ?? []).length ? (r?.trajectoryObserver?.latestLessons ?? []).map((row, index) => <div key={row.chain + "-" + row.symbol + "-" + index}><strong>{"$" + row.symbol}</strong><em>{row.outcome}</em><span>{row.message}</span></div>) : <p>Collecting multi-snapshot sequences now. The Observer waits for real development data before claiming a pattern.</p>}
+        </div>
+      </article>
+
+      <article className="v229-trajectory-observer rug-autopsy-analyst">
+        <div className="v229-observer-head">
+          <div><span>RUG AUTOPSY ANALYST · BACKGROUND ONLY · NO COUNCIL SEAT</span><h3>Study every confirmed rug, then warn the exact tournament team.</h3><p>Unsellable, locked-capital and catastrophic rug-like outcomes are labeled immediately. Their original entry fingerprints are compared with future candidates and supplied to the Safety Gate, Dumper Specialist and CIO as advisory evidence. Only confirmed present-tense safety failures remain hard vetoes.</p></div>
+          <strong>{r?.rugCases ?? 0}<small>rug files</small></strong>
+        </div>
+        <div className="v229-observer-stats">
+          <div><small>Confirmed cases</small><b>{r?.rugCases ?? 0}</b></div>
+          <div><small>Storage</small><b>{r?.rugStorage ?? "MEMORY"}</b></div>
+          <div><small>Council seats</small><b>0</b></div>
+          <div><small>Extra scanners</small><b>0</b></div>
+          <div><small>Feedback</small><b>Immediate</b></div>
+          <div><small>Pattern action</small><b>Advisory</b></div>
+        </div>
+        <div className="v229-observer-lessons">
+          <b>LATEST RUG AUTOPSIES</b>
+          {(r?.recentRugCases ?? []).length ? (r?.recentRugCases ?? []).map((row, index) => <div key={`${row.chain}-${row.symbol}-${row.recordedAt}-${index}`}><strong>${row.symbol}</strong><em>{row.chain}</em><span>{row.reason} Entry MC {compactUsd(row.entryMarketCap)} · entry liquidity {compactUsd(row.entryLiquidity)} · filed {timeAgo(row.recordedAt)} ago.</span></div>) : <p>No confirmed rug cases filed yet. The Analyst waits for evidence instead of inventing labels.</p>}
         </div>
       </article>
 

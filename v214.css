@@ -1018,6 +1018,7 @@
 
 /* V2.29 — Trajectory Observer (background-only learning worker) */
 .v229-trajectory-observer{margin:16px 0 20px;border:1px solid #dfe3e7;border-radius:22px;background:#fff;overflow:hidden}
+.rug-autopsy-analyst{border-color:#efcfca;background:#fffdfc}.rug-autopsy-analyst .v229-observer-head>div>span{color:#b94c3e}.rug-autopsy-analyst .v229-observer-head>strong{color:#b83f32}
 .v229-observer-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:19px 21px;border-bottom:1px solid #eceff2}
 .v229-observer-head span{font-size:8px;font-weight:850;letter-spacing:.1em;color:#637083}
 .v229-observer-head h3{margin:5px 0;font-size:19px;color:#111}

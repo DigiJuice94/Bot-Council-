@@ -4,6 +4,8 @@ The tournament is retired. The exact qualifier Team File Cabinet now controls th
 
 Its tournament configuration is locked: Team 10 memory namespace, no role bias, -3 threshold delta (54-point BUY line), 0.97 sizing multiplier, $25–$125 entries, 12-position maximum, and BUY-only execution. WATCH and SKIP decisions are recorded but never purchased. Global liquidity/sellability protection, reconciled accounting, Guardian exits, Filing Cabinet learning, and live provider scanning remain shared utilities rather than strategy overrides.
 
+The Rug Autopsy Analyst runs inside the existing Filing Cabinet pipeline without a Council seat, scanner, or timer. Confirmed unsellable/locked-capital and catastrophic rug-like outcomes are immediately labeled as dumper cases, their earliest entry fingerprints are retained, and similarity evidence raises the existing Dumper Genome advisory for future candidates. Learned similarity never creates a hard veto by itself; confirmed current zero liquidity, honeypot, unsellability, and authority failures remain deterministic global blocks.
+
 ## Main council
 
 - Eight independent local roles use Team File Cabinet's existing private memory namespace.
