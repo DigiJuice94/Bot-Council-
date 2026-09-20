@@ -1,9 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getTradeJournal } from "@/lib/trade-journal";
+import { NextResponse } from "next/server";
+import { resetPaperWalletPreserveLearning } from "@/lib/paper-wallet";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
-  const limit = Number(request.nextUrl.searchParams.get("limit") ?? 100);
-  return NextResponse.json(await getTradeJournal(limit), { headers: { "Cache-Control": "no-store" } });
+export async function POST() {
+  try {
+    const result = await resetPaperWalletPreserveLearning("Manual dashboard reset");
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      message: `Fresh PAPER run started at $${result.wallet.startingCashUsd.toFixed(2)}. Trade log and portfolio history cleared; learned research preserved.`,
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
 }

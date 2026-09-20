@@ -7,9 +7,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN test -f deployment-source.tar.gz \
-    && tar -xzf deployment-source.tar.gz \
-    && test -f app/page.tsx \
+RUN test -f app/page.tsx \
     && test -f app/layout.tsx \
     && test -f app/api/paper-reset/route.ts \
     && test -d components \

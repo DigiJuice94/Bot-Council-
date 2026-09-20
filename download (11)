@@ -1,8 +1,8 @@
-node_modules/
-.next/
+node_modules
+.next
+.git
 .env
 .env.*
-!.env.example
 npm-debug.log*
 deployment-source.tar.gz
 .DS_Store

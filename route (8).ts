@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
-import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
-import { listManagedPositions } from "@/lib/position-store";
+import { getTournamentView } from "@/lib/tournament";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function GET(request: Request) {
-  // The dashboard's trade table uses this lightweight path so research/status
-  // generation cannot hold back visible position updates.
-  if (new URL(request.url).searchParams.get("light") === "1") {
-    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
+export async function GET() {
+  try {
+    return NextResponse.json(await getTournamentView(), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
-  ensurePositionGuardianLoop();
-  const report = await refreshPositionGuardian();
-  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
 }
