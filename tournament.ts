@@ -53,11 +53,16 @@ function newTeam(variant: Variant): TournamentTeam {
   return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, councilRuns: 0, positions: [], trades: [], rolePerformance: emptyRoles(), rejectionCounts: {} };
 }
 function initialState(now = Date.now()): TournamentState {
-  return { version: 3, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [] };
+  return { version: 3, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [], forcedTurnoverReleaseVersion: 1 };
 }
 async function ensureState() {
   const current = await loadTournamentState();
   if (current) {
+    const existingOpenPositions = current.teams.some((team) => team.positions?.some((position) => position.status === "open"));
+    if (current.forcedTurnoverReleaseVersion !== 1) {
+      if (existingOpenPositions) current.forcedTurnoverReleaseRequestedAt ??= iso();
+      else current.forcedTurnoverReleaseVersion = 1;
+    }
     const variants = new Map(VARIANTS.map((variant) => [variant.id, variant]));
     for (const team of current.teams) {
       team.rejectionCounts ??= {};
@@ -425,6 +430,7 @@ export async function observeTournamentOpportunity(seed: WarRoomResult, sharedOp
       state.opportunityCount += 1;
       state.lastOpportunityAt = iso();
       const unsafe = immediateSafetyFailure(seed.snapshot) || hasPositiveSellabilityFailure(seed.snapshot);
+      const turnoverReleasePending = state.forcedTurnoverReleaseVersion !== 1;
       for (const result of councilResults) {
         const teamId = result.independentCouncil?.teamId;
         const team = state.teams.find((row) => row.id === teamId);
@@ -440,7 +446,8 @@ export async function observeTournamentOpportunity(seed: WarRoomResult, sharedOp
         };
         const existing = team.positions.find((position) => position.status === "open" && position.chain === result.snapshot.chain && position.tokenAddress === result.snapshot.tokenAddress);
         if (existing) applyMark(team, existing, result.snapshot, state.lastOpportunityAt);
-        if (unsafe) reject(team, immediateSafetyFailure(result.snapshot) ?? "Confirmed sellability failure");
+        if (turnoverReleasePending) reject(team, "One-time turnover release is clearing pre-deployment positions");
+        else if (unsafe) reject(team, immediateSafetyFailure(result.snapshot) ?? "Confirmed sellability failure");
         else if (eligible(team, result)) enter(team, result, roleScores(result), state.lastOpportunityAt);
       }
       if (seed.runnerGenome.learned) state.fileCabinetEvidence = [...seed.runnerGenome.runnerEvidence.slice(0, 3), ...seed.runnerGenome.dumperEvidence.slice(0, 2)].slice(0, 5);
@@ -484,9 +491,17 @@ export async function refreshTournamentMarks(limit = 4) {
       if (!snapshot) return;
       for (const team of state.teams) {
         const position = team.positions.find((row) => row.status === "open" && row.chain === snapshot.chain && row.tokenAddress === snapshot.tokenAddress);
-        if (position) applyMark(team, position, snapshot, at);
+        if (position) {
+          applyMark(team, position, snapshot, at);
+          if (state.forcedTurnoverReleaseVersion !== 1 && position.status === "open") {
+            sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "One-time Tournament.10 turnover release", at);
+          }
+        }
       }
     });
+    if (state.forcedTurnoverReleaseVersion !== 1 && !state.teams.some((team) => team.positions.some((position) => position.status === "open"))) {
+      state.forcedTurnoverReleaseVersion = 1;
+    }
     state.lastMarkRefreshAt = at;
     await flushOutcomeMemories(state);
     await saveTournamentState(state);
@@ -498,6 +513,7 @@ export async function refreshTournamentMarks(limit = 4) {
 export function ensureTournamentRuntime() {
   if (tournamentGlobal.__botWarRoomTournamentTimerV1) return;
   void ensureState().catch((error) => console.error("[tournament] initialize", error));
+  void refreshTournamentMarks(12).catch((error) => console.error("[tournament] one-time release", error));
   tournamentGlobal.__botWarRoomTournamentTimerV1 = setInterval(() => void refreshTournamentMarks().catch((error) => console.error("[tournament] marks", error)), 10_000);
 }
 

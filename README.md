@@ -33,6 +33,10 @@ The qualifier runs for 24 hours by default. After it ends, the best, second-best
 
 This release uses the V3 tournament ledger namespace. Deployment starts a clean qualifier because results produced by the former shared-agent overlay are not valid evidence for an 80-member tournament.
 
+## Tournament.10 turnover release
+
+The first deployment of this release performs one controlled turnover pass. Every pre-existing PAPER position—including regular positions and moon bags—is queued for a Guardian-verified exit, and tournament entries pause only until the existing tournament positions have cleared. Fresh market snapshots and the normal sellability audit are required: confirmed unsellable positions become locked-capital losses, while positions without a current quote remain pending instead of receiving invented proceeds. The migration is recorded once, so later restarts do not liquidate newly opened trades. Wallet history, realized results, trade logs and learned memory are preserved; this is not a reset.
+
 Optional controls:
 
 - `TOURNAMENT_QUALIFIER_HOURS` (default `24`)

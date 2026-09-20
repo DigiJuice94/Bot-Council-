@@ -119,6 +119,8 @@ export type TournamentState = {
   fileCabinetEvidence: string[];
   lastOpportunityAt?: string;
   lastMarkRefreshAt?: string;
+  forcedTurnoverReleaseVersion?: number;
+  forcedTurnoverReleaseRequestedAt?: string;
 };
 
 export type TournamentTeamView = TournamentTeam & {

@@ -499,6 +499,7 @@ export type ManagedPosition = {
   takenProfitLabels: string[];
   winnerState?: WinnerState;
   moonbagStartedAt?: string;
+  forcedExitReleaseVersion?: number;
   scaleIns?: PositionScaleFill[];
   lastConfirmationScore?: number;
   maxGrossExposurePct?: number;

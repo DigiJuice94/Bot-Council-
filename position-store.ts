@@ -4,6 +4,7 @@ import type { ManagedPosition } from "./types";
 const REDIS_KEY = "bot-war-room:positions:v3-live-paper";
 const memory = new Map<string, ManagedPosition>();
 const memoryLeases = new Set<string>();
+const memoryMigrations = new Set<string>();
 let redisPromise: Promise<any | null> | null = null;
 
 async function getRedis() {
@@ -45,6 +46,18 @@ export async function removeManagedPosition(positionId: string): Promise<void> {
   memory.delete(positionId);
   const redis = await getRedis();
   if (redis) await redis.hDel(REDIS_KEY, positionId);
+}
+
+export async function claimRuntimeMigration(name: string): Promise<boolean> {
+  const migrationName = name.replace(/[^a-zA-Z0-9:_-]/g, "_");
+  const key = `bot-war-room:runtime-migration:${migrationName}`;
+  const redis = await getRedis();
+  if (!redis) {
+    if (memoryMigrations.has(key)) return false;
+    memoryMigrations.add(key);
+    return true;
+  }
+  return (await redis.set(key, new Date().toISOString(), { NX: true })) === "OK";
 }
 
 /**
