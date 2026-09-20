@@ -7,12 +7,6 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN test -f app/page.tsx \
-    && test -f app/layout.tsx \
-    && test -f app/api/paper-reset/route.ts \
-    && test -d components \
-    && test -d lib \
-    && test -d public
 RUN npm run build
 
 FROM node:22-alpine AS runner
