@@ -33,11 +33,11 @@ The qualifier runs for 24 hours by default. After it ends, the best, second-best
 
 This release uses the V3 tournament ledger namespace. Deployment starts a clean qualifier because results produced by the former shared-agent overlay are not valid evidence for an 80-member tournament.
 
-## Tournament.12 GitHub-safe turnover release
+## Tournament.13 GitHub-safe turnover release
 
 The first deployment of this release performs one controlled turnover pass. Every pre-existing PAPER position—including regular positions and moon bags—is queued for a Guardian-verified exit, and tournament entries pause only until the existing tournament positions have cleared. Fresh market snapshots and the normal sellability audit are required: confirmed unsellable positions become locked-capital losses, while positions without a current quote remain pending instead of receiving invented proceeds. The migration is recorded once, so later restarts do not liquidate newly opened trades. Wallet history, realized results, trade logs and learned memory are preserved; this is not a reset.
 
-The Docker build reads the checked-in source tree directly and lets the real Next.js build validate it. It does not require a nested deployment archive or use a brittle pre-build file checklist, keeping GitHub and Railway uploads small and preventing false failures before compilation begins.
+The Docker build restores `app`, `components`, `lib` and `public` from the included root-level `deployment-source.tar.gz` before running the real Next.js build. This protects browser-based GitHub uploads that preserve root files but drop nested directories. The normal source folders remain included for direct local development, and no brittle pre-build file checklist is used.
 
 Optional controls:
 
