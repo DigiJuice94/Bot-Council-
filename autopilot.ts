@@ -1,6 +1,7 @@
 import { buildCouncilDiscussion } from "./debate";
 import { executePaper } from "./execution";
 import { runIndependentCouncil } from "./agent-entity-runtime";
+import { runWarRoom } from "./engine";
 import { resolveAdaptiveWeights, relevantMemoryHints } from "./learning-store";
 import { fetchLiveCandidate, fetchLiveTokenSnapshot, getWaterfallProviderHealth } from "./provider-waterfall";
 import { liveMarketDataMode } from "./market-data";
@@ -405,7 +406,7 @@ async function scanOneChain(chain: Chain) {
     getRunnerGenomeGuidance(snapshot),
   ]);
 
-  let result = await runIndependentCouncil(snapshot, {
+  const councilOptions = {
     mode: "paper",
     regime,
     agentWeights: learning.weights,
@@ -414,7 +415,24 @@ async function scanOneChain(chain: Chain) {
     profitability,
     portfolio,
     runnerGenome,
-  });
+  } as const;
+
+  let tournamentActive = await isTournamentActive().catch(() => true);
+  let result: WarRoomResult;
+  if (tournamentActive) {
+    try {
+      const seed = runWarRoom(snapshot, councilOptions);
+      const tournament = await observeTournamentOpportunity(seed, councilOptions);
+      tournamentActive = tournament.active;
+      result = tournament.representativeResult ?? await runIndependentCouncil(snapshot, councilOptions);
+    } catch (error) {
+      console.error("[tournament] opportunity", error);
+      tournamentActive = await isTournamentActive().catch(() => true);
+      result = await runIndependentCouncil(snapshot, councilOptions);
+    }
+  } else {
+    result = await runIndependentCouncil(snapshot, councilOptions);
+  }
 
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
@@ -429,17 +447,8 @@ async function scanOneChain(chain: Chain) {
   else if (result.decision === "WATCH") current.funnel.watches += 1;
   else current.funnel.skips += 1;
   await appendDecisionJournal(result);
-  // Tournament is a shadow ledger only: it consumes the already-computed result
-  // and never feeds back into the locked V3.6.2 scanner, Council or main wallet.
-  // Tournament failures must never terminate the scanner. While the tournament
-  // is active we fail safely by keeping the main wallet sidelined.
-  let tournamentActive = true;
-  try {
-    tournamentActive = await observeTournamentOpportunity(result);
-  } catch (error) {
-    console.error("[tournament] opportunity", error);
-    tournamentActive = await isTournamentActive().catch(() => true);
-  }
+  // The representative result is Council 1's decision. The other nine Council
+  // results stay in the isolated tournament ledger; the main wallet stays out.
   current.mainWalletPausedForTournament = tournamentActive;
 
   const discussion = buildCouncilDiscussion(result);

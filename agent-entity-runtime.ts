@@ -19,7 +19,17 @@ import type {
 const clamp = (n: number, min = 0, max = 100) => Math.max(min, Math.min(max, Number.isFinite(n) ? n : min));
 const now = () => new Date().toISOString();
 
-type CouncilOptions = {
+export type IndependentCouncilProfile = {
+  teamId: string;
+  teamName: string;
+  memoryNamespace: string;
+  roleBias?: Partial<Record<CouncilEntityId, number>>;
+  thresholdDelta?: number;
+  fileCabinet?: boolean;
+  roleMemoryNamespaces?: Partial<Record<CouncilEntityId, string>>;
+};
+
+export type CouncilOptions = {
   mode?: "paper" | "live";
   portfolio?: PortfolioRiskContext;
   agentWeights?: Partial<ResearchAgentWeights>;
@@ -28,6 +38,7 @@ type CouncilOptions = {
   learningSource?: "defaults" | "regime" | "learned";
   profitability?: ProfitabilityMetrics | null;
   runnerGenome?: RunnerGenomeGuidance;
+  teamProfile?: IndependentCouncilProfile;
 };
 
 type EntitySpec = {
@@ -224,8 +235,44 @@ function baseEvidence(packet: Packet) {
   ];
 }
 
-async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<IndependentEntityOpinion> {
-  const rawMemory = await loadPrivateEntityMemory(spec.id, 12);
+function roleNamespace(profile: IndependentCouncilProfile | undefined, role: CouncilEntityId) {
+  return profile?.roleMemoryNamespaces?.[role] ?? profile?.memoryNamespace ?? "main";
+}
+
+function identityCalibration(profile: IndependentCouncilProfile | undefined, role: CouncilEntityId) {
+  if (!profile || profile.teamId === "team-1") return 0;
+  const source = `${profile.teamId}:${role}`;
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
+  return ((hash % 11) - 5) * 0.45;
+}
+
+function candidateCalibration(profile: IndependentCouncilProfile | undefined, role: CouncilEntityId, packet: Packet) {
+  if (!profile || profile.teamId === "team-1") return 0;
+  const source = `${profile.teamId}:${role}:${packet.token.chain}:${packet.token.address}`;
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) hash = (hash * 33 + source.charCodeAt(index)) >>> 0;
+  return ((hash % 13) - 6) * 0.20;
+}
+
+function specialtyCalibration(profile: IndependentCouncilProfile | undefined, role: CouncilEntityId, packet: Packet) {
+  const bias = profile?.roleBias?.[role] ?? 0;
+  if (!bias) return 0;
+  const t = packet.token;
+  const g = packet.runnerGenome;
+  let signal = 0;
+  if (role === "launch") signal = (g.entryScore - 50) / 25 + t.marketCapChange5mPct / 40;
+  else if (role === "social") signal = t.sourceQuality?.socialVelocity ? t.socialVelocityPct / 60 : -0.25;
+  else if (role === "wallet") signal = (t.buySellRatio - 1) / 1.5 + t.holderGrowthPct / 30;
+  else if (role === "quant") signal = (g.entryScore + g.trajectoryScore - 100) / 45;
+  else if (role === "contract") signal = packet.commonAnalytics.hardRiskPassed ? (65 - g.dumperRiskScore) / 35 : -1;
+  else if (role === "bear") signal = (55 - Math.max(g.dumperRiskScore, g.trajectoryDumperRiskScore)) / 35;
+  else if (role === "portfolio") signal = (g.entryScore - g.dumperRiskScore) / 40;
+  return Math.max(-bias, Math.min(bias, bias * signal));
+}
+
+async function thinkPrivate(spec: EntitySpec, packet: Packet, profile?: IndependentCouncilProfile): Promise<IndependentEntityOpinion> {
+  const rawMemory = await loadPrivateEntityMemory(spec.id, 12, roleNamespace(profile, spec.id));
   const memory: EntityMemoryLite[] = rawMemory.map((row) => ({
     kind: row.kind,
     vote: row.vote,
@@ -378,10 +425,13 @@ async function thinkPrivate(spec: EntitySpec, packet: Packet): Promise<Independe
     ];
   }
 
+  const independentAdjustment = identityCalibration(profile, spec.id) + candidateCalibration(profile, spec.id, packet) + specialtyCalibration(profile, spec.id, packet);
+  score = clamp(score + independentAdjustment);
+  if (profile) evidence = [...evidence, `${profile.teamName} independent ${spec.shortName} calibration ${independentAdjustment >= 0 ? "+" : ""}${independentAdjustment.toFixed(2)}.`];
   const vote = voteFromScore(score, packet.commonAnalytics.hardRiskPassed);
   return {
     agentId: spec.id,
-    agentName: spec.name,
+    agentName: profile ? `${spec.name} · ${profile.teamName}` : spec.name,
     phase: "private",
     vote,
     confidence: confidenceFromScore(score),
@@ -444,7 +494,7 @@ async function thinkMeeting(
   };
 }
 
-async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Promise<IndependentEntityOpinion> {
+async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[], profile?: IndependentCouncilProfile): Promise<IndependentEntityOpinion> {
   const weights: Record<string, number> = {
     launch: 1.35,
     social: 0.75,
@@ -458,7 +508,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
   let weightedSupport = 0;
   let totalWeight = 0;
   for (const opinion of meeting) {
-    const w = weights[opinion.agentId] ?? 1;
+    const w = Math.max(0.25, (weights[opinion.agentId] ?? 1) * (1 + (profile?.roleBias?.[opinion.agentId] ?? 0) * 0.10));
     totalWeight += w;
     const direction = opinion.vote === "BUY" ? 1 : opinion.vote === "WATCH" ? 0.55 : 0;
     weightedSupport += w * direction * (0.55 + opinion.confidence / 220);
@@ -466,12 +516,22 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
 
   const normalized = totalWeight > 0 ? weightedSupport / totalWeight : 0;
   const genomeBoost = (packet.runnerGenome.entryScore * 0.72 + packet.runnerGenome.trajectoryScore * 0.28 - packet.runnerGenome.dumperRiskScore * 0.25 - packet.runnerGenome.trajectoryDumperRiskScore * 0.10) / 100;
-  const composite = clamp(normalized * 72 + genomeBoost * 28);
+  const cioMemory = await loadPrivateEntityMemory("cio", 12, roleNamespace(profile, "cio"));
+  const memory: EntityMemoryLite[] = cioMemory.map((row) => ({
+    kind: row.kind, vote: row.vote, chain: row.chain, realizedReturnPct: row.realizedReturnPct,
+    realizedPnlUsd: row.realizedPnlUsd, lesson: row.lesson,
+  }));
+  const cabinetAdjustment = profile?.fileCabinet
+    ? (packet.runnerGenome.entryScore - 60) * 0.08 - Math.max(0, packet.runnerGenome.dumperRiskScore - 65) * 0.10 + (packet.runnerGenome.trajectoryScore - 50) * 0.04
+    : 0;
+  const specialtyAdjustment = Math.max(-6, Math.min(6, meeting.reduce((sum, opinion) => sum + (profile?.roleBias?.[opinion.agentId] ?? 0) * ((opinion.score - 50) / 25), 0)));
+  const cioDirection = (profile?.roleBias?.cio ?? 0) * Math.max(-1, Math.min(1, (normalized - 0.5) * 2));
+  const composite = clamp(normalized * 72 + genomeBoost * 28 + memoryCalibration(memory) + identityCalibration(profile, "cio") + candidateCalibration(profile, "cio", packet) + specialtyAdjustment + cioDirection + cabinetAdjustment);
 
   const hardBlocked = !packet.commonAnalytics.hardRiskPassed || packet.commonAnalytics.executorFeasibility === "BLOCK";
   const vote: "BUY" | "WATCH" | "SKIP" = hardBlocked
     ? "SKIP"
-    : composite >= 57 ? "BUY"
+    : composite >= 57 + (profile?.thresholdDelta ?? 0) ? "BUY"
       : composite >= 38 ? "WATCH"
         : "SKIP";
 
@@ -485,7 +545,7 @@ async function thinkCio(packet: Packet, meeting: IndependentEntityOpinion[]): Pr
 
   return {
     agentId: "cio",
-    agentName: CIO_SPEC.name,
+    agentName: profile ? `${CIO_SPEC.name} · ${profile.teamName}` : CIO_SPEC.name,
     phase: "cio",
     vote,
     confidence: hardBlocked ? 0 : Math.round(clamp(52 + Math.abs(composite - 48) * 0.9, 50, 94)),
@@ -531,7 +591,8 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
   const privateRoundStartedAt = now();
 
   // All seven private reads execute independently before any peer output exists.
-  const initialOpinions = await Promise.all(ENTITY_SPECS.map((spec) => thinkPrivate(spec, packet)));
+  const profile = options.teamProfile;
+  const initialOpinions = await Promise.all(ENTITY_SPECS.map((spec) => thinkPrivate(spec, packet, profile)));
 
   const meetingRoundStartedAt = now();
   const meetingOpinions = process.env.COUNCIL_DEBATE_ROUND === "false"
@@ -548,7 +609,7 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
         }),
       );
 
-  const cioOpinion = await thinkCio(packet, meetingOpinions);
+  const cioOpinion = await thinkCio(packet, meetingOpinions, profile);
 
   const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK";
   const finalDecision = deterministicBlocked ? "SKIP" : cioOpinion.vote;
@@ -613,6 +674,9 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
 
   const independentCouncil: IndependentCouncilTrace = {
     sessionId,
+    teamId: profile?.teamId,
+    teamName: profile?.teamName,
+    memoryNamespace: profile?.memoryNamespace ?? "main",
     mode: "independent-local",
     agentModel: "local-specialist-engine",
     cioModel: "local-runner-cio",
@@ -624,12 +688,14 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
     cioOpinion,
   };
 
-  await recordEntityDecision({
+  const finalOpinions = [...meetingOpinions, cioOpinion];
+  await Promise.all(finalOpinions.map((opinion) => recordEntityDecision({
     decisionId: base.decisionId,
     symbol: snapshot.symbol,
     chain: snapshot.chain,
-    opinions: [...meetingOpinions, cioOpinion],
-  }).catch((error: unknown) => console.error("[independent-local-council] memory write", error));
+    opinions: [opinion],
+    namespace: roleNamespace(profile, opinion.agentId),
+  }))).catch((error: unknown) => console.error("[independent-local-council] memory write", error));
 
   const filteredAudit = base.auditTrail.filter((line: string) =>
     !line.startsWith("PRE-MEETING") &&

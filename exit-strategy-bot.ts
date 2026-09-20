@@ -35,12 +35,12 @@ export function profitFirstExitStrategy(exit: ExitStrategy): ExitStrategy {
     // dead capital for hours.
     stopLossPct: Math.min(exit.stopLossPct, 18),
     trailingStopPct: Math.min(exit.trailingStopPct, 14),
-    maxHoldMinutes: Math.min(exit.maxHoldMinutes, 90),
+    maxHoldMinutes: Math.min(exit.maxHoldMinutes, 20),
     winnerActivationPct: Math.min(exit.winnerActivationPct ?? 20, 20),
     winnerTrailingStopPct: Math.min(exit.winnerTrailingStopPct ?? 16, 16),
-    winnerMaxHoldMinutes: Math.min(exit.winnerMaxHoldMinutes ?? 180, 180),
+    winnerMaxHoldMinutes: Math.min(exit.winnerMaxHoldMinutes ?? 20, 20),
     moonbagTrailingStopPct: Math.min(exit.moonbagTrailingStopPct ?? 24, 24),
-    moonbagMaxHoldMinutes: Math.min(exit.moonbagMaxHoldMinutes ?? 1_440, 1_440),
+    moonbagMaxHoldMinutes: 2_880,
     breakEvenBufferPct: Math.max(exit.breakEvenBufferPct ?? 2, 3),
     invalidationRules: [
       ...exit.invalidationRules,
@@ -108,7 +108,7 @@ export function evaluateExitStrategist(args: {
   if (rawMovePct >= 25) maxHoldMinutes = 120;
   if (rawMovePct >= 50) maxHoldMinutes = 180;
   if (rawMovePct >= 100 && continuation >= 70) maxHoldMinutes = 240;
-  if (position.winnerState === "moonbag") maxHoldMinutes = 1_440;
+  if (position.winnerState === "moonbag") maxHoldMinutes = 2_880;
 
   const minimumTrainingCash = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
   const capitalRecycle = Boolean(

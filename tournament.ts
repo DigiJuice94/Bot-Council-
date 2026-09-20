@@ -1,8 +1,10 @@
 import { fetchLiveTokenSnapshot } from "./provider-waterfall";
 import { acquireRuntimeLease } from "./position-store";
 import { loadTournamentState, saveTournamentState } from "./tournament-store";
-import { TOURNAMENT_ROLES, type TournamentPosition, type TournamentRole, type TournamentState, type TournamentTeam, type TournamentTeamView, type TournamentView } from "./tournament-types";
-import type { MarketSnapshot, WarRoomResult } from "./types";
+import { runIndependentCouncil, type CouncilOptions, type IndependentCouncilProfile } from "./agent-entity-runtime";
+import { recordTournamentEntityOutcome } from "./agent-entity-store";
+import { TOURNAMENT_ROLES, type TournamentMemberDecision, type TournamentPosition, type TournamentRole, type TournamentState, type TournamentTeam, type TournamentTeamView, type TournamentView } from "./tournament-types";
+import type { CouncilEntityId, MarketSnapshot, PortfolioRiskContext, WarRoomResult } from "./types";
 
 const STARTING_CASH_USD = 1_000;
 const QUALIFIER_MS = Math.max(60_000, Number(process.env.TOURNAMENT_QUALIFIER_HOURS ?? 24) * 3_600_000);
@@ -16,15 +18,15 @@ const TP_LEVELS = [{ pct: 25, portion: 0.20 }, { pct: 50, portion: 0.20 }, { pct
 type Variant = Pick<TournamentTeam, "id" | "name" | "description" | "roleBias" | "thresholdDelta" | "sizeMultiplier" | "fileCabinet">;
 const VARIANTS: Variant[] = [
   { id: "team-1", name: "Team 1 · Baseline", description: "Exact V3.6.2 BUY decisions; no tournament bias.", roleBias: {}, thresholdDelta: 0, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-2", name: "Team 2 · Launch +4", description: "Aggressive Early Runner Scout selection; 52-point base entry threshold.", roleBias: { launch: 4 }, thresholdDelta: -5, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-3", name: "Team 3 · Narrative +4", description: "Narrative-led selection; 53-point base entry threshold.", roleBias: { social: 4 }, thresholdDelta: -4, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-4", name: "Team 4 · Flow +4", description: "Aggressive wallet-flow selection; 52-point base entry threshold.", roleBias: { wallet: 4 }, thresholdDelta: -5, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-5", name: "Team 5 · Quant +4", description: "Pattern-led selection; 54-point base entry threshold.", roleBias: { quant: 4 }, thresholdDelta: -3, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-6", name: "Team 6 · Safety +4", description: "Defensive Fast Safety Gate weighting; 58-point base entry threshold.", roleBias: { contract: 4 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
-  { id: "team-7", name: "Team 7 · Bear +4", description: "Defensive Dumper Specialist weighting; 58-point base entry threshold.", roleBias: { bear: 4 }, thresholdDelta: 1, sizeMultiplier: 0.95, fileCabinet: false },
-  { id: "team-8", name: "Team 8 · Portfolio +4", description: "Portfolio-led selection and sizing; 55-point base entry threshold.", roleBias: { portfolio: 4 }, thresholdDelta: -2, sizeMultiplier: 1.05, fileCabinet: false },
-  { id: "team-9", name: "Team 9 · CIO +4", description: "Runner CIO conviction emphasis; 53-point base entry threshold.", roleBias: { cio: 4 }, thresholdDelta: -4, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-10", name: "Team File Cabinet", description: "Learned evidence adjusts a 54-point base entry threshold; research remains advisory.", roleBias: {}, thresholdDelta: -3, sizeMultiplier: 1, fileCabinet: true },
+  { id: "team-2", name: "Team 2 · Launch +4", description: "Aggressive Early Runner Scout selection; 52-point base entry threshold.", roleBias: { launch: 4 }, thresholdDelta: -5, sizeMultiplier: 1.03, fileCabinet: false },
+  { id: "team-3", name: "Team 3 · Narrative +4", description: "Narrative-led selection; 53-point base entry threshold.", roleBias: { social: 4 }, thresholdDelta: -4, sizeMultiplier: 0.98, fileCabinet: false },
+  { id: "team-4", name: "Team 4 · Flow +4", description: "Aggressive wallet-flow selection; 52-point base entry threshold.", roleBias: { wallet: 4 }, thresholdDelta: -5, sizeMultiplier: 1.06, fileCabinet: false },
+  { id: "team-5", name: "Team 5 · Quant +4", description: "Pattern-led selection; 54-point base entry threshold.", roleBias: { quant: 4 }, thresholdDelta: -3, sizeMultiplier: 1.01, fileCabinet: false },
+  { id: "team-6", name: "Team 6 · Safety +4", description: "Defensive Fast Safety Gate weighting; 58-point base entry threshold.", roleBias: { contract: 4 }, thresholdDelta: 1, sizeMultiplier: 0.94, fileCabinet: false },
+  { id: "team-7", name: "Team 7 · Bear +4", description: "Defensive Dumper Specialist weighting; 58-point base entry threshold.", roleBias: { bear: 4 }, thresholdDelta: 1, sizeMultiplier: 0.92, fileCabinet: false },
+  { id: "team-8", name: "Team 8 · Portfolio +4", description: "Portfolio-led selection and sizing; 55-point base entry threshold.", roleBias: { portfolio: 4 }, thresholdDelta: -2, sizeMultiplier: 1.08, fileCabinet: false },
+  { id: "team-9", name: "Team 9 · CIO +4", description: "Runner CIO conviction emphasis; 53-point base entry threshold.", roleBias: { cio: 4 }, thresholdDelta: -4, sizeMultiplier: 1.04, fileCabinet: false },
+  { id: "team-10", name: "Team File Cabinet", description: "Learned evidence adjusts a 54-point base entry threshold; research remains advisory.", roleBias: {}, thresholdDelta: -3, sizeMultiplier: 0.97, fileCabinet: true },
 ];
 
 const tournamentGlobal = globalThis as typeof globalThis & {
@@ -48,10 +50,10 @@ function emptyRoles(): TournamentTeam["rolePerformance"] {
   return Object.fromEntries(TOURNAMENT_ROLES.map((role) => [role, { role, trades: 0, wins: 0, losses: 0, attributedPnlUsd: 0 }])) as TournamentTeam["rolePerformance"];
 }
 function newTeam(variant: Variant): TournamentTeam {
-  return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance: emptyRoles(), rejectionCounts: {} };
+  return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, councilRuns: 0, positions: [], trades: [], rolePerformance: emptyRoles(), rejectionCounts: {} };
 }
 function initialState(now = Date.now()): TournamentState {
-  return { version: 2, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [] };
+  return { version: 3, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [] };
 }
 async function ensureState() {
   const current = await loadTournamentState();
@@ -59,6 +61,12 @@ async function ensureState() {
     const variants = new Map(VARIANTS.map((variant) => [variant.id, variant]));
     for (const team of current.teams) {
       team.rejectionCounts ??= {};
+      team.councilRuns ??= 0;
+      for (const position of team.positions ?? []) {
+        if (position.rolesSettled) position.rolesCredited = true;
+        else if (position.status === "open") creditRoles(team, position);
+        else settleRoles(team, position);
+      }
       // Qualifier wallets survive deployments, but strategy configuration must
       // track the current tournament build. Otherwise Redis would preserve the
       // obsolete near-identical thresholds that caused the no-buy behavior.
@@ -67,7 +75,14 @@ async function ensureState() {
         if (variant) Object.assign(team, variant);
       }
     }
-    for (const team of current.qualifierArchive ?? []) team.rejectionCounts ??= {};
+    for (const team of current.qualifierArchive ?? []) {
+      team.rejectionCounts ??= {}; team.councilRuns ??= 0;
+      for (const position of team.positions ?? []) {
+        if (position.rolesSettled) position.rolesCredited = true;
+        else if (position.status === "open") creditRoles(team, position);
+        else settleRoles(team, position);
+      }
+    }
     return current;
   }
   const created = initialState();
@@ -102,36 +117,73 @@ function reject(team: TournamentTeam, reason: string) {
   team.rejectionCounts[reason] = (team.rejectionCounts[reason] ?? 0) + 1;
   return false;
 }
-function eligible(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>) {
+function eligible(team: TournamentTeam, result: WarRoomResult) {
   // Tournament wallets own their cash and capacity. Never inherit the sidelined
   // main wallet's execution.allowed/request, because those are calculated from
   // the main wallet's cash. Shared market risk and Executor safety still apply.
   if (!result.risk.passed) return reject(team, `Hard safety: ${result.risk.hardBlocks[0] ?? "risk veto"}`);
   if (result.councilProcess.executorVote === "BLOCK") return reject(team, "Executor blocked market feasibility");
   if (team.cashUsd < 25) return reject(team, "Team wallet has less than $25 cash");
-  if (team.id === "team-1") return result.decision === "BUY" || reject(team, `Baseline Council finished ${result.decision}`);
+  return result.decision === "BUY" || reject(team, `${team.name} Council finished ${result.decision}`);
+}
 
-  // Teams 2-10 synthesize the same locked specialist reads with their own small
-  // controlled bias. Previously a shared soft SKIP forced every team to sit out.
-  let adjusted = result.independentCouncil?.cioOpinion.score ?? result.conviction;
-  for (const role of TOURNAMENT_ROLES) adjusted += ((scores[role] - 50) / 50) * (team.roleBias[role] ?? 0);
-  if (team.fileCabinet) {
-    const genome = result.runnerGenome;
-    if (!genome.learned) return result.decision === "BUY" || reject(team, "File Cabinet needs learned Runner Genome evidence");
-    adjusted += (genome.entryScore - 60) * 0.08 - Math.max(0, genome.dumperRiskScore - 65) * 0.10 + (genome.trajectoryScore - 50) * 0.04;
-  }
-  const required = 57 + team.thresholdDelta;
-  return adjusted >= required || reject(team, `Team score ${adjusted.toFixed(1)} below ${required.toFixed(1)}`);
+function teamPortfolio(team: TournamentTeam, chain: MarketSnapshot["chain"]): PortfolioRiskContext {
+  const value = equity(team);
+  const openValue = team.positions.filter((position) => position.status === "open").reduce((sum, position) => sum + position.remainingQuantity * position.markPrice, 0);
+  const chainValue = team.positions.filter((position) => position.status === "open" && position.chain === chain).reduce((sum, position) => sum + position.remainingQuantity * position.markPrice, 0);
+  return {
+    equityUsd: value, cashUsd: team.cashUsd, dailyPnlPct: (value / team.startingCashUsd - 1) * 100,
+    openPositions: team.positions.filter((position) => position.status === "open").length,
+    totalExposurePct: value > 0 ? openValue / value * 100 : 0,
+    chainExposurePct: value > 0 ? chainValue / value * 100 : 0,
+    strategyExposurePct: value > 0 ? openValue / value * 100 : 0,
+    maxDailyLossPct: 100, maxOpenPositions: MAX_OPEN_POSITIONS, maxTotalExposurePct: 100,
+    maxChainExposurePct: 100, liveTradingEnabled: false,
+  };
+}
+
+function teamProfile(team: TournamentTeam): IndependentCouncilProfile {
+  const roleMemoryNamespaces = team.draftSources
+    ? Object.fromEntries(TOURNAMENT_ROLES.map((role) => [role, `tournament:${team.draftSources?.[role]?.teamId ?? team.id}`])) as Partial<Record<CouncilEntityId, string>>
+    : undefined;
+  return {
+    teamId: team.id, teamName: team.name, memoryNamespace: `tournament:${team.id}`,
+    roleBias: team.roleBias, thresholdDelta: team.thresholdDelta, fileCabinet: team.fileCabinet,
+    roleMemoryNamespaces,
+  };
+}
+
+function memberDecisions(result: WarRoomResult, profile: IndependentCouncilProfile): TournamentMemberDecision[] {
+  const trace = result.independentCouncil;
+  if (!trace) return [];
+  return [...trace.meetingOpinions, trace.cioOpinion].map((opinion) => ({
+    role: opinion.agentId as TournamentRole, vote: opinion.vote, score: opinion.score,
+    confidence: opinion.confidence, memoryNamespace: profile.roleMemoryNamespaces?.[opinion.agentId] ?? profile.memoryNamespace,
+  }));
+}
+
+async function mapConcurrent<T, R>(rows: T[], limit: number, run: (row: T) => Promise<R>): Promise<R[]> {
+  const output = new Array<R>(rows.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, rows.length) }, async () => {
+    while (cursor < rows.length) { const index = cursor++; output[index] = await run(rows[index]); }
+  }));
+  return output;
 }
 function positionExists(team: TournamentTeam, snapshot: MarketSnapshot) {
   return team.positions.some((position) => position.status === "open" && position.chain === snapshot.chain && position.tokenAddress === snapshot.tokenAddress);
 }
+function creditRoles(team: TournamentTeam, position: TournamentPosition) {
+  if (position.rolesCredited) return;
+  for (const role of TOURNAMENT_ROLES) team.rolePerformance[role].trades += 1;
+  position.rolesCredited = true;
+}
 function settleRoles(team: TournamentTeam, position: TournamentPosition) {
   if (position.rolesSettled) return;
+  creditRoles(team, position);
   const total = TOURNAMENT_ROLES.reduce((sum, role) => sum + Math.max(1, position.roleScores[role]), 0);
   for (const role of TOURNAMENT_ROLES) {
     const row = team.rolePerformance[role];
-    row.trades += 1;
     row.wins += position.realizedPnlUsd > 0 ? 1 : 0;
     row.losses += position.realizedPnlUsd <= 0 ? 1 : 0;
     row.attributedPnlUsd = roundUsd(row.attributedPnlUsd + position.realizedPnlUsd * (Math.max(1, position.roleScores[role]) / total) * TOURNAMENT_ROLES.length);
@@ -156,6 +208,7 @@ function sell(team: TournamentTeam, position: TournamentPosition, quantity: numb
     position.remainingCostUsd = 0;
     position.status = "closed";
     position.closedAt = at;
+    position.exitReason = note;
     settleRoles(team, position);
   }
 }
@@ -171,6 +224,7 @@ function lockPosition(team: TournamentTeam, position: TournamentPosition, reason
   position.status = "unsellable";
   position.closedAt = at;
   position.lockedReason = reason;
+  position.exitReason = reason;
   settleRoles(team, position);
 }
 function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot: MarketSnapshot, at: string) {
@@ -195,11 +249,21 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
       if (position.status !== "open") return;
     }
   }
+  const isMoonbag = position.takenTargets.length >= TP_LEVELS.length
+    && position.remainingQuantity <= position.initialQuantity * 0.12;
+  if (isMoonbag && !position.moonbagAt) position.moonbagAt = at;
   const drawdownPct = position.highWaterPrice > 0 ? (1 - snapshot.price / position.highWaterPrice) * 100 : 0;
   const ageMinutes = (new Date(at).getTime() - new Date(position.openedAt).getTime()) / 60_000;
+  const moonbagMinutes = position.moonbagAt ? (new Date(at).getTime() - new Date(position.moonbagAt).getTime()) / 60_000 : 0;
+  const volumeAcceleration = snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct ?? 0;
+  const buyingPressureSlowed = !isMoonbag && ageMinutes >= 5
+    && Boolean(snapshot.dataProvenance?.live)
+    && ((snapshot.buySellRatio < 1 && volumeAcceleration <= 0) || snapshot.buySellRatio < 0.85);
   if (pnlPct <= -position.stopLossPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared stop-loss", at);
   else if (pnlPct >= 25 && drawdownPct >= position.trailingStopPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared trailing stop", at);
-  else if (ageMinutes >= position.maxHoldMinutes) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared maximum hold time", at);
+  else if (buyingPressureSlowed) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", `Buying pressure slowed after ${ageMinutes.toFixed(0)}m · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume acceleration ${volumeAcceleration.toFixed(1)}%`, at);
+  else if (isMoonbag && moonbagMinutes >= 2_880) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Moon bag reached its 48-hour maximum hold", at);
+  else if (!isMoonbag && ageMinutes >= 20) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Regular trade reached its 20-minute maximum hold", at);
 }
 function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>, at: string) {
   const snapshot = result.snapshot;
@@ -222,9 +286,13 @@ function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<Tourn
     initialQuantity: quantity, remainingQuantity: quantity, entryNotionalUsd: spend, remainingCostUsd: spend,
     realizedPnlUsd: 0, openedAt: at, status: "open", takenTargets: [],
     stopLossPct: Math.max(1, result.exitStrategy.stopLossPct), trailingStopPct: Math.max(1, result.exitStrategy.trailingStopPct),
-    maxHoldMinutes: Math.max(5, result.exitStrategy.maxHoldMinutes), roleScores: scores,
+    maxHoldMinutes: 20, roleScores: scores,
+    decisionId: result.decisionId,
+    memoryNamespace: result.independentCouncil?.memoryNamespace ?? `tournament:${team.id}`,
+    memberOpinions: memberDecisions(result, teamProfile(team)),
   };
   team.positions.push(position);
+  creditRoles(team, position);
   team.lastRejectionReason = undefined;
   addTrade(team, { id: `${position.id}-BUY`, at, symbol: snapshot.symbol, chain: snapshot.chain, action: "BUY", quantity, price: snapshot.price, valueUsd: spend, pnlUsd: -fee, note: team.fileCabinet ? "File Cabinet advisory entry" : "Controlled tournament entry" });
   return true;
@@ -237,7 +305,30 @@ function teamView(team: TournamentTeam): TournamentTeamView {
   const openValueUsd = team.positions.filter((position) => position.status === "open").reduce((sum, position) => sum + position.remainingQuantity * position.markPrice, 0);
   const equityUsd = team.cashUsd + openValueUsd;
   const unrealizedPnlUsd = openValueUsd - openCost(team);
-  return { ...team, rank: 0, openValueUsd: roundUsd(openValueUsd), equityUsd: roundUsd(equityUsd), unrealizedPnlUsd: roundUsd(unrealizedPnlUsd), activeTrades: team.positions.filter((position) => position.status === "open").length, returnPct: roundUsd((equityUsd / team.startingCashUsd - 1) * 100) };
+  const totalPnlUsd = equityUsd - team.startingCashUsd;
+  const accountingDeltaUsd = totalPnlUsd - (team.realizedPnlUsd + unrealizedPnlUsd);
+  const openPositions = team.positions.filter((position) => position.status === "open");
+  const rolePerformance = Object.fromEntries(TOURNAMENT_ROLES.map((role) => {
+    const row = team.rolePerformance[role];
+    const livePnl = openPositions.reduce((sum, position) => {
+      const totalScore = TOURNAMENT_ROLES.reduce((scoreSum, item) => scoreSum + Math.max(1, position.roleScores[item]), 0);
+      const positionPnl = position.realizedPnlUsd + position.remainingQuantity * position.markPrice - position.remainingCostUsd;
+      return sum + positionPnl * (Math.max(1, position.roleScores[role]) / totalScore) * TOURNAMENT_ROLES.length;
+    }, 0);
+    return [role, {
+      ...row,
+      activeTrades: openPositions.length,
+      unrealizedAttributedPnlUsd: roundUsd(livePnl),
+      totalAttributedPnlUsd: roundUsd(row.attributedPnlUsd + livePnl),
+    }];
+  })) as TournamentTeam["rolePerformance"];
+  return {
+    ...team, rolePerformance, rank: 0,
+    openValueUsd: roundUsd(openValueUsd), equityUsd: roundUsd(equityUsd),
+    unrealizedPnlUsd: roundUsd(unrealizedPnlUsd), totalPnlUsd: roundUsd(totalPnlUsd),
+    accountingDeltaUsd: roundUsd(accountingDeltaUsd), accountingVerified: Math.abs(accountingDeltaUsd) <= 0.02,
+    activeTrades: openPositions.length, returnPct: roundUsd((equityUsd / team.startingCashUsd - 1) * 100),
+  };
 }
 function ranked(teams: TournamentTeam[]) {
   return teams.map(teamView).sort((a, b) => b.equityUsd - a.equityUsd || b.realizedPnlUsd - a.realizedPnlUsd).map((team, index) => ({ ...team, rank: index + 1 }));
@@ -259,7 +350,7 @@ function draftFinalists(qualifiers: TournamentTeam[], at: string) {
       rolePerformance[role].sourceTeamId = source.id;
       rolePerformance[role].sourceTeamName = source.name;
     }
-    return { id: `final-${rank}`, name: `Final Team ${rank}`, description: `${rank === 1 ? "Best" : rank === 2 ? "Second-best" : "Third-best"} qualifier performer drafted independently for every role.`, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, positions: [], trades: [], rolePerformance, roleBias, thresholdDelta, sizeMultiplier, fileCabinet: Object.values(draftSources).some((source) => source.teamId === "team-10"), rejectionCounts: {}, draftSources } satisfies TournamentTeam;
+    return { id: `final-${rank}`, name: `Final Team ${rank}`, description: `${rank === 1 ? "Best" : rank === 2 ? "Second-best" : "Third-best"} qualifier performer drafted independently for every role.`, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, councilRuns: 0, positions: [], trades: [], rolePerformance, roleBias, thresholdDelta, sizeMultiplier, fileCabinet: Object.values(draftSources).some((source) => source.teamId === "team-10"), rejectionCounts: {}, draftSources } satisfies TournamentTeam;
   });
 }
 function advanceIfDue(state: TournamentState, now = Date.now()) {
@@ -288,30 +379,79 @@ function advanceIfDue(state: TournamentState, now = Date.now()) {
   }
 }
 
-export async function observeTournamentOpportunity(result: WarRoomResult): Promise<boolean> {
-  const unsafe = immediateSafetyFailure(result.snapshot) || hasPositiveSellabilityFailure(result.snapshot);
-  const release = await acquireTournamentOpportunityLease();
-  if (!release) return (await ensureState()).phase !== "complete";
+async function flushOutcomeMemories(state: TournamentState) {
+  const positions = [...state.teams, ...(state.qualifierArchive ?? [])]
+    .flatMap((team) => team.positions)
+    .filter((position) => position.status !== "open" && !position.memoryRecorded && position.memberOpinions?.length);
+  for (const position of positions) {
+    const groups = new Map<string, TournamentMemberDecision[]>();
+    for (const opinion of position.memberOpinions) groups.set(opinion.memoryNamespace, [...(groups.get(opinion.memoryNamespace) ?? []), opinion]);
+    await Promise.all([...groups].map(([namespace, opinions]) => recordTournamentEntityOutcome({
+      namespace, positionId: position.id, symbol: position.symbol, chain: position.chain,
+      decisionId: position.decisionId, realizedPnlUsd: position.realizedPnlUsd,
+      realizedReturnPct: position.entryNotionalUsd > 0 ? position.realizedPnlUsd / position.entryNotionalUsd * 100 : 0,
+      closedAt: position.closedAt ?? iso(), exitReason: position.exitReason ?? position.lockedReason ?? "Tournament exit",
+      opinions: opinions.map((opinion) => ({ agentId: opinion.role, vote: opinion.vote, confidence: opinion.confidence, score: opinion.score })),
+    })));
+    position.memoryRecorded = true;
+  }
+}
+
+export async function observeTournamentOpportunity(seed: WarRoomResult, sharedOptions: Omit<CouncilOptions, "portfolio" | "teamProfile"> = {}): Promise<{ active: boolean; representativeResult?: WarRoomResult }> {
+  const opportunityRelease = await acquireRuntimeLease(`tournament-opportunity:${seed.decisionId}`, 120_000);
+  if (!opportunityRelease) return { active: (await ensureState()).phase !== "complete" };
   try {
-    const state = await ensureState();
-    advanceIfDue(state);
-    if (state.phase === "complete") return false;
-    if (state.processedOpportunityIds.includes(result.decisionId)) return true;
-    state.processedOpportunityIds = [...state.processedOpportunityIds.slice(-(MAX_PROCESSED_IDS - 1)), result.decisionId];
-    state.opportunityCount += 1;
-    state.lastOpportunityAt = iso();
-    const scores = roleScores(result);
-    for (const team of state.teams) {
-      const existing = team.positions.find((position) => position.status === "open" && position.chain === result.snapshot.chain && position.tokenAddress === result.snapshot.tokenAddress);
-      if (existing) applyMark(team, existing, result.snapshot, state.lastOpportunityAt);
-      if (unsafe) reject(team, immediateSafetyFailure(result.snapshot) ?? "Confirmed sellability failure");
-      else if (eligible(team, result, scores)) enter(team, result, scores, state.lastOpportunityAt);
+    let preview = await ensureState();
+    advanceIfDue(preview);
+    if (preview.phase === "complete") return { active: false };
+    if (preview.processedOpportunityIds.includes(seed.decisionId)) return { active: true };
+    const phase = preview.phase;
+    const teams = preview.teams.map((team) => structuredClone(team));
+    const councilResults = await mapConcurrent(teams, 2, async (team) => runIndependentCouncil(seed.snapshot, {
+      ...sharedOptions,
+      mode: "paper",
+      portfolio: teamPortfolio(team, seed.snapshot.chain),
+      teamProfile: teamProfile(team),
+    }));
+
+    const release = await acquireTournamentOpportunityLease();
+    if (!release) return { active: true, representativeResult: councilResults[0] };
+    try {
+      const state = await ensureState();
+      advanceIfDue(state);
+      if (state.phase === "complete") { await flushOutcomeMemories(state); await saveTournamentState(state); return { active: false }; }
+      if (state.phase !== phase || state.processedOpportunityIds.includes(seed.decisionId)) return { active: true, representativeResult: councilResults[0] };
+      state.processedOpportunityIds = [...state.processedOpportunityIds.slice(-(MAX_PROCESSED_IDS - 1)), seed.decisionId];
+      state.opportunityCount += 1;
+      state.lastOpportunityAt = iso();
+      const unsafe = immediateSafetyFailure(seed.snapshot) || hasPositiveSellabilityFailure(seed.snapshot);
+      for (const result of councilResults) {
+        const teamId = result.independentCouncil?.teamId;
+        const team = state.teams.find((row) => row.id === teamId);
+        if (!team) continue;
+        const profile = teamProfile(team);
+        const members = memberDecisions(result, profile);
+        team.councilRuns += 1;
+        team.lastCouncil = {
+          decisionId: result.decisionId, decision: result.decision === "BUY" || result.decision === "WATCH" ? result.decision : "SKIP",
+          score: result.independentCouncil?.cioOpinion.score ?? result.conviction,
+          completedAt: result.independentCouncil?.completedAt ?? state.lastOpportunityAt,
+          members: Object.fromEntries(members.map((member) => [member.role, member])),
+        };
+        const existing = team.positions.find((position) => position.status === "open" && position.chain === result.snapshot.chain && position.tokenAddress === result.snapshot.tokenAddress);
+        if (existing) applyMark(team, existing, result.snapshot, state.lastOpportunityAt);
+        if (unsafe) reject(team, immediateSafetyFailure(result.snapshot) ?? "Confirmed sellability failure");
+        else if (eligible(team, result)) enter(team, result, roleScores(result), state.lastOpportunityAt);
+      }
+      if (seed.runnerGenome.learned) state.fileCabinetEvidence = [...seed.runnerGenome.runnerEvidence.slice(0, 3), ...seed.runnerGenome.dumperEvidence.slice(0, 2)].slice(0, 5);
+      await flushOutcomeMemories(state);
+      await saveTournamentState(state);
+      return { active: true, representativeResult: councilResults[0] };
+    } finally {
+      await release().catch(() => undefined);
     }
-    if (result.runnerGenome.learned) state.fileCabinetEvidence = [...result.runnerGenome.runnerEvidence.slice(0, 3), ...result.runnerGenome.dumperEvidence.slice(0, 2)].slice(0, 5);
-    await saveTournamentState(state);
-    return true;
   } finally {
-    await release().catch(() => undefined);
+    await opportunityRelease().catch(() => undefined);
   }
 }
 
@@ -348,6 +488,7 @@ export async function refreshTournamentMarks(limit = 4) {
       }
     });
     state.lastMarkRefreshAt = at;
+    await flushOutcomeMemories(state);
     await saveTournamentState(state);
   } finally {
     await release().catch(() => undefined);
@@ -364,6 +505,7 @@ export async function getTournamentView(): Promise<TournamentView> {
   ensureTournamentRuntime();
   const state = await ensureState();
   advanceIfDue(state);
+  await flushOutcomeMemories(state);
   await saveTournamentState(state);
   return { ...state, teams: ranked(state.teams), qualifierArchive: state.qualifierArchive ? ranked(state.qualifierArchive) : undefined, roundLabel: state.phase === "qualifier" ? "10-team qualifier" : state.phase === "final" ? "3-team drafted final" : state.status === "failed" ? "Experiment failed" : "Tournament complete", generatedAt: iso() };
 }

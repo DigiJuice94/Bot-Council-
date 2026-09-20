@@ -2,7 +2,6 @@ import { createClient } from "redis";
 import type { CouncilEntityId, IndependentEntityOpinion, ManagedPosition } from "./types";
 
 const PREFIX = "bot-war-room:entity-memory:v226";
-const OUTCOME_SET_KEY = `${PREFIX}:recorded-outcomes`;
 const MAX_MEMORY = 60;
 
 export type EntityMemoryRecord = {
@@ -29,7 +28,7 @@ export type EntityMemoryRecord = {
 };
 
 let redisPromise: Promise<any | null> | null = null;
-const memoryFallback = new Map<CouncilEntityId, EntityMemoryRecord[]>();
+const memoryFallback = new Map<string, EntityMemoryRecord[]>();
 const fallbackOutcomeSet = new Set<string>();
 
 async function getRedis() {
@@ -50,28 +49,38 @@ async function getRedis() {
   return redisPromise;
 }
 
-function key(agentId: CouncilEntityId) {
-  return `${PREFIX}:${agentId}`;
+function cleanNamespace(namespace = "main") {
+  return namespace.replace(/[^a-zA-Z0-9:_-]/g, "_").slice(0, 100) || "main";
 }
 
-export async function loadPrivateEntityMemory(agentId: CouncilEntityId, limit = 10): Promise<EntityMemoryRecord[]> {
+function key(agentId: CouncilEntityId, namespace = "main") {
+  return `${PREFIX}:${cleanNamespace(namespace)}:${agentId}`;
+}
+
+function outcomeKey(namespace = "main") {
+  return `${PREFIX}:${cleanNamespace(namespace)}:recorded-outcomes`;
+}
+
+export async function loadPrivateEntityMemory(agentId: CouncilEntityId, limit = 10, namespace = "main"): Promise<EntityMemoryRecord[]> {
   const redis = await getRedis();
-  if (!redis) return (memoryFallback.get(agentId) ?? []).slice(0, limit);
-  const rows = await redis.lRange(key(agentId), 0, Math.max(0, limit - 1));
+  const memoryKey = key(agentId, namespace);
+  if (!redis) return (memoryFallback.get(memoryKey) ?? []).slice(0, limit);
+  const rows = await redis.lRange(memoryKey, 0, Math.max(0, limit - 1));
   return rows.flatMap((raw: string) => {
     try { return [JSON.parse(raw) as EntityMemoryRecord]; } catch { return []; }
   });
 }
 
-export async function appendPrivateEntityMemory(record: EntityMemoryRecord) {
+export async function appendPrivateEntityMemory(record: EntityMemoryRecord, namespace = "main") {
   const redis = await getRedis();
+  const memoryKey = key(record.agentId, namespace);
   if (!redis) {
-    const current = memoryFallback.get(record.agentId) ?? [];
-    memoryFallback.set(record.agentId, [record, ...current.filter((row) => row.id !== record.id)].slice(0, MAX_MEMORY));
+    const current = memoryFallback.get(memoryKey) ?? [];
+    memoryFallback.set(memoryKey, [record, ...current.filter((row) => row.id !== record.id)].slice(0, MAX_MEMORY));
     return;
   }
-  await redis.lPush(key(record.agentId), JSON.stringify(record));
-  await redis.lTrim(key(record.agentId), 0, MAX_MEMORY - 1);
+  await redis.lPush(memoryKey, JSON.stringify(record));
+  await redis.lTrim(memoryKey, 0, MAX_MEMORY - 1);
 }
 
 export async function recordEntityDecision(args: {
@@ -79,6 +88,7 @@ export async function recordEntityDecision(args: {
   symbol: string;
   chain: string;
   opinions: IndependentEntityOpinion[];
+  namespace?: string;
 }) {
   await Promise.all(args.opinions.map((opinion) => appendPrivateEntityMemory({
     id: `${args.decisionId}:${opinion.agentId}:decision`,
@@ -92,28 +102,30 @@ export async function recordEntityDecision(args: {
     confidence: opinion.confidence,
     thesis: opinion.thesis,
     lesson: `${opinion.vote} at ${opinion.confidence}% confidence. ${opinion.thesis}`.slice(0, 700),
-  })));
+  }, args.namespace)));
 }
 
-async function outcomeAlreadyRecorded(positionId: string) {
+async function outcomeAlreadyRecorded(positionId: string, namespace = "main") {
   const redis = await getRedis();
-  if (!redis) return fallbackOutcomeSet.has(positionId);
-  return Boolean(await redis.sIsMember(OUTCOME_SET_KEY, positionId));
+  const scopedId = `${cleanNamespace(namespace)}:${positionId}`;
+  if (!redis) return fallbackOutcomeSet.has(scopedId);
+  return Boolean(await redis.sIsMember(outcomeKey(namespace), positionId));
 }
 
-async function markOutcomeRecorded(positionId: string) {
+async function markOutcomeRecorded(positionId: string, namespace = "main") {
   const redis = await getRedis();
   if (!redis) {
-    fallbackOutcomeSet.add(positionId);
+    fallbackOutcomeSet.add(`${cleanNamespace(namespace)}:${positionId}`);
     return;
   }
-  await redis.sAdd(OUTCOME_SET_KEY, positionId);
+  await redis.sAdd(outcomeKey(namespace), positionId);
 }
 
 export async function recordIndependentCouncilOutcome(position: ManagedPosition) {
   const council = position.entryContext?.independentCouncil;
   if (!council || (position.status !== "closed" && position.status !== "unsellable")) return;
-  if (await outcomeAlreadyRecorded(position.id)) return;
+  const namespace = council.memoryNamespace ?? "main";
+  if (await outcomeAlreadyRecorded(position.id, namespace)) return;
 
   const finalOpinions = council.meetingOpinions.length ? council.meetingOpinions : council.initialOpinions;
   const outcomeGood = position.realizedPnlUsd > 0;
@@ -148,8 +160,39 @@ export async function recordIndependentCouncilOutcome(position: ManagedPosition)
       maxAdverseExcursionPct: position.maxAdverseExcursionPct,
       profitCapturePct: position.profitCapturePct,
       lesson: lesson.slice(0, 1_200),
-    });
+    }, namespace);
   }));
 
-  await markOutcomeRecorded(position.id);
+  await markOutcomeRecorded(position.id, namespace);
+}
+
+export async function recordTournamentEntityOutcome(args: {
+  namespace: string;
+  positionId: string;
+  symbol: string;
+  chain: string;
+  decisionId: string;
+  realizedPnlUsd: number;
+  realizedReturnPct: number;
+  closedAt: string;
+  exitReason: string;
+  opinions: Array<{ agentId: CouncilEntityId; vote: "BUY" | "WATCH" | "SKIP"; confidence: number; score: number }>;
+}) {
+  if (await outcomeAlreadyRecorded(args.positionId, args.namespace)) return;
+  const outcomeLabel = args.realizedPnlUsd > 0 ? "WIN" : args.realizedPnlUsd < 0 ? "LOSS" : "FLAT";
+  await Promise.all(args.opinions.map((opinion) => appendPrivateEntityMemory({
+    id: `${args.positionId}:${opinion.agentId}:outcome`,
+    agentId: opinion.agentId,
+    kind: "outcome",
+    createdAt: args.closedAt,
+    symbol: args.symbol,
+    chain: args.chain,
+    decisionId: args.decisionId,
+    vote: opinion.vote,
+    confidence: opinion.confidence,
+    realizedReturnPct: args.realizedReturnPct,
+    realizedPnlUsd: args.realizedPnlUsd,
+    lesson: `${outcomeLabel} on $${args.symbol}: ${args.realizedReturnPct.toFixed(2)}% / $${args.realizedPnlUsd.toFixed(2)}. This independent team member voted ${opinion.vote} at ${opinion.confidence}% with score ${opinion.score}. Exit: ${args.exitReason}`.slice(0, 1_200),
+  }, args.namespace)));
+  await markOutcomeRecorded(args.positionId, args.namespace);
 }

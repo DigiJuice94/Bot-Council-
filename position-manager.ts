@@ -264,6 +264,9 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const fresh = freshCouncil(position, snapshot, portfolio);
   const confirmation = confirmationScore(position, snapshot, fresh);
   const winnerState = determineWinnerState(position, rawMovePct, confirmation);
+  const moonbagStartedAt = winnerState === "moonbag"
+    ? (position.moonbagStartedAt ?? now)
+    : position.moonbagStartedAt;
   const controls = effectiveGuardianControls(position, winnerState);
   const exitStrategist = evaluateExitStrategist({ position, snapshot, portfolio, exitGenome });
   const genomeTrailingStopPct = exitGenome ? Math.max(6, Math.min(40, exitGenome.trailingStopPct)) : controls.trailingStopPct;
@@ -281,7 +284,16 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const liquidityTriggered = snapshot.liquidity < position.exitStrategy.liquidityFloorUsd;
   const securityTriggered = confirmedSellabilityFailure(snapshot) || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25;
   const authorityTriggered = snapshot.chainFamily === "solana" && (snapshot.mintAuthority || snapshot.freezeAuthority);
-  const timeTriggered = heldMinutes >= activeMaxHoldMinutes;
+  const moonbagHeldMinutes = moonbagStartedAt ? Math.max(0, (Date.now() - new Date(moonbagStartedAt).getTime()) / 60_000) : 0;
+  const turnoverMaxHoldMinutes = winnerState === "moonbag" ? 2_880 : 20;
+  const timeTriggered = winnerState === "moonbag"
+    ? moonbagHeldMinutes >= turnoverMaxHoldMinutes
+    : heldMinutes >= Math.min(activeMaxHoldMinutes, turnoverMaxHoldMinutes);
+  const volumeAcceleration = snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct ?? 0;
+  const buyingPressureSlowed = winnerState !== "moonbag"
+    && heldMinutes >= 5
+    && Boolean(snapshot.dataProvenance?.live)
+    && ((snapshot.buySellRatio < 1 && volumeAcceleration <= 0) || snapshot.buySellRatio < 0.85);
   const tp = nextTakeProfit(position, rawMovePct);
   const scaleStep = nextScaleStep(position, snapshot, fresh, confirmation);
 
@@ -299,6 +311,10 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     lastReason = securityTriggered || authorityTriggered
       ? "Emergency exit: contract/security condition changed."
       : `Emergency exit: liquidity fell below $${Math.round(position.exitStrategy.liquidityFloorUsd).toLocaleString()} floor.`;
+  } else if (buyingPressureSlowed) {
+    lastAction = "EXIT";
+    status = "exit_pending";
+    lastReason = `Exit: buying pressure slowed after ${heldMinutes.toFixed(0)} minutes · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume acceleration ${volumeAcceleration.toFixed(1)}%. Recycle capital.`;
   } else if (strategistExitTriggered) {
     lastAction = "EXIT";
     status = "exit_pending";
@@ -322,7 +338,9 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   } else if (timeTriggered) {
     lastAction = "EXIT";
     status = "exit_pending";
-    lastReason = `Exit: ${winnerState} max hold ${controls.maxHoldMinutes} minutes reached.`;
+    lastReason = winnerState === "moonbag"
+      ? "Exit: moon bag reached its 48-hour maximum hold."
+      : "Exit: regular trade reached the 20-minute maximum hold.";
   } else if (tp) {
     lastAction = "TRIM";
     lastReason = `${tp.label}: +${tp.gainPct}% target reached; Guardian will realize ${tp.sellPct}% of scaled position once and preserve ${position.exitStrategy.moonbagPct ?? 0}% for the moonbag.`;
@@ -349,6 +367,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     maxAdverseExcursionPct: Number(mae.toFixed(3)),
     profitCapturePct: Number(capture.toFixed(2)),
     winnerState,
+    moonbagStartedAt,
     lastConfirmationScore: confirmation,
     breakEvenArmed,
     lastHighWaterAt,

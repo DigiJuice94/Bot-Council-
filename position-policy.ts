@@ -55,16 +55,16 @@ export function effectiveGuardianControls(position: ManagedPosition, state: Winn
   if (state === "moonbag") {
     return {
       trailingStopPct: exit.moonbagTrailingStopPct ?? Math.min(35, exit.trailingStopPct + 10),
-      maxHoldMinutes: exit.moonbagMaxHoldMinutes ?? Math.max(exit.maxHoldMinutes, 20_160),
+      maxHoldMinutes: Math.min(exit.moonbagMaxHoldMinutes ?? 2_880, 2_880),
     };
   }
   if (state === "runner" || state === "confirmed") {
     return {
       trailingStopPct: exit.winnerTrailingStopPct ?? Math.min(32, exit.trailingStopPct + 5),
-      maxHoldMinutes: exit.winnerMaxHoldMinutes ?? Math.max(exit.maxHoldMinutes, 2_160),
+      maxHoldMinutes: Math.min(exit.winnerMaxHoldMinutes ?? 20, 20),
     };
   }
-  return { trailingStopPct: exit.trailingStopPct, maxHoldMinutes: exit.maxHoldMinutes };
+  return { trailingStopPct: exit.trailingStopPct, maxHoldMinutes: Math.min(exit.maxHoldMinutes, 20) };
 }
 
 export function nextScaleStep(position: ManagedPosition, snapshot: MarketSnapshot, fresh: WarRoomResult, confirmation: number): ScaleStep | null {

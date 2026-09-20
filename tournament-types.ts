@@ -10,8 +10,19 @@ export type TournamentRolePerformance = {
   wins: number;
   losses: number;
   attributedPnlUsd: number;
+  activeTrades?: number;
+  unrealizedAttributedPnlUsd?: number;
+  totalAttributedPnlUsd?: number;
   sourceTeamId?: string;
   sourceTeamName?: string;
+};
+
+export type TournamentMemberDecision = {
+  role: TournamentRole;
+  vote: "BUY" | "WATCH" | "SKIP";
+  score: number;
+  confidence: number;
+  memoryNamespace: string;
 };
 
 export type TournamentPosition = {
@@ -36,7 +47,14 @@ export type TournamentPosition = {
   stopLossPct: number;
   trailingStopPct: number;
   maxHoldMinutes: number;
+  moonbagAt?: string;
   roleScores: Record<TournamentRole, number>;
+  decisionId: string;
+  memoryNamespace: string;
+  memberOpinions: TournamentMemberDecision[];
+  exitReason?: string;
+  memoryRecorded?: boolean;
+  rolesCredited?: boolean;
   rolesSettled?: boolean;
 };
 
@@ -62,6 +80,7 @@ export type TournamentTeam = {
   realizedPnlUsd: number;
   lockedCapitalLossUsd: number;
   totalTrades: number;
+  councilRuns: number;
   positions: TournamentPosition[];
   trades: TournamentTrade[];
   rolePerformance: Record<TournamentRole, TournamentRolePerformance>;
@@ -71,11 +90,18 @@ export type TournamentTeam = {
   fileCabinet: boolean;
   rejectionCounts: Record<string, number>;
   lastRejectionReason?: string;
+  lastCouncil?: {
+    decisionId: string;
+    decision: "BUY" | "WATCH" | "SKIP";
+    score: number;
+    completedAt: string;
+    members: Partial<Record<TournamentRole, TournamentMemberDecision>>;
+  };
   draftSources?: Partial<Record<TournamentRole, { teamId: string; teamName: string; rank: number }>>;
 };
 
 export type TournamentState = {
-  version: 2;
+  version: 3;
   phase: TournamentPhase;
   status: "running" | "winner" | "failed";
   createdAt: string;
@@ -100,6 +126,9 @@ export type TournamentTeamView = TournamentTeam & {
   openValueUsd: number;
   equityUsd: number;
   unrealizedPnlUsd: number;
+  totalPnlUsd: number;
+  accountingDeltaUsd: number;
+  accountingVerified: boolean;
   activeTrades: number;
   returnPct: number;
 };

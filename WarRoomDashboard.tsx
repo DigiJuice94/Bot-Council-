@@ -835,7 +835,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="active-trades" className="active-trades-panel page-panel">
-        <div className="wide-panel-head"><div><h2>◉ Active Trades</h2><p>Main PAPER positions currently held and actively managed by the Exit Strategist.</p></div><span className="quiet-chip">{activePositions.length} active</span></div>
+        <div className="wide-panel-head"><div><h2>◉ Active Trades</h2><p>Main PAPER positions actively managed by the Exit Strategist · 20-minute maximum, with earlier exits when live buying pressure fades.</p></div><span className="quiet-chip">{activePositions.length} active</span></div>
         <div className="active-trades-grid">
           {activePositions.length ? activePositions.slice(0, 24).map((position) => {
             const pnlUsd = positionPnlUsd(position);
@@ -851,7 +851,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="moon-bags" className="moon-bags-panel page-panel">
-        <div className="wide-panel-head"><div><h2>🌙 Moon Bags</h2><p>Partial profits were already taken; these smaller remainders continue running under Moon Bag protection.</p></div><span className="moonbag-chip">{moonBagPositions.length} moon bag{moonBagPositions.length === 1 ? "" : "s"}</span></div>
+        <div className="wide-panel-head"><div><h2>🌙 Moon Bags</h2><p>Partial profits were already taken; these smaller remainders continue under Moon Bag protection for no more than 48 hours.</p></div><span className="moonbag-chip">{moonBagPositions.length} moon bag{moonBagPositions.length === 1 ? "" : "s"}</span></div>
         <div className="moon-bags-grid">
           {moonBagPositions.length ? moonBagPositions.slice(0, 24).map((position) => {
             const remainingValue = Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0);

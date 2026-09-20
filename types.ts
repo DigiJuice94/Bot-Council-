@@ -251,6 +251,9 @@ export type IndependentEntityOpinion = {
 
 export type IndependentCouncilTrace = {
   sessionId: string;
+  teamId?: string;
+  teamName?: string;
+  memoryNamespace?: string;
   mode: "independent-ai" | "independent-local" | "isolated-local-fallback";
   agentModel: string;
   cioModel: string;
@@ -495,6 +498,7 @@ export type ManagedPosition = {
   lastReason: string;
   takenProfitLabels: string[];
   winnerState?: WinnerState;
+  moonbagStartedAt?: string;
   scaleIns?: PositionScaleFill[];
   lastConfirmationScore?: number;
   maxGrossExposurePct?: number;
