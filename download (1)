@@ -2,6 +2,6 @@ node_modules/
 .next/
 .env
 .env.*
-*.tsbuildinfo
-*.zip
-deployment-source.tar.gz
+!.env.example
+npm-debug.log*
+.DS_Store

@@ -1,23 +1,22 @@
-# Bot War Room V3.6.2 · 80-Bot Council Tournament
+# Bot War Room V3.6.2 · File Cabinet Main Council
 
-This release keeps the verified V3.6.2 trading, liquidity, sellability, Guardian and accounting files locked while adding ten genuinely separate PAPER councils.
+The tournament is retired. Team File Cabinet—the best qualifier performer—is promoted to the persistent main PAPER wallet.
 
-## Tournament architecture
+## Main council
 
-- Ten councils receive the same measured market opportunity.
-- Every council has eight members: Early Runner Scout, Narrative Scout, Flow Analyst, Pattern Quant, Safety Gate, Dumper Specialist, Portfolio Strategist and Runner CIO.
-- Each of the 80 members forms its own private score and vote, uses its own council/role memory namespace and receives its own settled outcome lesson.
-- Every council owns a separate $1,000 PAPER wallet, positions, cash, realized P/L and performance ledger.
-- Teams 1–9 use controlled variations. Team 10 is Team File Cabinet and treats stored research as advisory evidence.
-- Council runs are concurrency-limited to two at a time. This preserves independent decisions without creating 80 processes or repeating provider calls.
-- The primary PAPER wallet is sidelined while the tournament is active. Guardian can still manage legacy positions.
-- Regular positions have a hard 20-minute maximum and may exit after five minutes when live buy/sell flow and volume acceleration confirm fading pressure. True 10% moon bags are exempt from that turnover rule but close no later than 48 hours after moon-bag conversion.
+- Eight independent local roles use Team File Cabinet's existing private memory namespace.
+- Stored research remains advisory evidence for the CIO; it cannot override global safety.
+- The promoted council keeps the File Cabinet threshold adjustment and learned runner/dumper evidence.
+- Tournament cash, equity and positions are not merged into the main wallet. This prevents artificial gains and preserves accounting integrity.
 
-The Tournament tab shows moving rank, wallet value, realized P/L, active and total trades, Council-run count and the latest vote, score and confidence for every member.
+## Restored utilities
 
-## Safety
+- The primary paper wallet can open new positions again.
+- Portfolio, Active Trades, Moon Bags, Unsellable Capital, Detailed Trade Log, File Cabinet research and diagnostics remain active.
+- The API now returns the complete managed-position ledger instead of truncating the dashboard to 50 positions.
+- Guardian, Exit Strategist, wallet reconciliation and research maintenance continue in the normal scan loop.
 
-The market snapshot is shared, and the following hard protections remain global across all councils:
+## Global safety
 
 - confirmed zero executable liquidity;
 - confirmed honeypot or freeze authority;
@@ -25,27 +24,9 @@ The market snapshot is shared, and the following hard protections remain global 
 - Executor feasibility;
 - locked-capital accounting with no invented sale proceeds.
 
-UNKNOWN provider coverage remains observational, matching the locked baseline. Hard safety cannot be overridden by team variation or File Cabinet research.
+## GitHub/Railway upload protection
 
-## Two-stage tournament
-
-The qualifier runs for 24 hours by default. After it ends, the best, second-best and third-best performer at each role are drafted into Final Teams 1–3. Drafted roles retain their source member memory stream. Each finalist receives a fresh $1,000 wallet and competes for another 24 hours. If every finalist ends below $1,000, the experiment is marked failed.
-
-This release uses the V3 tournament ledger namespace. Deployment starts a clean qualifier because results produced by the former shared-agent overlay are not valid evidence for an 80-member tournament.
-
-## Tournament.13 GitHub-safe turnover release
-
-The first deployment of this release performs one controlled turnover pass. Every pre-existing PAPER position—including regular positions and moon bags—is queued for a Guardian-verified exit, and tournament entries pause only until the existing tournament positions have cleared. Fresh market snapshots and the normal sellability audit are required: confirmed unsellable positions become locked-capital losses, while positions without a current quote remain pending instead of receiving invented proceeds. The migration is recorded once, so later restarts do not liquidate newly opened trades. Wallet history, realized results, trade logs and learned memory are preserved; this is not a reset.
-
-The Docker build restores `app`, `components`, `lib` and `public` from the included root-level `deployment-source.tar.gz` before running the real Next.js build. This protects browser-based GitHub uploads that preserve root files but drop nested directories. The normal source folders remain included for direct local development, and no brittle pre-build file checklist is used.
-
-Optional controls:
-
-- `TOURNAMENT_QUALIFIER_HOURS` (default `24`)
-- `TOURNAMENT_FINAL_HOURS` (default `24`)
-- `TOURNAMENT_MAX_OPEN_POSITIONS` (default `12` per council)
-- `TOURNAMENT_PAPER_FEE_BPS` (default `25`)
-- `WAR_ROOM_SCAN_WORKERS` (`1`–`3`, default `3`)
+The one-folder package includes `deployment-source.tar.gz`. Keep that root-level file. The Docker build extracts it before compilation so `app`, `components`, `lib` and `public` are restored even when a browser-based GitHub upload drops nested folders.
 
 ## Run
 
@@ -56,6 +37,4 @@ npm run build
 npm start
 ```
 
-Copy `env.example` to your deployment environment and configure the provider and Redis values you use. Redis is strongly recommended so wallets and all 80 memory streams survive restarts.
-
-See `BASELINE-INTEGRITY.md` for hashes of the locked trading files.
+Redis is strongly recommended so the main wallet, trade history and promoted File Cabinet memories survive restarts.

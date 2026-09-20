@@ -1,11 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getTradeJournal } from "@/lib/trade-journal";
 
 export const dynamic = "force-dynamic";
 
-// V2.12 deliberately disables client/manual paper order injection.
-// The only code path allowed to create a new paper position is the server-side autonomous Council in lib/autopilot.ts.
-export async function POST() {
-  return NextResponse.json({
-    error: "Manual paper execution is disabled in V2.12. The autonomous War Room owns the paper wallet and only real-provider Council decisions may create entries.",
-  }, { status: 403, headers: { "Cache-Control": "no-store" } });
+export async function GET(request: NextRequest) {
+  const limit = Number(request.nextUrl.searchParams.get("limit") ?? 100);
+  return NextResponse.json(await getTradeJournal(limit), { headers: { "Cache-Control": "no-store" } });
 }

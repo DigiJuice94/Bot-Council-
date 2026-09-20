@@ -1,7 +1,6 @@
 import { buildCouncilDiscussion } from "./debate";
 import { executePaper } from "./execution";
-import { runIndependentCouncil } from "./agent-entity-runtime";
-import { runWarRoom } from "./engine";
+import { runIndependentCouncil, type IndependentCouncilProfile } from "./agent-entity-runtime";
 import { resolveAdaptiveWeights, relevantMemoryHints } from "./learning-store";
 import { fetchLiveCandidate, fetchLiveTokenSnapshot, getWaterfallProviderHealth } from "./provider-waterfall";
 import { liveMarketDataMode } from "./market-data";
@@ -15,7 +14,6 @@ import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import { ensureTournamentRuntime, isTournamentActive, observeTournamentOpportunity } from "./tournament";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -24,6 +22,27 @@ const DEFAULT_SCAN_WORKERS = 3;
 const MAX_CHAT_ROWS = 120;
 const MAX_DECISIONS = 60;
 const MAX_SHADOW_ROWS = 80;
+
+const MAIN_FILE_CABINET_PROFILE: IndependentCouncilProfile = {
+  teamId: "team-10",
+  teamName: "Team File Cabinet · Main Wallet",
+  // Preserve the winning team's private role memories instead of starting the
+  // promoted council from an empty namespace.
+  memoryNamespace: "tournament:team-10",
+  roleMemoryNamespaces: {
+    launch: "tournament:team-10",
+    social: "tournament:team-10",
+    wallet: "tournament:team-10",
+    quant: "tournament:team-10",
+    contract: "tournament:team-10",
+    bear: "tournament:team-10",
+    portfolio: "tournament:team-10",
+    cio: "tournament:team-10",
+  },
+  roleBias: {},
+  thresholdDelta: -3,
+  fileCabinet: true,
+};
 
 export type AutopilotChatRow = {
   id: string;
@@ -81,7 +100,6 @@ export type AutopilotStatus = {
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   chat: AutopilotChatRow[];
-  mainWalletPausedForTournament: boolean;
   lastError?: string;
 };
 
@@ -129,7 +147,6 @@ function initialState(): AutopilotStatus {
     latestResult: null,
     recentDecisions: [],
     chat: [],
-    mainWalletPausedForTournament: true,
   };
 }
 
@@ -417,22 +434,10 @@ async function scanOneChain(chain: Chain) {
     runnerGenome,
   } as const;
 
-  let tournamentActive = await isTournamentActive().catch(() => true);
-  let result: WarRoomResult;
-  if (tournamentActive) {
-    try {
-      const seed = runWarRoom(snapshot, councilOptions);
-      const tournament = await observeTournamentOpportunity(seed, councilOptions);
-      tournamentActive = tournament.active;
-      result = tournament.representativeResult ?? await runIndependentCouncil(snapshot, councilOptions);
-    } catch (error) {
-      console.error("[tournament] opportunity", error);
-      tournamentActive = await isTournamentActive().catch(() => true);
-      result = await runIndependentCouncil(snapshot, councilOptions);
-    }
-  } else {
-    result = await runIndependentCouncil(snapshot, councilOptions);
-  }
+  const result: WarRoomResult = await runIndependentCouncil(snapshot, {
+    ...councilOptions,
+    teamProfile: MAIN_FILE_CABINET_PROFILE,
+  });
 
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
@@ -447,9 +452,6 @@ async function scanOneChain(chain: Chain) {
   else if (result.decision === "WATCH") current.funnel.watches += 1;
   else current.funnel.skips += 1;
   await appendDecisionJournal(result);
-  // The representative result is Council 1's decision. The other nine Council
-  // results stay in the isolated tournament ledger; the main wallet stays out.
-  current.mainWalletPausedForTournament = tournamentActive;
 
   const discussion = buildCouncilDiscussion(result);
   for (const turn of discussion) {
@@ -459,10 +461,7 @@ async function scanOneChain(chain: Chain) {
   addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Deterministic safety and Executor checks complete. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
-  if (tournamentActive) {
-    // Guardian keeps managing any legacy main-wallet holdings, but no new main
-    // PAPER position is opened until the final tournament round completes.
-  } else if (result.decision === "BUY") {
+  if (result.decision === "BUY") {
     if (!result.risk.passed) recordRejection(result.risk.hardBlocks[0] ?? "Deterministic risk veto");
     else if (!result.execution.allowed || !result.execution.request) recordRejection(result.execution.reason);
     else executed = await autoExecute(result, portfolio);
@@ -525,7 +524,6 @@ export async function runAutonomousTick() {
 
 export function ensureAutonomousWarRoom() {
   ensurePositionGuardianLoop();
-  ensureTournamentRuntime();
   const current = state();
   current.running = true;
   current.intervalMs = intervalMs();
@@ -535,7 +533,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `V3.6.2 Local Council started with three bounded scan lanes. Claude Risk Reaper is removed. Deterministic liquidity, honeypot, sellability, authority and Executor protections remain active. Audit Watch is observational only when coverage is UNKNOWN.`, "system");
+  addChat("System", `Team File Cabinet is promoted to the main paper wallet with its private learned memory intact. Three bounded scan lanes and all wallet utilities are active. Deterministic liquidity, honeypot, sellability, authority and Executor protections remain global.`, "system");
 }
 
 export async function getAutopilotStatus() {
@@ -548,14 +546,13 @@ export async function getAutopilotStatus() {
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
-  state().mainWalletPausedForTournament = await isTournamentActive().catch(() => true);
   return {
     ...state(),
     paperWallet: bankroll.wallet,
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
+    positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)),
     generatedAt: new Date().toISOString(),
   };
 }

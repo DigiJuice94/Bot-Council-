@@ -25,7 +25,6 @@ type AutopilotPayload = {
   positions: ManagedPosition[];
   lastError?: string;
   generatedAt: string;
-  mainWalletPausedForTournament?: boolean;
 };
 
 type DetailedTradeRow = PaperWalletFillRecord & {
@@ -696,7 +695,6 @@ export default function WarRoomDashboard() {
     <main className="light-app">
       <nav className="war-room-top-tabs" aria-label="War Room sections">
         <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
-        <button type="button" onClick={() => scrollToSection("tournament")}>TOURNAMENT</button>
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
         <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
@@ -718,8 +716,7 @@ export default function WarRoomDashboard() {
       </section>
 
       <section className="autonomy-band">
-        {status?.mainWalletPausedForTournament && <div className="main-wallet-paused"><b>MAIN WALLET SIDELINED</b><span>New entries are paused while the Council Tournament runs. Existing holdings remain protected by Guardian.</span></div>}
-        <div><span className="green-live"><i /> LIVE</span><strong>Real-data autonomous paper trader</strong><p>Fresh listings flow into seven isolated specialist entities first; only after their private opinions lock do they meet, and a separate eighth Runner CIO synthesizes the group. Approved BUYs spend the persistent $1,000 paper wallet; Guardian marks positions to market while the dedicated Exit Strategist banks profits, kills dead trades, recycles stale capital and returns simulated proceeds to cash.</p></div>
+        <div><span className="green-live"><i /> LIVE</span><strong>Team File Cabinet · main paper wallet</strong><p>The tournament is retired. Its best-performing File Cabinet council now controls the persistent main wallet using the same eight independent roles and its private learned memory. Approved BUYs, trims and exits flow through Guardian, the detailed ledger and reconciled wallet accounting.</p></div>
         <div className="paper-wallet-strip">
           <span><small>Starting wallet</small><b>${(status?.paperWallet?.startingCashUsd ?? 1000).toFixed(2)}</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 1000).toFixed(2)}</b></span>
