@@ -1,11 +1,12 @@
 import { buildCouncilDiscussion } from "./debate";
 import { executePaper } from "./execution";
-import { runIndependentCouncil, type IndependentCouncilProfile } from "./agent-entity-runtime";
+import { runIndependentCouncil } from "./agent-entity-runtime";
+import { runWarRoom } from "./engine";
 import { resolveAdaptiveWeights, relevantMemoryHints } from "./learning-store";
 import { fetchLiveCandidate, fetchLiveTokenSnapshot, getWaterfallProviderHealth } from "./provider-waterfall";
 import { liveMarketDataMode } from "./market-data";
 import { ensurePaperWalletResearchFunds, getPaperPortfolioContext, getPaperWalletResetMeta } from "./paper-wallet";
-import { ensurePositionGuardianLoop, registerPaperPosition } from "./position-manager";
+import { assessPaperEntryEligibility, registerPaperPosition } from "./position-manager";
 import { acquireRuntimeLease, listManagedPositions } from "./position-store";
 import { loadLatestProfitability } from "./profitability-store";
 import { getProviderHealth } from "./provider-health";
@@ -14,6 +15,7 @@ import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
+import { ensureTournamentRuntime, isTournamentActive, observeTournamentOpportunity } from "./tournament";
 import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
@@ -22,19 +24,6 @@ const DEFAULT_SCAN_WORKERS = 3;
 const MAX_CHAT_ROWS = 120;
 const MAX_DECISIONS = 60;
 const MAX_SHADOW_ROWS = 80;
-const FILE_CABINET_MIN_BUY_USD = 25;
-const FILE_CABINET_MAX_BUY_USD = 125;
-const FILE_CABINET_SIZE_MULTIPLIER = 0.97;
-const FILE_CABINET_MAX_OPEN_POSITIONS = 12;
-
-const MAIN_FILE_CABINET_PROFILE: IndependentCouncilProfile = {
-  teamId: "team-10",
-  teamName: "Team File Cabinet",
-  memoryNamespace: "tournament:team-10",
-  roleBias: {},
-  thresholdDelta: -3,
-  fileCabinet: true,
-};
 
 export type AutopilotChatRow = {
   id: string;
@@ -92,6 +81,7 @@ export type AutopilotStatus = {
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   chat: AutopilotChatRow[];
+  mainWalletPausedForTournament: boolean;
   lastError?: string;
 };
 
@@ -139,6 +129,7 @@ function initialState(): AutopilotStatus {
     latestResult: null,
     recentDecisions: [],
     chat: [],
+    mainWalletPausedForTournament: true,
   };
 }
 
@@ -176,24 +167,64 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
   };
 }
 
-async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskContext, request: ExecutionRequest) {
-  // Exact Team File Cabinet tournament sizing: learned Genome amount, multiplied
-  // by 0.97, with the original $25 floor and $125 ceiling.
+function explicitSecurityFailure(result: WarRoomResult) {
+  const snapshot = result.snapshot;
+  const q = snapshot.dataProvenance?.quality;
+  if (q?.sellability && !snapshot.sellable) return "Sellability explicitly failed";
+  if (q?.honeypot && snapshot.honeypot) return "Honeypot evidence is positive";
+  if (q?.top10 && snapshot.top10Pct > 80) return "Top 10 holders exceed 80%";
+  if (q?.bundled && snapshot.bundledPct > 25) return "Bundled supply exceeds 25%";
+  if (snapshot.chainFamily === "solana" && q?.authorities && (snapshot.mintAuthority || snapshot.freezeAuthority)) return "Solana mint/freeze authority remains active";
+  const earlyRunner = snapshot.marketCap >= 8_000 && snapshot.marketCap <= 80_000 && snapshot.ageMinutes <= 1_440;
+  const minimumLiquidity = earlyRunner ? Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_ABSOLUTE_MIN_LIQUIDITY_USD ?? 1_000)) : 15_000;
+  if (snapshot.liquidity < minimumLiquidity) return `Executable liquidity below ${earlyRunner ? "early-runner" : "standard"} minimum`;
+  return undefined;
+}
+
+async function eligibilityWithPaperUnknownOverride(result: WarRoomResult, request: ExecutionRequest, context: PositionEntryContext) {
+  const standard = await assessPaperEntryEligibility({ request, snapshot: result.snapshot, entryContext: context });
+  if (standard.allowed) return standard;
+  const q = result.snapshot.dataProvenance?.quality;
+  const missingCriticalEvidence = Boolean(q && (!q.sellability || !q.honeypot || (result.snapshot.chainFamily === "solana" && !q.authorities)));
+  const explicitFailure = explicitSecurityFailure(result);
+  if (!missingCriticalEvidence || explicitFailure || !standard.reason.includes("deterministic contract/security conditions")) return standard;
+
+  const sameToken = (await listManagedPositions()).filter((position) => position.chain === request.chain && position.tokenAddress === request.tokenAddress);
+  if (sameToken.some((position) => position.status !== "closed")) {
+    return { allowed: false, isReentry: false, reentryCount: 0, reason: "Position Guardian already owns an open position in this token." };
+  }
+  if (sameToken.some((position) => position.status === "closed")) {
+    return standard; // Preserve the existing re-entry/cooldown rules after a completed trade.
+  }
+  return {
+    allowed: true,
+    isReentry: false,
+    reentryCount: 0,
+    reason: "PAPER-only exploration override: safety evidence is incomplete, not explicitly bad. Position size remains reduced and no live wallet is exposed.",
+  };
+}
+
+async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskContext, request: ExecutionRequest, exploration: boolean) {
+  // $50 is the floor, not the ceiling. Once Council sees an opportunity, the
+  // active Runner Genome controls paper size from learned runner/dumper similarity.
   if (request.mode === "paper" && request.side === "BUY") {
-    if (portfolio.cashUsd + 0.005 < FILE_CABINET_MIN_BUY_USD) {
-      const reason = `Paper wallet has $${portfolio.cashUsd.toFixed(2)} cash; Team File Cabinet requires at least $${FILE_CABINET_MIN_BUY_USD.toFixed(2)}.`;
+    const minimumBuyUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
+    const maximumBuyUsd = Math.max(minimumBuyUsd, Number(process.env.PAPER_TRAINING_MAX_BUY_USD ?? 150));
+    if (portfolio.cashUsd + 0.005 < minimumBuyUsd) {
+      const reason = `Paper wallet has $${portfolio.cashUsd.toFixed(2)} cash; waiting for an exit before the next $${minimumBuyUsd.toFixed(2)}+ training entry.`;
       recordRejection(reason);
-      addChat("Executor", `TEAM FILE CABINET BUY waiting for cash on $${result.snapshot.symbol}: ${reason}`, "execution");
+      addChat("Executor", `${exploration ? "EARLY-RUNNER PROBE" : "EARLY-RUNNER BUY"} waiting for cash on $${result.snapshot.symbol}: ${reason}`, "execution");
       return false;
     }
-    const learnedTarget = result.runnerGenome?.suggestedTradeUsd ?? request.notionalUsd;
-    const notionalUsd = Math.min(portfolio.cashUsd, FILE_CABINET_MAX_BUY_USD, Math.max(FILE_CABINET_MIN_BUY_USD, learnedTarget * FILE_CABINET_SIZE_MULTIPLIER));
+    const genomeTarget = Math.max(minimumBuyUsd, result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd);
+    const targetUsd = exploration ? Math.min(genomeTarget, Number(process.env.PAPER_WATCH_MAX_BUY_USD ?? 100)) : genomeTarget;
+    const notionalUsd = Math.min(maximumBuyUsd, targetUsd, portfolio.cashUsd);
     request = {
       ...request,
-      notionalUsd: Number(notionalUsd.toFixed(2)),
+      notionalUsd: Number(Math.max(minimumBuyUsd, notionalUsd).toFixed(2)),
       maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Math.max(request.maxSlippageBps, Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600)) : request.maxSlippageBps,
     };
-    addChat("Executor", `TEAM FILE CABINET BUY $${result.snapshot.symbol}: $${request.notionalUsd.toFixed(2)} · Genome ${result.runnerGenome?.entryScore.toFixed(0) ?? "—"}/100 · dumper risk ${result.runnerGenome?.dumperRiskScore.toFixed(0) ?? "—"}/100.`, "execution");
+    addChat("Executor", `${exploration ? "EARLY-RUNNER PROBE" : "EARLY-RUNNER BUY"} $${result.snapshot.symbol}: $${request.notionalUsd.toFixed(2)} · Genome ${result.runnerGenome?.entryScore.toFixed(0) ?? "—"}/100 · dumper risk $${result.runnerGenome?.dumperRiskScore.toFixed(0) ?? "—"}/100. Win or lose, file the outcome and update the model.`, "execution");
   }
 
   const context = entryContext(result, portfolio);
@@ -209,13 +240,13 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   if (!executionSnapshot) {
     const reason = "Entry blocked: fresh final liquidity verification returned no executable market.";
     recordRejection(reason);
-    addChat("Executor", `TEAM FILE CABINET entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
   }
   if (!Number.isFinite(executionSnapshot.liquidity) || executionSnapshot.liquidity <= 0) {
     const reason = "Entry blocked: fresh final liquidity verification reports $0 liquidity.";
     recordRejection(reason);
-    addChat("Executor", `TEAM FILE CABINET entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
   }
   const liquidityAudit = await auditEntryLiquidity(executionSnapshot, request);
@@ -231,18 +262,13 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   addChat("Liquidity Auditor", `$${result.snapshot.symbol}: ${liquidityAudit.reason}. Entry liquidity check passed.`, "execution");
 
   context.snapshot = executionSnapshot;
-  const positions = await listManagedPositions();
-  const openPositions = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
-  const sameTokenOpen = openPositions.some((position) => position.chain === request.chain && position.tokenAddress === request.tokenAddress);
-  if (sameTokenOpen || openPositions.length >= FILE_CABINET_MAX_OPEN_POSITIONS) {
-    const reason = sameTokenOpen
-      ? "Team File Cabinet already holds this token."
-      : `Team File Cabinet reached its tournament maximum of ${FILE_CABINET_MAX_OPEN_POSITIONS} active trades.`;
-    recordRejection(reason);
-    addChat("Executor", `TEAM FILE CABINET entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
+  const verifiedResult: WarRoomResult = { ...result, snapshot: executionSnapshot };
+  const eligibility = await eligibilityWithPaperUnknownOverride(verifiedResult, request, context);
+  if (!eligibility.allowed) {
+    recordRejection(eligibility.reason);
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER"} entry skipped for $${result.snapshot.symbol}: ${eligibility.reason}`, "execution");
     return false;
   }
-  const reentryCount = positions.filter((position) => position.status === "closed" && position.chain === request.chain && position.tokenAddress === request.tokenAddress).length;
 
   try {
     const fill = await executePaper(request, executionSnapshot);
@@ -252,20 +278,27 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
       snapshot: executionSnapshot,
       exitStrategy: result.exitStrategy,
       entryContext: context,
-      reentryCount,
+      reentryCount: eligibility.reentryCount,
     });
-    await markResearchTradeOpened(result, fill.requestedUsd, false);
+    await markResearchTradeOpened(result, fill.requestedUsd, exploration);
     state().buyCount += 1;
     state().funnel.paperBuys += 1;
-    addChat("Executor", `TEAM FILE CABINET BUY $${fill.symbol}: $${fill.requestedUsd.toFixed(2)} at $${fill.fillPrice}. ${fill.routeVerified ? "Live route verified." : "Live DEX liquidity model used."} Guardian owns ${position?.id ?? "the position"}.`, "execution");
+    if (exploration) {
+      state().explorationBuyCount += 1;
+      state().funnel.explorationBuys += 1;
+    }
+    addChat("Executor", `${exploration ? "PAPER PROBE" : "AUTO PAPER BUY"} $${fill.symbol}: $${fill.requestedUsd.toFixed(2)} at $${fill.fillPrice}. ${fill.routeVerified ? "Live route verified." : "Live DEX liquidity model used."} Guardian owns ${position?.id ?? "the position"}.`, "execution");
 
-    const refreshedPositions = await listManagedPositions();
-    await ingestClosedPositions(refreshedPositions);
-    const resetMeta = await getPaperWalletResetMeta();
-    const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
-    const research = await getRunnerResearchSnapshot({ positions: refreshedPositions, providers, walletResetCount: resetMeta.resets });
-    const live = await maybeDispatchLiveTrade({ result, paperRequest: request, research });
-    if (live.attempted) addChat("Executor", `${live.dispatched ? "LIVE AUTO-UNLOCK" : "LIVE DISPATCH BLOCKED"}: ${live.reason}`, "execution");
+    // Only full Council BUYs can mirror to live, and only after every Code Deciphered gate passes.
+    if (!exploration) {
+      const positions = await listManagedPositions();
+      await ingestClosedPositions(positions);
+      const resetMeta = await getPaperWalletResetMeta();
+      const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
+      const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
+      const live = await maybeDispatchLiveTrade({ result, paperRequest: request, research });
+      if (live.attempted) addChat("Executor", `${live.dispatched ? "LIVE AUTO-UNLOCK" : "LIVE DISPATCH BLOCKED"}: ${live.reason}`, "execution");
+    }
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -276,19 +309,32 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
 }
 
 async function autoExecute(result: WarRoomResult, portfolio: PortfolioRiskContext) {
-  if (result.decision !== "BUY" || !result.risk.passed || result.councilProcess.executorVote === "BLOCK") return false;
-  const request: ExecutionRequest = result.execution.request ?? {
+  if (result.decision !== "BUY" || !result.execution.allowed || !result.execution.request) return false;
+  if (result.execution.request.mode !== "paper") return false;
+  return executeRequest(result, portfolio, result.execution.request, false);
+}
+
+function explorationRequest(result: WarRoomResult, portfolio: PortfolioRiskContext): ExecutionRequest | null {
+  if (process.env.PAPER_EXPLORATION_MODE === "false") return null;
+  if (result.decision !== "WATCH" || !result.risk.passed) return null;
+  if (result.councilProcess.executorVote === "BLOCK") return null;
+  if (explicitSecurityFailure(result)) return null;
+  // WATCH means the Council sees an opportunity but wants more proof. In PAPER mode
+  // that is exactly the type of rep the Filing Cabinet needs. Do not re-run old Alpha/quorum filters.
+  const minimumBuyUsd = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
+  if (portfolio.cashUsd + 0.005 < minimumBuyUsd) return null;
+  const notionalUsd = Number(Math.max(minimumBuyUsd, Math.min(result.runnerGenome?.suggestedTradeUsd ?? minimumBuyUsd, Number(process.env.PAPER_WATCH_MAX_BUY_USD ?? 100))).toFixed(2));
+  return {
     mode: "paper",
     chain: result.snapshot.chain,
     tokenAddress: result.snapshot.tokenAddress,
     symbol: result.snapshot.symbol,
     side: "BUY",
-    notionalUsd: result.runnerGenome?.suggestedTradeUsd ?? FILE_CABINET_MIN_BUY_USD,
-    maxSlippageBps: result.conviction >= 85 ? 125 : 90,
-    strategyId: result.experiment.id,
-    decisionId: result.decisionId,
+    notionalUsd,
+    maxSlippageBps: result.runnerGenome?.earlyRunnerZone ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : 135,
+    strategyId: `${result.experiment.id}-exploration`,
+    decisionId: `${result.decisionId}-PROBE`,
   };
-  return executeRequest(result, portfolio, request);
 }
 
 function addShadowDecision(result: WarRoomResult) {
@@ -360,17 +406,6 @@ async function scanOneChain(chain: Chain) {
     getRunnerGenomeGuidance(snapshot),
   ]);
 
-  // These are the exact wallet constraints Team File Cabinet competed with.
-  // They replace the broad main-wallet training defaults for Council decisions.
-  const fileCabinetPortfolio: PortfolioRiskContext = {
-    ...portfolio,
-    maxDailyLossPct: 100,
-    maxOpenPositions: FILE_CABINET_MAX_OPEN_POSITIONS,
-    maxTotalExposurePct: 100,
-    maxChainExposurePct: 100,
-    liveTradingEnabled: false,
-  };
-
   const councilOptions = {
     mode: "paper",
     regime,
@@ -378,14 +413,26 @@ async function scanOneChain(chain: Chain) {
     learningSource: learning.source,
     memoryHints,
     profitability,
-    portfolio: fileCabinetPortfolio,
+    portfolio,
     runnerGenome,
   } as const;
 
-  const result: WarRoomResult = await runIndependentCouncil(snapshot, {
-    ...councilOptions,
-    teamProfile: MAIN_FILE_CABINET_PROFILE,
-  });
+  let tournamentActive = await isTournamentActive().catch(() => true);
+  let result: WarRoomResult;
+  if (tournamentActive) {
+    try {
+      const seed = runWarRoom(snapshot, councilOptions);
+      const tournament = await observeTournamentOpportunity(seed, councilOptions);
+      tournamentActive = tournament.active;
+      result = tournament.representativeResult ?? await runIndependentCouncil(snapshot, councilOptions);
+    } catch (error) {
+      console.error("[tournament] opportunity", error);
+      tournamentActive = await isTournamentActive().catch(() => true);
+      result = await runIndependentCouncil(snapshot, councilOptions);
+    }
+  } else {
+    result = await runIndependentCouncil(snapshot, councilOptions);
+  }
 
   if (!result.independentCouncil) {
     throw new Error("Independent Council trace missing; refusing legacy synthetic decision");
@@ -400,21 +447,31 @@ async function scanOneChain(chain: Chain) {
   else if (result.decision === "WATCH") current.funnel.watches += 1;
   else current.funnel.skips += 1;
   await appendDecisionJournal(result);
+  // The representative result is Council 1's decision. The other nine Council
+  // results stay in the isolated tournament ledger; the main wallet stays out.
+  current.mainWalletPausedForTournament = tournamentActive;
 
   const discussion = buildCouncilDiscussion(result);
   for (const turn of discussion) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Exact tournament Team File Cabinet rules applied. Wallet equity ${fileCabinetPortfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Deterministic safety and Executor checks complete. PAPER kill switches OFF. Wallet equity ${portfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
-  if (result.decision === "BUY") {
+  if (tournamentActive) {
+    // Guardian keeps managing any legacy main-wallet holdings, but no new main
+    // PAPER position is opened until the final tournament round completes.
+  } else if (result.decision === "BUY") {
     if (!result.risk.passed) recordRejection(result.risk.hardBlocks[0] ?? "Deterministic risk veto");
-    else if (result.councilProcess.executorVote === "BLOCK") recordRejection("Executor blocked market feasibility");
-    else executed = await autoExecute(result, fileCabinetPortfolio);
+    else if (!result.execution.allowed || !result.execution.request) recordRejection(result.execution.reason);
+    else executed = await autoExecute(result, portfolio);
+  } else if (result.decision === "WATCH") {
+    const probe = explorationRequest(result, portfolio);
+    if (probe) executed = await executeRequest(result, portfolio, probe, true);
+    else recordRejection("WATCH opportunity could not execute because a hard safety/cash condition blocked the paper rep");
   } else {
-    recordRejection(`Team File Cabinet Council finished ${result.decision}`);
+    recordRejection(result.risk.hardBlocks[0] ?? "Council/alpha threshold produced SKIP");
   }
   if (!executed) addShadowDecision(result);
 }
@@ -467,7 +524,7 @@ export async function runAutonomousTick() {
 }
 
 export function ensureAutonomousWarRoom() {
-  ensurePositionGuardianLoop();
+  ensureTournamentRuntime();
   const current = state();
   current.running = true;
   current.intervalMs = intervalMs();
@@ -477,7 +534,7 @@ export function ensureAutonomousWarRoom() {
 
   setTimeout(() => void runAutonomousTick(), 750);
   globalState.__botWarRoomAutopilotTimerV14 = setInterval(() => void runAutonomousTick(), current.intervalMs);
-  addChat("System", `Team File Cabinet is promoted to the main paper wallet with its private learned memory intact. Three bounded scan lanes and all wallet utilities are active. Deterministic liquidity, honeypot, sellability, authority and Executor protections remain global.`, "system");
+  addChat("System", `Exact Tournament.13 Team File Cabinet environment started as the only paper wallet. Its original council, scoring, sizing, execution, exits, fees, memory and mark refresh are active.`, "system");
 }
 
 export async function getAutopilotStatus() {
@@ -490,13 +547,14 @@ export async function getAutopilotStatus() {
   const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
+  state().mainWalletPausedForTournament = await isTournamentActive().catch(() => true);
   return {
     ...state(),
     paperWallet: bankroll.wallet,
     paperWalletResetMeta: resetMeta,
     providers,
     research,
-    positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)),
+    positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)).slice(0, 50),
     generatedAt: new Date().toISOString(),
   };
 }

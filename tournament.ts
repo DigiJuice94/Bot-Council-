@@ -7,8 +7,6 @@ import { TOURNAMENT_ROLES, type TournamentMemberDecision, type TournamentPositio
 import type { CouncilEntityId, MarketSnapshot, PortfolioRiskContext, WarRoomResult } from "./types";
 
 const STARTING_CASH_USD = 1_000;
-const QUALIFIER_MS = Math.max(60_000, Number(process.env.TOURNAMENT_QUALIFIER_HOURS ?? 24) * 3_600_000);
-const FINAL_MS = Math.max(60_000, Number(process.env.TOURNAMENT_FINAL_HOURS ?? 24) * 3_600_000);
 const MAX_OPEN_POSITIONS = Math.max(1, Number(process.env.TOURNAMENT_MAX_OPEN_POSITIONS ?? 12));
 const MAX_TRADE_ROWS = 300;
 const MAX_PROCESSED_IDS = 1_200;
@@ -17,15 +15,6 @@ const TP_LEVELS = [{ pct: 25, portion: 0.20 }, { pct: 50, portion: 0.20 }, { pct
 
 type Variant = Pick<TournamentTeam, "id" | "name" | "description" | "roleBias" | "thresholdDelta" | "sizeMultiplier" | "fileCabinet">;
 const VARIANTS: Variant[] = [
-  { id: "team-1", name: "Team 1 · Baseline", description: "Exact V3.6.2 BUY decisions; no tournament bias.", roleBias: {}, thresholdDelta: 0, sizeMultiplier: 1, fileCabinet: false },
-  { id: "team-2", name: "Team 2 · Launch +4", description: "Aggressive Early Runner Scout selection; 52-point base entry threshold.", roleBias: { launch: 4 }, thresholdDelta: -5, sizeMultiplier: 1.03, fileCabinet: false },
-  { id: "team-3", name: "Team 3 · Narrative +4", description: "Narrative-led selection; 53-point base entry threshold.", roleBias: { social: 4 }, thresholdDelta: -4, sizeMultiplier: 0.98, fileCabinet: false },
-  { id: "team-4", name: "Team 4 · Flow +4", description: "Aggressive wallet-flow selection; 52-point base entry threshold.", roleBias: { wallet: 4 }, thresholdDelta: -5, sizeMultiplier: 1.06, fileCabinet: false },
-  { id: "team-5", name: "Team 5 · Quant +4", description: "Pattern-led selection; 54-point base entry threshold.", roleBias: { quant: 4 }, thresholdDelta: -3, sizeMultiplier: 1.01, fileCabinet: false },
-  { id: "team-6", name: "Team 6 · Safety +4", description: "Defensive Fast Safety Gate weighting; 58-point base entry threshold.", roleBias: { contract: 4 }, thresholdDelta: 1, sizeMultiplier: 0.94, fileCabinet: false },
-  { id: "team-7", name: "Team 7 · Bear +4", description: "Defensive Dumper Specialist weighting; 58-point base entry threshold.", roleBias: { bear: 4 }, thresholdDelta: 1, sizeMultiplier: 0.92, fileCabinet: false },
-  { id: "team-8", name: "Team 8 · Portfolio +4", description: "Portfolio-led selection and sizing; 55-point base entry threshold.", roleBias: { portfolio: 4 }, thresholdDelta: -2, sizeMultiplier: 1.08, fileCabinet: false },
-  { id: "team-9", name: "Team 9 · CIO +4", description: "Runner CIO conviction emphasis; 53-point base entry threshold.", roleBias: { cio: 4 }, thresholdDelta: -4, sizeMultiplier: 1.04, fileCabinet: false },
   { id: "team-10", name: "Team File Cabinet", description: "Learned evidence adjusts a 54-point base entry threshold; research remains advisory.", roleBias: {}, thresholdDelta: -3, sizeMultiplier: 0.97, fileCabinet: true },
 ];
 
@@ -53,7 +42,7 @@ function newTeam(variant: Variant): TournamentTeam {
   return { ...variant, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, councilRuns: 0, positions: [], trades: [], rolePerformance: emptyRoles(), rejectionCounts: {} };
 }
 function initialState(now = Date.now()): TournamentState {
-  return { version: 3, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: iso(now + QUALIFIER_MS), opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [], forcedTurnoverReleaseVersion: 1 };
+  return { version: 3, phase: "qualifier", status: "running", createdAt: iso(now), qualifierStartedAt: iso(now), qualifierEndsAt: "9999-12-31T23:59:59.999Z", opportunityCount: 0, processedOpportunityIds: [], teams: VARIANTS.map(newTeam), fileCabinetEvidence: [], forcedTurnoverReleaseVersion: 1 };
 }
 async function ensureState() {
   const current = await loadTournamentState();
@@ -64,6 +53,16 @@ async function ensureState() {
       else current.forcedTurnoverReleaseVersion = 1;
     }
     const variants = new Map(VARIANTS.map((variant) => [variant.id, variant]));
+    current.teams = current.teams.filter((team) => team.id === "team-10");
+    if (!current.teams.length) current.teams = VARIANTS.map(newTeam);
+    current.phase = "qualifier";
+    current.status = "running";
+    current.qualifierEndsAt = "9999-12-31T23:59:59.999Z";
+    current.finalStartedAt = undefined;
+    current.finalEndsAt = undefined;
+    current.completedAt = undefined;
+    current.winnerTeamId = undefined;
+    current.failureReason = undefined;
     for (const team of current.teams) {
       team.rejectionCounts ??= {};
       team.councilRuns ??= 0;
@@ -358,30 +357,11 @@ function draftFinalists(qualifiers: TournamentTeam[], at: string) {
     return { id: `final-${rank}`, name: `Final Team ${rank}`, description: `${rank === 1 ? "Best" : rank === 2 ? "Second-best" : "Third-best"} qualifier performer drafted independently for every role.`, startingCashUsd: STARTING_CASH_USD, cashUsd: STARTING_CASH_USD, realizedPnlUsd: 0, lockedCapitalLossUsd: 0, totalTrades: 0, councilRuns: 0, positions: [], trades: [], rolePerformance, roleBias, thresholdDelta, sizeMultiplier, fileCabinet: Object.values(draftSources).some((source) => source.teamId === "team-10"), rejectionCounts: {}, draftSources } satisfies TournamentTeam;
   });
 }
-function advanceIfDue(state: TournamentState, now = Date.now()) {
-  if (state.phase === "qualifier" && now >= new Date(state.qualifierEndsAt).getTime()) {
-    const at = iso(now);
-    for (const team of state.teams) liquidateRound(team, at);
-    state.qualifierArchive = state.teams;
-    state.teams = draftFinalists(state.qualifierArchive, at);
-    state.phase = "final";
-    state.finalStartedAt = at;
-    state.finalEndsAt = iso(now + FINAL_MS);
-  }
-  if (state.phase === "final" && state.finalEndsAt && now >= new Date(state.finalEndsAt).getTime()) {
-    const at = iso(now);
-    for (const team of state.teams) liquidateRound(team, at);
-    const ordered = ranked(state.teams);
-    state.phase = "complete";
-    state.completedAt = at;
-    if (ordered.every((team) => team.equityUsd < STARTING_CASH_USD)) {
-      state.status = "failed";
-      state.failureReason = "All three final councils finished below their $1,000 starting wallet.";
-    } else {
-      state.status = "winner";
-      state.winnerTeamId = ordered[0]?.id;
-    }
-  }
+function advanceIfDue(state: TournamentState) {
+  // The winning Tournament.13 environment now runs continuously as the main
+  // wallet. There is no qualifier deadline, draft, final, or losing council.
+  state.phase = "qualifier";
+  state.status = "running";
 }
 
 async function flushOutcomeMemories(state: TournamentState) {
@@ -523,5 +503,5 @@ export async function getTournamentView(): Promise<TournamentView> {
   advanceIfDue(state);
   await flushOutcomeMemories(state);
   await saveTournamentState(state);
-  return { ...state, teams: ranked(state.teams), qualifierArchive: state.qualifierArchive ? ranked(state.qualifierArchive) : undefined, roundLabel: state.phase === "qualifier" ? "10-team qualifier" : state.phase === "final" ? "3-team drafted final" : state.status === "failed" ? "Experiment failed" : "Tournament complete", generatedAt: iso() };
+  return { ...state, teams: ranked(state.teams), qualifierArchive: undefined, roundLabel: "Exact Tournament.13 environment · continuous", generatedAt: iso() };
 }

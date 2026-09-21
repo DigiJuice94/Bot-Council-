@@ -1,44 +1,54 @@
-# Bot War Room V3.6.2 · File Cabinet Main Council
+# Bot War Room V3.6.2 — Team File Cabinet Exact
 
-The tournament is retired. The exact qualifier Team File Cabinet now controls the persistent main PAPER wallet.
+This is the promoted Tournament.13 winner running as the only paper wallet.
 
-Its tournament configuration is locked: Team 10 memory namespace, no role bias, -3 threshold delta (54-point BUY line), 0.97 sizing multiplier, $25–$125 entries, 12-position maximum, and BUY-only execution. WATCH and SKIP decisions are recorded but never purchased. Global liquidity/sellability protection, reconciled accounting, Guardian exits, Filing Cabinet learning, and live provider scanning remain shared utilities rather than strategy overrides.
+## Exact winning environment
 
-The Rug Autopsy Analyst runs inside the existing Filing Cabinet pipeline without a Council seat, scanner, or timer. Confirmed unsellable/locked-capital and catastrophic rug-like outcomes are immediately labeled as dumper cases, their earliest entry fingerprints are retained, and similarity evidence raises the existing Dumper Genome advisory for future candidates. Learned similarity never creates a hard veto by itself; confirmed current zero liquidity, honeypot, unsellability, and authority failures remain deterministic global blocks.
+- Council ID: `team-10`
+- Council name: `Team File Cabinet`
+- Eight independent members
+- Private memory namespace: `tournament:team-10`
+- Starting paper wallet: `$1,000`
+- BUY threshold adjustment: `-3` (54-point base line)
+- Role bias: none
+- Filing Cabinet evidence: advisory
+- Size multiplier: `0.97`
+- Entry range: `$25–$125`
+- Maximum active positions: `12`
+- Paper fee: `25 bps`
+- Profit trims: 20% at +25%, 20% at +50%, 25% at +100%, 25% at +200%
+- Regular positions: maximum 20 minutes
+- Early exit: after five minutes when verified buying pressure/volume fades
+- Moon bag: approximately 10%, maximum 48 hours
+- Mark refresh: original shared Tournament.13 rotation
 
-## Main council
+The former main-wallet Guardian does not run. The other nine councils, qualifier,
+draft and final round are removed from the active system.
 
-- Eight independent local roles use Team File Cabinet's existing private memory namespace.
-- Stored research remains advisory evidence for the CIO; it cannot override global safety.
-- The promoted council keeps the File Cabinet threshold adjustment and learned runner/dumper evidence.
-- Tournament cash, equity and positions are not merged into the main wallet. This prevents artificial gains and preserves accounting integrity.
+## Global truth protections retained
 
-## Restored utilities
-
-- The primary paper wallet can open new positions again.
-- Portfolio, Active Trades, Moon Bags, Unsellable Capital, Detailed Trade Log, File Cabinet research and diagnostics remain active.
-- The API now returns the complete managed-position ledger instead of truncating the dashboard to 50 positions.
-- Guardian, Exit Strategist, wallet reconciliation and research maintenance continue in the normal scan loop.
-
-## Global safety
-
-- confirmed zero executable liquidity;
-- confirmed honeypot or freeze authority;
-- positively confirmed unsellability;
-- Executor feasibility;
-- locked-capital accounting with no invented sale proceeds.
-
-## GitHub/Railway upload protection
-
-The one-folder package includes `deployment-source.tar.gz`. Keep that root-level file. The Docker build extracts it before compilation so `app`, `components`, `lib` and `public` are restored even when a browser-based GitHub upload drops nested folders.
+- Confirmed zero liquidity blocks entry and locks affected open capital as a loss.
+- Confirmed honeypots block entry.
+- Confirmed Solana freeze authority blocks entry.
+- Positively confirmed sellability failures block entry.
+- Two confirmed sellability failures on an open position record locked capital.
+- Unsellable positions receive no fake sale proceeds.
+- Wallet accounting displays an explicit reconciliation status.
 
 ## Run
 
 ```bash
-npm ci
-npm run typecheck
-npm run build
-npm start
+npm install
+npm run dev
 ```
 
-Redis is strongly recommended so the main wallet, trade history and promoted File Cabinet memories survive restarts.
+Production verification:
+
+```bash
+npm run typecheck
+npm run build
+```
+
+Set `REDIS_URL` in deployment so the wallet, trades and learned member memories
+survive restarts. The promoted wallet uses its own state key and does not reuse
+the completed ten-team tournament ledger or the abandoned legacy main wallet.

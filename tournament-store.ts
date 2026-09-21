@@ -1,16 +1,18 @@
 import { createClient } from "redis";
 import type { TournamentState } from "./tournament-types";
 
-const REDIS_KEY = "bot-war-room:tournament:v3-80-independent-bots";
+// Dedicated state for the promoted Tournament.13 winner. Do not reuse the
+// completed ten-team tournament ledger or the legacy main paper wallet.
+const REDIS_KEY = "bot-war-room:team-file-cabinet-exact:v1";
 const globalStore = globalThis as typeof globalThis & {
-  __botWarRoomTournamentStateV3?: TournamentState;
-  __botWarRoomTournamentRedisV3?: Promise<any | null>;
+  __botWarRoomTeamFileCabinetStateV1?: TournamentState;
+  __botWarRoomTeamFileCabinetRedisV1?: Promise<any | null>;
 };
 
 async function redisClient() {
   if (!process.env.REDIS_URL) return null;
-  if (!globalStore.__botWarRoomTournamentRedisV3) {
-    globalStore.__botWarRoomTournamentRedisV3 = (async () => {
+  if (!globalStore.__botWarRoomTeamFileCabinetRedisV1) {
+    globalStore.__botWarRoomTeamFileCabinetRedisV1 = (async () => {
       try {
         const client = createClient({ url: process.env.REDIS_URL });
         client.on("error", (error: unknown) => console.error("[tournament-store] redis", error));
@@ -22,21 +24,21 @@ async function redisClient() {
       }
     })();
   }
-  return globalStore.__botWarRoomTournamentRedisV3;
+  return globalStore.__botWarRoomTeamFileCabinetRedisV1;
 }
 
 export async function loadTournamentState(): Promise<TournamentState | null> {
   const redis = await redisClient();
-  if (!redis) return globalStore.__botWarRoomTournamentStateV3 ?? null;
+  if (!redis) return globalStore.__botWarRoomTeamFileCabinetStateV1 ?? null;
   const raw = await redis.get(REDIS_KEY);
   if (!raw) return null;
   const state = JSON.parse(raw) as TournamentState;
-  globalStore.__botWarRoomTournamentStateV3 = state;
+  globalStore.__botWarRoomTeamFileCabinetStateV1 = state;
   return state;
 }
 
 export async function saveTournamentState(state: TournamentState): Promise<void> {
-  globalStore.__botWarRoomTournamentStateV3 = state;
+  globalStore.__botWarRoomTeamFileCabinetStateV1 = state;
   const redis = await redisClient();
   if (redis) await redis.set(REDIS_KEY, JSON.stringify(state));
 }

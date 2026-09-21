@@ -4,11 +4,11 @@ import { fetchLivePositionSnapshot } from "./market-data";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
-import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
+import { acquireRuntimeLease, claimRuntimeMigration, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { entryLiquidityExitFloor } from "./exit-strategy";
-import { getRunnerExitGuidance, recordRugAutopsy } from "./runner-research";
+import { getRunnerExitGuidance } from "./runner-research";
 import { auditPositionSellability, type SellabilityAudit } from "./sellability-auditor";
 import { confirmedSellabilityFailure } from "./security-evidence";
 import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
@@ -644,9 +644,27 @@ const guardianGlobal = globalThis as typeof globalThis & {
 
 export function ensurePositionGuardianLoop() {
   if (guardianGlobal.__botWarRoomGuardianTimer) return;
+  void requestOneTimePaperTurnoverRelease().catch((error) => console.error("[position-guardian] one-time release", error));
   guardianGlobal.__botWarRoomGuardianTimer = setInterval(() => {
     void refreshPositionGuardian().catch((error) => console.error("[position-guardian] refresh failed", error));
   }, 5000);
+}
+
+async function requestOneTimePaperTurnoverRelease() {
+  if (!(await claimRuntimeMigration("tournament-10-release-all-current-paper-positions"))) return;
+  const at = new Date().toISOString();
+  const positions = await listManagedPositions();
+  await Promise.all(positions
+    .filter((position) => position.mode === "paper" && (position.status === "open" || position.status === "exit_pending"))
+    .map((position) => saveManagedPosition({
+      ...position,
+      status: "exit_pending",
+      lastAction: "EXIT",
+      lastReason: "One-time Tournament.10 turnover release: sell every position held before this deployment.",
+      forcedExitReleaseVersion: 1,
+      updatedAt: at,
+    })));
+  await refreshPositionGuardian();
 }
 
 export async function refreshPositionGuardian(): Promise<PositionGuardianReport> {
@@ -678,7 +696,6 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
             const watched = await auditForLockedCapital(next, snapshot, false);
             next = watched.position;
             if (watched.locked) {
-              await recordRugAutopsy(next, snapshot);
               if (!next.learningRecorded) {
                 await reflectOnClosedPosition(next, snapshot);
                 next = { ...next, learningRecorded: true };
@@ -729,7 +746,6 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           }
 
           if ((next.status === "closed" || next.status === "unsellable") && !next.learningRecorded) {
-            if (next.status === "unsellable" || next.pnlPct <= -80) await recordRugAutopsy(next, snapshot);
             await reflectOnClosedPosition(next, snapshot);
             next = { ...next, learningRecorded: true };
           }

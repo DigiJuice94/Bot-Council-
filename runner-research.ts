@@ -16,12 +16,12 @@ const memoryCases = new Map<string, CoinCaseFile>();
 let memoryMeta: ResearchMeta | null = null;
 
 type GenomeModelRow = { row: CoinCaseFile; features: number[] };
-type GenomeModelCache = { at: number; rows: GenomeModelRow[]; runners: GenomeModelRow[]; dumpers: GenomeModelRow[]; rugs: GenomeModelRow[] };
+type GenomeModelCache = { at: number; rows: GenomeModelRow[]; runners: GenomeModelRow[]; dumpers: GenomeModelRow[] };
 let genomeModelCache: GenomeModelCache | null = null;
 const GENOME_MODEL_CACHE_MS = 30_000;
 
 export type ResearchOutcome = "open" | "runner" | "dumper" | "neutral";
-export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor" | "observer" | "rug";
+export type BotRole = "launch" | "social" | "wallet" | "quant" | "contract" | "bear" | "cio" | "executor" | "observer";
 
 export type ResearchObservation = {
   at: string;
@@ -73,9 +73,6 @@ export type CoinCaseFile = {
   maxDrawdownPct: number;
   outcome: ResearchOutcome;
   outcomeAt?: string;
-  rugConfirmed?: boolean;
-  rugConfirmedAt?: string;
-  rugReason?: string;
   observations: ResearchObservation[];
   botNotes: BotResearchNote[];
   paperTradeOpened?: boolean;
@@ -135,16 +132,6 @@ export type RunnerResearchSnapshot = {
   dumperCases: number;
   neutralCases: number;
   openCases: number;
-  rugCases: number;
-  rugStorage: "REDIS" | "MEMORY";
-  recentRugCases: Array<{
-    symbol: string;
-    chain: string;
-    reason: string;
-    recordedAt: string;
-    entryMarketCap: number;
-    entryLiquidity: number;
-  }>;
   observations: number;
   paperTrades: number;
   paperWins: number;
@@ -216,10 +203,6 @@ export type RunnerGenomeGuidance = {
   learned: boolean;
   runnerEvidence: string[];
   dumperEvidence: string[];
-  rugSimilarityScore: number;
-  rugSampleSize: number;
-  rugAdvisory: "LOW" | "ELEVATED" | "HIGH";
-  rugEvidence: string[];
   expectedPeakMultiple: number;
   expectedTimeToPeakMinutes: number;
   typicalRunnerDrawdownPct: number;
@@ -508,57 +491,6 @@ export async function markResearchTradeOpened(result: WarRoomResult, requestedUs
   await writeCase(row);
 }
 
-function rugOutcomeReason(position: ManagedPosition) {
-  const reason = position.unsellableReason ?? position.lastReason ?? "Confirmed catastrophic trade failure.";
-  if (position.status === "unsellable") return reason;
-  if ((position.lockedCapitalLossUsd ?? 0) > 0) return `Locked capital recorded. ${reason}`;
-  return `Catastrophic ${position.pnlPct.toFixed(1)}% outcome. ${reason}`;
-}
-
-function isRugOutcome(position: ManagedPosition) {
-  if (position.status === "unsellable" || (position.lockedCapitalLossUsd ?? 0) > 0) return true;
-  if (position.pnlPct <= -90) return true;
-  const reason = `${position.unsellableReason ?? ""} ${position.lastReason ?? ""}`.toLowerCase();
-  return position.pnlPct <= -80 && /(liquidity|honeypot|unsellable|locked|rug|route)/.test(reason);
-}
-
-/**
- * Background Rug Autopsy Analyst. It owns no Council seat and starts no timer.
- * Confirmed failures are promoted into the existing Filing Cabinet immediately,
- * preserving their earliest pre-buy fingerprint for future similarity checks.
- */
-export async function recordRugAutopsy(position: ManagedPosition, finalSnapshot?: MarketSnapshot) {
-  if (!isRugOutcome(position)) return null;
-  const entrySnapshot = position.entryContext?.snapshot ?? finalSnapshot;
-  if (!entrySnapshot) return null;
-  const id = distinctTokenKey(position);
-  let row = await readCase(id);
-  if (!row) row = await upsertObservation(entrySnapshot);
-  const now = new Date().toISOString();
-  const first = row.observations[0];
-  const reason = rugOutcomeReason(position);
-  const newlyConfirmed = !row.rugConfirmed;
-  row.rugConfirmed = true;
-  row.rugConfirmedAt ??= now;
-  row.rugReason = reason.slice(0, 1_200);
-  row.outcome = "dumper";
-  row.outcomeAt ??= now;
-  row.paperClosed = true;
-  row.paperPnlUsd = position.realizedPnlUsd;
-  row.paperReturnPct = position.pnlPct;
-  row.paperExitReason = position.lastReason;
-  if (newlyConfirmed) {
-    row.botNotes = [...row.botNotes, {
-      at: now,
-      agentId: "rug" as const,
-      message: `RUG AUTOPSY $${position.symbol}: ${reason} Entry fingerprint — liquidity/MC ${((first?.liquidityToMc ?? 0) * 100).toFixed(1)}%, buy/sell ${(first?.buySellRatio ?? 0).toFixed(2)}x, top-10 ${(first?.top10Pct ?? 0).toFixed(1)}%, bundled ${(first?.bundledPct ?? 0).toFixed(1)}%, volume acceleration ${(first?.volumeAccelerationPct ?? 0).toFixed(0)}%. Future candidates receive advisory similarity evidence; confirmed present-tense safety failures remain the only hard veto.`,
-    }].slice(-MAX_BOT_NOTES_PER_CASE);
-  }
-  await writeCase(row);
-  genomeModelCache = null;
-  return row;
-}
-
 export async function refreshOneResearchCase(fetcher: (chain: any, tokenAddress: string) => Promise<MarketSnapshot | null>) {
   const cases = await allCases();
   const now = Date.now();
@@ -590,7 +522,6 @@ export async function ingestClosedPositions(positions: ManagedPosition[]) {
 
   for (const position of closed) {
     const tokenKey = distinctTokenKey(position);
-    if (isRugOutcome(position)) await recordRugAutopsy(position, position.entryContext?.snapshot);
     const row = await readCase(tokenKey);
     if (row) {
       row.paperClosed = true;
@@ -742,7 +673,6 @@ async function genomeModel(): Promise<GenomeModelCache> {
     rows,
     runners: rows.filter((item) => item.row.outcome === "runner"),
     dumpers: rows.filter((item) => item.row.outcome === "dumper"),
-    rugs: rows.filter((item) => item.row.rugConfirmed),
   };
   return genomeModelCache;
 }
@@ -758,25 +688,6 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     trainingCases: model.rows.map((item) => item.row),
   });
   const features = snapshotFeatures(snapshot);
-  const nearestRugs = model.rugs
-    .map((item) => ({ ...item, distance: vectorDistance(features, item.features) }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, Math.min(5, model.rugs.length));
-  const rugWeights = nearestRugs.map((item) => {
-    const similarity = clampScore(100 * Math.exp(-item.distance * 2.4));
-    const chainWeight = item.row.chain === snapshot.chain ? 1.12 : 1;
-    return { item, similarity, weight: chainWeight / Math.max(0.08, item.distance) };
-  });
-  const rugWeightTotal = rugWeights.reduce((sum, item) => sum + item.weight, 0);
-  const rawRugSimilarity = rugWeightTotal > 0
-    ? rugWeights.reduce((sum, item) => sum + item.similarity * item.weight, 0) / rugWeightTotal
-    : 0;
-  const rugSampleConfidence = model.rugs.length ? Math.min(1, 0.55 + model.rugs.length / 20 * 0.45) : 0;
-  const rugSimilarityScore = clampScore(rawRugSimilarity * rugSampleConfidence);
-  const rugAdvisory: RunnerGenomeGuidance["rugAdvisory"] = rugSimilarityScore >= 70 ? "HIGH" : rugSimilarityScore >= 45 ? "ELEVATED" : "LOW";
-  const rugEvidence = nearestRugs.slice(0, 3).map(({ row, distance }) =>
-    `$${row.symbol} ${row.chain} rug match ${(100 * Math.exp(-distance * 2.4)).toFixed(0)}/100: ${(row.rugReason ?? "confirmed rug/locked-capital outcome").slice(0, 180)}`
-  );
   const nearest = model.rows
     .map((item) => ({ ...item, distance: vectorDistance(features, item.features) }))
     .sort((a, b) => a.distance - b.distance)
@@ -820,8 +731,7 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
   const entryScore = clampScore(staticEntryScore * (1 - trajectoryWeight) + trajectory.score * trajectoryWeight);
   const safetyDumperPenalty = Math.max(0, snapshot.top10Pct - 60) * 0.8 + Math.max(0, snapshot.bundledPct - 18) * 1.4;
   const flowDumperPenalty = snapshot.buySellRatio < 0.8 ? (0.8 - snapshot.buySellRatio) * 40 : 0;
-  const rugSimilarityPenalty = Math.max(0, rugSimilarityScore - 40) * 0.4;
-  const staticDumperRiskScore = clampScore((100 - entryScore) * 0.72 + safetyDumperPenalty + flowDumperPenalty + rugSimilarityPenalty);
+  const staticDumperRiskScore = clampScore((100 - entryScore) * 0.72 + safetyDumperPenalty + flowDumperPenalty);
   const dumperRiskScore = trajectoryWeight > 0
     ? clampScore(staticDumperRiskScore * (1 - trajectoryWeight * 0.85) + trajectory.dumperRiskScore * (trajectoryWeight * 0.85))
     : staticDumperRiskScore;
@@ -849,9 +759,6 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     ...trajectory.evidence.slice(0, 2),
   ];
   const dumperEvidence = [
-    model.rugs.length
-      ? `Rug Autopsy Analyst: ${rugAdvisory} similarity ${rugSimilarityScore.toFixed(0)}/100 against ${model.rugs.length} confirmed rug case(s). Advisory evidence only.`
-      : `Rug Autopsy Analyst has no confirmed rug fingerprints yet.`,
     snapshot.buySellRatio < 1 ? `Sell pressure is leading at ${snapshot.buySellRatio.toFixed(2)}x buys/sells.` : `Buy pressure currently exceeds sells.`,
     `Top-10 ${snapshot.top10Pct.toFixed(1)}% · bundled ${snapshot.bundledPct.toFixed(1)}%.`,
     `Liquidity/MC ${(liqRatio * 100).toFixed(1)}%; execution feasibility still decides whether the order can actually fill.`,
@@ -873,10 +780,6 @@ export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise
     learned: model.rows.length >= 20,
     runnerEvidence,
     dumperEvidence,
-    rugSimilarityScore: Number(rugSimilarityScore.toFixed(1)),
-    rugSampleSize: model.rugs.length,
-    rugAdvisory,
-    rugEvidence,
     expectedPeakMultiple: Number(expectedPeakMultiple.toFixed(2)),
     expectedTimeToPeakMinutes: Number(expectedTimeToPeakMinutes.toFixed(0)),
     typicalRunnerDrawdownPct: Number(typicalRunnerDrawdownPct.toFixed(1)),
@@ -1037,18 +940,6 @@ export async function getRunnerResearchSnapshot(args: {
   const dumperCases = cases.filter((row) => row.outcome === "dumper").length;
   const neutralCases = cases.filter((row) => row.outcome === "neutral").length;
   const openCases = cases.filter((row) => row.outcome === "open").length;
-  const rugRows = cases.filter((row) => row.rugConfirmed);
-  const recentRugCases = [...rugRows]
-    .sort((a, b) => (b.rugConfirmedAt ?? b.lastSeenAt).localeCompare(a.rugConfirmedAt ?? a.lastSeenAt))
-    .slice(0, 8)
-    .map((row) => ({
-      symbol: row.symbol,
-      chain: row.chain,
-      reason: row.rugReason ?? "Confirmed rug/locked-capital outcome.",
-      recordedAt: row.rugConfirmedAt ?? row.lastSeenAt,
-      entryMarketCap: row.firstMarketCap,
-      entryLiquidity: row.observations[0]?.liquidity ?? 0,
-    }));
   const labeledCases = runnerCases + dumperCases;
   const confirmedTells = findings.filter((row) => row.status === "confirmed").length;
   const invalidatedTells = findings.filter((row) => row.status === "invalidated").length;
@@ -1109,16 +1000,13 @@ export async function getRunnerResearchSnapshot(args: {
   }));
 
   return {
-    mission: "Observe the movie, not just the screenshot → study trajectories and rug fingerprints → paper trade → autopsy → feed advisory lessons back to the exact Tournament Team File Cabinet.",
+    mission: "Observe the movie, not just the screenshot → study trajectories → paper trade → autopsy → feed lessons back to each specialist → validate runner patterns.",
     casesStudied: cases.length,
     labeledCases,
     runnerCases,
     dumperCases,
     neutralCases,
     openCases,
-    rugCases: rugRows.length,
-    rugStorage: process.env.REDIS_URL ? "REDIS" : "MEMORY",
-    recentRugCases,
     observations: meta.observations,
     paperTrades: stats.paperTrades,
     paperWins: stats.paperWins,

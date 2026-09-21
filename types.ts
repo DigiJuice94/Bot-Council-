@@ -166,10 +166,6 @@ export type RunnerGenomeGuidance = {
   learned: boolean;
   runnerEvidence: string[];
   dumperEvidence: string[];
-  rugSimilarityScore: number;
-  rugSampleSize: number;
-  rugAdvisory: "LOW" | "ELEVATED" | "HIGH";
-  rugEvidence: string[];
   expectedPeakMultiple: number;
   expectedTimeToPeakMinutes: number;
   typicalRunnerDrawdownPct: number;
