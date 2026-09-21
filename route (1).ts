@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ensureAutonomousWarRoom } from "@/lib/autopilot";
-import { getProofOfWork } from "@/lib/proof-of-work";
-export const dynamic="force-dynamic"; export const revalidate=0;
-export async function GET(req:NextRequest){ try{ ensureAutonomousWarRoom(); const limit=Number(req.nextUrl.searchParams.get("limit")??500); return NextResponse.json(await getProofOfWork(limit),{headers:{"Cache-Control":"no-store"}}); }catch(error){ return NextResponse.json({error:error instanceof Error?error.message:String(error)},{status:500}); } }
+import { buildCabinetExport, type CabinetKind } from "@/lib/cabinet-export";
+export const dynamic = "force-dynamic";
+export async function GET(req: NextRequest, { params }: { params: Promise<{kind:string}> }) {
+  const { kind } = await params;
+  if (!["main","rug","proof"].includes(kind)) return NextResponse.json({error:"Unknown cabinet"},{status:404});
+  const data = await buildCabinetExport(kind as CabinetKind);
+  const download = req.nextUrl.searchParams.get("download") === "1";
+  return NextResponse.json(data,{headers: download ? {"Content-Disposition":`attachment; filename=bot-war-room-${kind}-cabinet-${new Date().toISOString().slice(0,10)}.json`,"Cache-Control":"no-store"}:{"Cache-Control":"no-store"}});
+}
