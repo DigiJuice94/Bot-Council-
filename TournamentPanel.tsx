@@ -42,7 +42,7 @@ export default function TournamentPanel() {
 
   const wallet = view?.teams[0];
   const activePositions = wallet?.positions.filter((position) => position.status === "open") ?? [];
-  return <><header className="primary-app-nav"><a className="app-nav-brand" href="/">BOT WAR ROOM <small>V3.6.3</small></a><nav><a className="active" href="/">Trading</a><a href="/cabinets">File Cabinets</a></nav></header><section id="wallet" className="tournament-panel page-panel">
+  return <><header className="primary-app-nav"><a className="app-nav-brand" href="/">BOT WAR ROOM <small>V3.6.3.2</small></a><nav><a className="active" href="/">TRADING DASHBOARD</a><a className="cabinet-nav-callout" href="/cabinets">FILE CABINETS & DOWNLOADS <b>3</b></a></nav></header><div className="workspace-switcher"><a className="active" href="/"><small>WORKSPACE 01</small><strong>Trading Dashboard</strong><span>Live wallet, positions and trade ledger</span></a><a href="/cabinets"><small>WORKSPACE 02</small><strong>File Cabinets & Downloads</strong><span>Main · Rug · Proof of Work →</span></a></div><section id="wallet" className="tournament-panel page-panel">
     <div className="tournament-head">
       <div><small>V3.6.2 TOURNAMENT.13 · EXACT WINNER</small><h2>Team File Cabinet Main Wallet</h2><p>The original winning eight-member council now runs alone inside its tournament wallet, entry, sizing, fee and marking environment. Regular trades recycle after 20 minutes or sooner when buying pressure fades; moon bags close after two hours.</p></div>
       <div className="tournament-clock"><span>{view?.roundLabel ?? "Loading exact environment"}</span><b>{wallet ? money(wallet.equityUsd) : "$1,000.00"}</b><small>{view?.opportunityCount ?? 0} opportunities evaluated</small></div>
