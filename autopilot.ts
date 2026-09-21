@@ -89,6 +89,7 @@ type AutopilotGlobal = typeof globalThis & {
   __botWarRoomAutopilotTimerV14?: ReturnType<typeof setInterval>;
   __botWarRoomAutopilotStateV14?: AutopilotStatus;
   __botWarRoomAutopilotBusyV14?: boolean;
+  __botWarRoomResearchMaintenanceBusyV1?: boolean;
   __botWarRoomAutopilotCursorV14?: number;
   __botWarRoomLastErrorMessageV227?: string;
   __botWarRoomLastErrorAtV227?: number;
@@ -398,13 +399,29 @@ async function scanOneChain(chain: Chain) {
   current.chainStats[chain].lastCandidateAt = new Date().toISOString();
 
   const regime = classifyMarketRegime(snapshot);
-  const [learning, memoryHints, profitability, portfolio, runnerGenome] = await Promise.all([
+  const [learning, memoryHints, profitability, runnerGenome] = await Promise.all([
     resolveAdaptiveWeights(regime, snapshot),
     relevantMemoryHints(snapshot, regime.id),
     loadLatestProfitability(),
-    getPaperPortfolioContext(snapshot.chain),
     getRunnerGenomeGuidance(snapshot),
   ]);
+  // The legacy main wallet is intentionally absent. Tournament.13 replaces
+  // this neutral seed with Team File Cabinet's real isolated wallet before any
+  // member votes, so reading the abandoned position ledger only added latency.
+  const portfolio: PortfolioRiskContext = {
+    equityUsd: 1_000,
+    cashUsd: 1_000,
+    dailyPnlPct: 0,
+    openPositions: 0,
+    totalExposurePct: 0,
+    chainExposurePct: 0,
+    strategyExposurePct: 0,
+    maxDailyLossPct: 100,
+    maxOpenPositions: 12,
+    maxTotalExposurePct: 100,
+    maxChainExposurePct: 100,
+    liveTradingEnabled: false,
+  };
 
   const councilOptions = {
     mode: "paper",
@@ -480,12 +497,20 @@ async function runScannerMaintenance() {
   // These tasks are global rather than chain-specific. Run them once per
   // bounded batch so parallel discovery never duplicates wallet locks or
   // research maintenance.
-  const bankroll = await ensurePaperWalletResearchFunds();
-  if (bankroll.resetPerformed) {
-    addChat("System", `Research bankroll automatically restarted at $${bankroll.wallet.startingCashUsd.toFixed(2)} after reaching zero. Reset #${bankroll.resetMeta.resets}; prior losses remain in the research record.`, "system");
-  }
   await refreshOneResearchCase(fetchLiveTokenSnapshot);
   await reviewOneShadowDecision();
+}
+
+async function runScannerMaintenanceInBackground() {
+  if (globalState.__botWarRoomResearchMaintenanceBusyV1) return;
+  globalState.__botWarRoomResearchMaintenanceBusyV1 = true;
+  try {
+    await runScannerMaintenance();
+  } catch (error) {
+    console.error("[autopilot] background research maintenance failed", error);
+  } finally {
+    globalState.__botWarRoomResearchMaintenanceBusyV1 = false;
+  }
 }
 
 export async function runAutonomousTick() {
@@ -495,7 +520,6 @@ export async function runAutonomousTick() {
   try {
     releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
     if (!releaseLease) return;
-    await runScannerMaintenance();
     const cursor = globalState.__botWarRoomAutopilotCursorV14 ?? 0;
     const workers = scanWorkers();
     const chains = Array.from({ length: workers }, (_, index) => CHAINS[(cursor + index) % CHAINS.length]);
@@ -503,6 +527,9 @@ export async function runAutonomousTick() {
     // Two bounded lanes overlap provider/Council latency without creating an
     // unbounded worker pool or changing any candidate or safety decision.
     await Promise.all(chains.map((chain) => scanOneChain(chain)));
+    // Filing Cabinet upkeep must never sit in front of discovery. It has its
+    // own single-flight guard, so slow providers cannot block or multiply scans.
+    void runScannerMaintenanceInBackground();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const current = state();

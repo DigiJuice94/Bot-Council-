@@ -12,6 +12,9 @@ const MAX_TRADE_ROWS = 300;
 const MAX_PROCESSED_IDS = 1_200;
 const FEE_RATE = Math.max(0, Number(process.env.TOURNAMENT_PAPER_FEE_BPS ?? 25)) / 10_000;
 const TP_LEVELS = [{ pct: 25, portion: 0.20 }, { pct: 50, portion: 0.20 }, { pct: 100, portion: 0.25 }, { pct: 200, portion: 0.25 }];
+const REGULAR_MAX_HOLD_MINUTES = 20;
+const MOONBAG_MAX_HOLD_MINUTES = 120;
+const DEADLINE_REFRESH_FAILURES_BEFORE_LOCK = 2;
 
 type Variant = Pick<TournamentTeam, "id" | "name" | "description" | "roleBias" | "thresholdDelta" | "sizeMultiplier" | "fileCabinet">;
 const VARIANTS: Variant[] = [
@@ -21,6 +24,7 @@ const VARIANTS: Variant[] = [
 const tournamentGlobal = globalThis as typeof globalThis & {
   __botWarRoomTournamentTimerV1?: ReturnType<typeof setInterval>;
   __botWarRoomTournamentRefreshCursorV1?: number;
+  __botWarRoomTournamentRefreshBusyV2?: boolean;
 };
 
 function iso(ms = Date.now()) { return new Date(ms).toISOString(); }
@@ -231,6 +235,19 @@ function lockPosition(team: TournamentTeam, position: TournamentPosition, reason
   position.exitReason = reason;
   settleRoles(team, position);
 }
+function isMoonbagPosition(position: TournamentPosition) {
+  return position.takenTargets.length >= TP_LEVELS.length
+    && position.remainingQuantity <= position.initialQuantity * 0.12;
+}
+function turnoverDeadlineMs(position: TournamentPosition) {
+  if (isMoonbagPosition(position)) {
+    return new Date(position.moonbagAt ?? position.openedAt).getTime() + MOONBAG_MAX_HOLD_MINUTES * 60_000;
+  }
+  return new Date(position.openedAt).getTime() + REGULAR_MAX_HOLD_MINUTES * 60_000;
+}
+function turnoverDue(position: TournamentPosition, now = Date.now()) {
+  return position.status === "open" && now >= turnoverDeadlineMs(position);
+}
 function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot: MarketSnapshot, at: string) {
   if (position.status !== "open") return;
   const unsafe = immediateSafetyFailure(snapshot);
@@ -243,6 +260,8 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
   }
   if (!Number.isFinite(snapshot.price) || snapshot.price <= 0) return;
   position.markPrice = snapshot.price;
+  position.lastMarkAt = at;
+  position.deadlineRefreshFailures = 0;
   position.highWaterPrice = Math.max(position.highWaterPrice, snapshot.price);
   const pnlPct = (snapshot.price / Math.max(position.entryPrice, 1e-12) - 1) * 100;
   for (let index = 0; index < TP_LEVELS.length; index += 1) {
@@ -253,8 +272,7 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
       if (position.status !== "open") return;
     }
   }
-  const isMoonbag = position.takenTargets.length >= TP_LEVELS.length
-    && position.remainingQuantity <= position.initialQuantity * 0.12;
+  const isMoonbag = isMoonbagPosition(position);
   if (isMoonbag && !position.moonbagAt) position.moonbagAt = at;
   const drawdownPct = position.highWaterPrice > 0 ? (1 - snapshot.price / position.highWaterPrice) * 100 : 0;
   const ageMinutes = (new Date(at).getTime() - new Date(position.openedAt).getTime()) / 60_000;
@@ -266,8 +284,8 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
   if (pnlPct <= -position.stopLossPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared stop-loss", at);
   else if (pnlPct >= 25 && drawdownPct >= position.trailingStopPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared trailing stop", at);
   else if (buyingPressureSlowed) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", `Buying pressure slowed after ${ageMinutes.toFixed(0)}m · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume acceleration ${volumeAcceleration.toFixed(1)}%`, at);
-  else if (isMoonbag && moonbagMinutes >= 2_880) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Moon bag reached its 48-hour maximum hold", at);
-  else if (!isMoonbag && ageMinutes >= 20) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Regular trade reached its 20-minute maximum hold", at);
+  else if (isMoonbag && moonbagMinutes >= MOONBAG_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Moon bag reached its 2-hour maximum hold", at);
+  else if (!isMoonbag && ageMinutes >= REGULAR_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Regular trade reached its 20-minute maximum hold", at);
 }
 function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>, at: string) {
   const snapshot = result.snapshot;
@@ -288,7 +306,7 @@ function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<Tourn
     chain: snapshot.chain, tokenAddress: snapshot.tokenAddress, symbol: snapshot.symbol,
     entryPrice: snapshot.price, markPrice: snapshot.price, highWaterPrice: snapshot.price,
     initialQuantity: quantity, remainingQuantity: quantity, entryNotionalUsd: spend, remainingCostUsd: spend,
-    realizedPnlUsd: 0, openedAt: at, status: "open", takenTargets: [],
+    realizedPnlUsd: 0, openedAt: at, lastMarkAt: at, status: "open", takenTargets: [],
     stopLossPct: Math.max(1, result.exitStrategy.stopLossPct), trailingStopPct: Math.max(1, result.exitStrategy.trailingStopPct),
     maxHoldMinutes: 20, roleScores: scores,
     decisionId: result.decisionId,
@@ -447,16 +465,26 @@ export async function isTournamentActive() {
 }
 
 export async function refreshTournamentMarks(limit = 4) {
+  if (tournamentGlobal.__botWarRoomTournamentRefreshBusyV2) return;
+  tournamentGlobal.__botWarRoomTournamentRefreshBusyV2 = true;
+  try {
   // Fetch prices without holding the state lock. Provider latency can otherwise
   // collide with a new candidate and make the whole tournament miss it.
   const preview = await ensureState();
   if (preview.phase === "complete") return;
   const unique = new Map<string, TournamentPosition>();
   for (const team of preview.teams) for (const position of team.positions) if (position.status === "open") unique.set(`${position.chain}:${position.tokenAddress}`, position);
-  const rows = [...unique.values()];
+  const rows = [...unique.values()].sort((a, b) => {
+    const aDue = turnoverDue(a) ? 0 : 1;
+    const bDue = turnoverDue(b) ? 0 : 1;
+    return aDue - bDue || turnoverDeadlineMs(a) - turnoverDeadlineMs(b);
+  });
   if (!rows.length) return;
+  const dueRows = rows.filter((position) => turnoverDue(position));
   const cursor = tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 ?? 0;
-  const selected = Array.from({ length: Math.min(limit, rows.length) }, (_, index) => rows[(cursor + index) % rows.length]);
+  const selected = dueRows.length
+    ? dueRows.slice(0, limit)
+    : Array.from({ length: Math.min(limit, rows.length) }, (_, index) => rows[(cursor + index) % rows.length]);
   tournamentGlobal.__botWarRoomTournamentRefreshCursorV1 = (cursor + selected.length) % rows.length;
   const snapshots = await Promise.all(selected.map((position) => fetchLiveTokenSnapshot(position.chain, position.tokenAddress).catch(() => null)));
 
@@ -467,11 +495,20 @@ export async function refreshTournamentMarks(limit = 4) {
     advanceIfDue(state);
     if (state.phase === "complete") { await saveTournamentState(state); return; }
     const at = iso();
-    snapshots.forEach((snapshot) => {
-      if (!snapshot) return;
+    snapshots.forEach((snapshot, index) => {
+      const selectedPosition = selected[index];
       for (const team of state.teams) {
-        const position = team.positions.find((row) => row.status === "open" && row.chain === snapshot.chain && row.tokenAddress === snapshot.tokenAddress);
+        const position = team.positions.find((row) => row.status === "open" && row.chain === selectedPosition.chain && row.tokenAddress === selectedPosition.tokenAddress);
         if (position) {
+          if (!snapshot) {
+            if (turnoverDue(position)) {
+              position.deadlineRefreshFailures = (position.deadlineRefreshFailures ?? 0) + 1;
+              if (position.deadlineRefreshFailures >= DEADLINE_REFRESH_FAILURES_BEFORE_LOCK) {
+                lockPosition(team, position, `${isMoonbagPosition(position) ? "Two-hour moon-bag" : "20-minute regular-trade"} deadline reached, but two fresh executable exit checks returned no market. No proceeds credited; remaining capital conservatively recorded as locked/lost.`, at);
+              }
+            }
+            continue;
+          }
           applyMark(team, position, snapshot, at);
           if (state.forcedTurnoverReleaseVersion !== 1 && position.status === "open") {
             sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "One-time Tournament.10 turnover release", at);
@@ -487,6 +524,9 @@ export async function refreshTournamentMarks(limit = 4) {
     await saveTournamentState(state);
   } finally {
     await release().catch(() => undefined);
+  }
+  } finally {
+    tournamentGlobal.__botWarRoomTournamentRefreshBusyV2 = false;
   }
 }
 

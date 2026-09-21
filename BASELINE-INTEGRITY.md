@@ -12,12 +12,17 @@ Tournament.13 build that produced Team File Cabinet's winning result:
 | `lib/engine.ts` | `cf5e99dfd5a4b1a57fe00118a4b14c9ad5124a5cd939102b91919f34d33d92bf` |
 | `lib/risk.ts` | `0c483146319d67ed90f7292ab0820f30912486668ef955295f9a1f69bbf253a9` |
 | `lib/provider-waterfall.ts` | `7ca9cc3079a54c6cabfb307e30e1a8c78c6f9de9aeb3217eeab221bf6a161f85` |
-| `lib/runner-research.ts` | `2cc091d5d903155e143504b71d9ebd649bf31d423db0b3651494d5ff127fcc12` |
 
 `lib/tournament.ts` retains the original Team File Cabinet entry, fee, sizing,
 marking, exit, locked-capital and accounting functions. Only the nine losing
 variants and the qualifier/final transition were disabled so Team 10 can run
 continuously as the sole main wallet.
+
+Requested turnover amendment: regular positions remain capped at 20 minutes;
+moon bags are capped at two hours. Overdue exits are prioritized and fail closed
+after two unavailable executable-market checks rather than remaining open or
+crediting a fake sale. Filing Cabinet model loading now uses one shared in-flight
+read so parallel scan lanes cannot duplicate the same large memory load.
 
 The legacy main-wallet Guardian is not started. No second trading engine can
 place positions beside the promoted winner.

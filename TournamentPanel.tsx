@@ -44,7 +44,7 @@ export default function TournamentPanel() {
   const activePositions = wallet?.positions.filter((position) => position.status === "open") ?? [];
   return <section id="wallet" className="tournament-panel page-panel">
     <div className="tournament-head">
-      <div><small>V3.6.2 TOURNAMENT.13 · EXACT WINNER</small><h2>Team File Cabinet Main Wallet</h2><p>The original winning eight-member council now runs alone inside its exact tournament wallet, entry, sizing, fee, exit and mark-refresh environment. Regular trades recycle after 20 minutes or sooner when buying pressure fades; true moon bags close after 48 hours.</p></div>
+      <div><small>V3.6.2 TOURNAMENT.13 · EXACT WINNER</small><h2>Team File Cabinet Main Wallet</h2><p>The original winning eight-member council now runs alone inside its tournament wallet, entry, sizing, fee and marking environment. Regular trades recycle after 20 minutes or sooner when buying pressure fades; moon bags close after two hours.</p></div>
       <div className="tournament-clock"><span>{view?.roundLabel ?? "Loading exact environment"}</span><b>{wallet ? money(wallet.equityUsd) : "$1,000.00"}</b><small>{view?.opportunityCount ?? 0} opportunities evaluated</small></div>
     </div>
     {error && <p className="tournament-error">{error}</p>}

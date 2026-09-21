@@ -18,6 +18,7 @@ let memoryMeta: ResearchMeta | null = null;
 type GenomeModelRow = { row: CoinCaseFile; features: number[] };
 type GenomeModelCache = { at: number; rows: GenomeModelRow[]; runners: GenomeModelRow[]; dumpers: GenomeModelRow[] };
 let genomeModelCache: GenomeModelCache | null = null;
+let genomeModelPromise: Promise<GenomeModelCache> | null = null;
 const GENOME_MODEL_CACHE_MS = 30_000;
 
 export type ResearchOutcome = "open" | "runner" | "dumper" | "neutral";
@@ -658,23 +659,31 @@ function timeToPeakMinutes(row: CoinCaseFile) {
 
 async function genomeModel(): Promise<GenomeModelCache> {
   if (genomeModelCache && Date.now() - genomeModelCache.at < GENOME_MODEL_CACHE_MS) return genomeModelCache;
-  const cases = await allCases();
-  const labeled = cases.filter((row) => (row.outcome === "runner" || row.outcome === "dumper") && row.observations.length > 0);
-  const earlyLabeled = labeled.filter((row) =>
-    row.firstMarketCap >= 5_000 && row.firstMarketCap <= 150_000 &&
-    (row.observations[0]?.ageMinutes ?? Infinity) <= 1_440
-  );
-  // Prefer the same fresh-coin population we actually trade. Until that sample is
-  // large enough, fall back to all labeled cases rather than pretending certainty.
-  const trainingSet = earlyLabeled.length >= 20 ? earlyLabeled : labeled;
-  const rows = trainingSet.map((row) => ({ row, features: normalizedFeatures(row) }));
-  genomeModelCache = {
-    at: Date.now(),
-    rows,
-    runners: rows.filter((item) => item.row.outcome === "runner"),
-    dumpers: rows.filter((item) => item.row.outcome === "dumper"),
-  };
-  return genomeModelCache;
+  if (genomeModelPromise) return genomeModelPromise;
+  genomeModelPromise = (async () => {
+    const cases = await allCases();
+    const labeled = cases.filter((row) => (row.outcome === "runner" || row.outcome === "dumper") && row.observations.length > 0);
+    const earlyLabeled = labeled.filter((row) =>
+      row.firstMarketCap >= 5_000 && row.firstMarketCap <= 150_000 &&
+      (row.observations[0]?.ageMinutes ?? Infinity) <= 1_440
+    );
+    // Prefer the same fresh-coin population we actually trade. Until that sample is
+    // large enough, fall back to all labeled cases rather than pretending certainty.
+    const trainingSet = earlyLabeled.length >= 20 ? earlyLabeled : labeled;
+    const rows = trainingSet.map((row) => ({ row, features: normalizedFeatures(row) }));
+    genomeModelCache = {
+      at: Date.now(),
+      rows,
+      runners: rows.filter((item) => item.row.outcome === "runner"),
+      dumpers: rows.filter((item) => item.row.outcome === "dumper"),
+    };
+    return genomeModelCache;
+  })();
+  try {
+    return await genomeModelPromise;
+  } finally {
+    genomeModelPromise = null;
+  }
 }
 
 export async function getRunnerGenomeGuidance(snapshot: MarketSnapshot): Promise<RunnerGenomeGuidance> {

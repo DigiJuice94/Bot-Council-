@@ -19,11 +19,15 @@ This is the promoted Tournament.13 winner running as the only paper wallet.
 - Profit trims: 20% at +25%, 20% at +50%, 25% at +100%, 25% at +200%
 - Regular positions: maximum 20 minutes
 - Early exit: after five minutes when verified buying pressure/volume fades
-- Moon bag: approximately 10%, maximum 48 hours
+- Moon bag: approximately 10%, maximum 2 hours
 - Mark refresh: original shared Tournament.13 rotation
 
 The former main-wallet Guardian does not run. The other nine councils, qualifier,
 draft and final round are removed from the active system.
+
+Turnover enforcement is fail-closed: overdue positions get priority for fresh
+exit pricing. If two consecutive fresh executable-market checks fail after the
+deadline, no proceeds are invented; remaining capital is recorded as locked/lost.
 
 ## Global truth protections retained
 

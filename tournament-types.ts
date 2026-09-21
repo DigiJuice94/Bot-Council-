@@ -39,10 +39,12 @@ export type TournamentPosition = {
   remainingCostUsd: number;
   realizedPnlUsd: number;
   openedAt: string;
+  lastMarkAt?: string;
   status: "open" | "closed" | "unsellable";
   closedAt?: string;
   lockedReason?: string;
   sellabilityFailureCount?: number;
+  deadlineRefreshFailures?: number;
   takenTargets: number[];
   stopLossPct: number;
   trailingStopPct: number;
