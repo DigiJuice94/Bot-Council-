@@ -177,7 +177,7 @@ function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): P
 }
 
 async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskContext, request: ExecutionRequest) {
-  // Exact Team File Cabinet tournament sizing: learned Genome amount, multiplied
+  // Locked Main File Cabinet sizing: learned Genome amount, multiplied
   // by 0.97, with the original $25 floor and $125 ceiling.
   if (request.mode === "paper" && request.side === "BUY") {
     if (portfolio.cashUsd + 0.005 < FILE_CABINET_MIN_BUY_USD) {
@@ -237,7 +237,7 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
   if (sameTokenOpen || openPositions.length >= FILE_CABINET_MAX_OPEN_POSITIONS) {
     const reason = sameTokenOpen
       ? "Team File Cabinet already holds this token."
-      : `Team File Cabinet reached its tournament maximum of ${FILE_CABINET_MAX_OPEN_POSITIONS} active trades.`;
+      : `Main File Cabinet reached its maximum of ${FILE_CABINET_MAX_OPEN_POSITIONS} active trades.`;
     recordRejection(reason);
     addChat("Executor", `TEAM FILE CABINET entry skipped for $${result.snapshot.symbol}: ${reason}`, "execution");
     return false;
@@ -406,7 +406,7 @@ async function scanOneChain(chain: Chain) {
     const bot = result.agents.find((agent) => agent.id === turn.agentId)?.name ?? turn.agentId;
     addChat(bot, turn.message, "council");
   }
-  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Exact tournament Team File Cabinet rules applied. Wallet equity ${fileCabinetPortfolio.equityUsd.toFixed(2)}.`, "council");
+  addChat("CIO", `${snapshot.symbol}: ${result.decision} at ${result.conviction}% conviction. ${result.councilProcess.alignedBots}/8 local entities aligned. Locked Main File Cabinet rules applied. Wallet equity ${fileCabinetPortfolio.equityUsd.toFixed(2)}.`, "council");
 
   let executed = false;
   if (result.decision === "BUY") {

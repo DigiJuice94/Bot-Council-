@@ -1109,7 +1109,7 @@ export async function getRunnerResearchSnapshot(args: {
   }));
 
   return {
-    mission: "Observe the movie, not just the screenshot → study trajectories and rug fingerprints → paper trade → autopsy → feed advisory lessons back to the exact Tournament Team File Cabinet.",
+    mission: "Observe the movie, not just the screenshot → study trajectories and rug fingerprints → paper trade → autopsy → feed advisory lessons back to the active Main File Cabinet strategy.",
     casesStudied: cases.length,
     labeledCases,
     runnerCases,

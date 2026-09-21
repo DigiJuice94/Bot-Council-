@@ -181,7 +181,7 @@ export default function RunnerResearchPanel() {
 
       <article className="v229-trajectory-observer rug-autopsy-analyst">
         <div className="v229-observer-head">
-          <div><span>RUG AUTOPSY ANALYST · BACKGROUND ONLY · NO COUNCIL SEAT</span><h3>Study every confirmed rug, then warn the exact tournament team.</h3><p>Unsellable, locked-capital and catastrophic rug-like outcomes are labeled immediately. Their original entry fingerprints are compared with future candidates and supplied to the Safety Gate, Dumper Specialist and CIO as advisory evidence. Only confirmed present-tense safety failures remain hard vetoes.</p></div>
+          <div><span>RUG AUTOPSY ANALYST · BACKGROUND ONLY · NO COUNCIL SEAT</span><h3>Study every confirmed rug, then warn the active main strategy.</h3><p>Unsellable, locked-capital and catastrophic rug-like outcomes are labeled immediately. Their original entry fingerprints are compared with future candidates and supplied to the Safety Gate, Dumper Specialist and CIO as advisory evidence. Only confirmed present-tense safety failures remain hard vetoes.</p></div>
           <strong>{r?.rugCases ?? 0}<small>rug files</small></strong>
         </div>
         <div className="v229-observer-stats">
