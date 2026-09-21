@@ -31,7 +31,8 @@ deadline, no proceeds are invented; remaining capital is recorded as locked/lost
 
 ## Global truth protections retained
 
-- Confirmed zero liquidity blocks entry and locks affected open capital as a loss.
+- Zero or invalid liquidity is rejected again inside the wallet entry function, so no caller can bypass the no-buy rule.
+- Every trim and full sale must carry the current market snapshot; zero or invalid liquidity creates a `LOCKED` event, credits `$0` proceeds and records the remaining cost as lost capital.
 - Confirmed honeypots block entry.
 - Confirmed Solana freeze authority blocks entry.
 - Positively confirmed sellability failures block entry.
