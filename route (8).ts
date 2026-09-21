@@ -1,10 +1,4 @@
-import { NextResponse } from "next/server";
-import { createCoreExperiment } from "@/lib/experiments";
-
-export const dynamic = "force-dynamic";
-
-export async function GET() {
-  return NextResponse.json(createCoreExperiment(["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "Robinhood Chain"]), {
-    headers: { "Cache-Control": "no-store" },
-  });
-}
+import { NextRequest, NextResponse } from "next/server";
+import { buildCabinetExport, type CabinetKind } from "@/lib/cabinet-export";
+export const dynamic="force-dynamic";
+export async function GET(request:NextRequest,{params}:{params:{kind:string}}){const kind=params.kind as CabinetKind;if(!["main","rug","proof"].includes(kind))return NextResponse.json({error:"Unknown cabinet"},{status:404});const data=await buildCabinetExport(kind);if(request.nextUrl.searchParams.get("download")==="1")return new NextResponse(JSON.stringify(data,null,2),{headers:{"Content-Type":"application/json","Content-Disposition":`attachment; filename="bot-war-room-${kind}-cabinet-${new Date().toISOString().slice(0,10)}.json"`,"Cache-Control":"no-store"}});return NextResponse.json(data,{headers:{"Cache-Control":"no-store"}})}

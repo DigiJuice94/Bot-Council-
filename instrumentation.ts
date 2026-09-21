@@ -1,8 +1,10 @@
-// Start the promoted winner when the server process starts. Discovery must not
-// depend on somebody keeping the dashboard open.
+// Run before serving requests or starting the Council's runtime loops.
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NEXT_PHASE !== "phase-production-build") {
-    const { ensureAutonomousWarRoom } = await import("./lib/autopilot");
-    ensureAutonomousWarRoom();
+    const { resetPaperWalletPreserveLearning } = await import("./lib/paper-wallet");
+    await resetPaperWalletPreserveLearning(
+      "Fresh verified PAPER ledger requested for Portfolio Auditor release",
+      "v3-portfolio-auditor-reset-20260918",
+    );
   }
 }

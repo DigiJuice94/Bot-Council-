@@ -701,6 +701,7 @@ export default function WarRoomDashboard() {
         <button type="button" onClick={() => scrollToSection("unsellable-capital")}>UNSELLABLE</button>
         <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
         <button type="button" onClick={() => scrollToSection("diagnostics")}>WHY TRADES STOP</button>
+        <a className="file-cabinets-tab" href="/cabinets">FILE CABINETS</a>
       </nav>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
