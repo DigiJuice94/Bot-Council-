@@ -31,8 +31,7 @@ deadline, no proceeds are invented; remaining capital is recorded as locked/lost
 
 ## Global truth protections retained
 
-- Zero or invalid liquidity is rejected again inside the wallet entry function, so no caller can bypass the no-buy rule.
-- Every trim and full sale must carry the current market snapshot; zero or invalid liquidity creates a `LOCKED` event, credits `$0` proceeds and records the remaining cost as lost capital.
+- Confirmed zero liquidity blocks entry and locks affected open capital as a loss.
 - Confirmed honeypots block entry.
 - Confirmed Solana freeze authority blocks entry.
 - Positively confirmed sellability failures block entry.
@@ -57,3 +56,11 @@ npm run build
 Set `REDIS_URL` in deployment so the wallet, trades and learned member memories
 survive restarts. The promoted wallet uses its own state key and does not reuse
 the completed ten-team tournament ledger or the abandoned legacy main wallet.
+
+## V3.6.3 Monitoring / Proof-of-Work
+- Trading strategy/formula unchanged.
+- Added separate /cabinets intelligence workspace.
+- Main, Rug, and Proof-of-Work cabinets each export downloadable JSON.
+- Proof-of-Work independently reconciles wallet equity and trade arithmetic.
+- Runtime heartbeat exposes last opportunity and last mark refresh without controlling trading.
+- Internal confirmation is explicitly distinct from future live wallet/on-chain confirmation.

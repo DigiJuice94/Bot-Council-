@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.6.2-team-file-cabinet-exact.3",
+  "version": "3.6.3-monitoring-proof-of-work.1",
   "private": true,
   "scripts": {
     "dev": "next dev",

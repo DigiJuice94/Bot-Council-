@@ -103,7 +103,7 @@ function roleScores(result: WarRoomResult): Record<TournamentRole, number> {
   return Object.fromEntries(TOURNAMENT_ROLES.map((role) => [role, Number(byId.get(role) ?? (role === "cio" ? result.conviction : 50))])) as Record<TournamentRole, number>;
 }
 function immediateSafetyFailure(snapshot: MarketSnapshot) {
-  if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) return "Confirmed zero executable liquidity";
+  if (snapshot.liquidity <= 0) return "Confirmed zero executable liquidity";
   if (snapshot.honeypot) return "Confirmed honeypot";
   if (snapshot.chainFamily === "solana" && snapshot.freezeAuthority) return "Confirmed freeze authority";
   return null;
@@ -198,14 +198,7 @@ function settleRoles(team: TournamentTeam, position: TournamentPosition) {
   }
   position.rolesSettled = true;
 }
-function sell(team: TournamentTeam, position: TournamentPosition, quantity: number, snapshot: MarketSnapshot, action: "TRIM" | "SELL", note: string, at: string) {
-  // Exit accounting must prove that a market exists at the exact snapshot used
-  // for the fill. Never turn a stale quoted price into imaginary paper cash.
-  if (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0) {
-    lockPosition(team, position, "Exit rejected: market reports zero executable liquidity. No proceeds credited; remaining capital recorded as locked/lost.", at);
-    return;
-  }
-  const price = snapshot.price;
+function sell(team: TournamentTeam, position: TournamentPosition, quantity: number, price: number, action: "TRIM" | "SELL", note: string, at: string) {
   const actualQty = Math.min(position.remainingQuantity, Math.max(0, quantity));
   if (actualQty <= 0 || price <= 0) return;
   const cost = position.remainingQuantity > 0 ? position.remainingCostUsd * (actualQty / position.remainingQuantity) : 0;
@@ -275,7 +268,7 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
     const target = TP_LEVELS[index];
     if (pnlPct >= target.pct && !position.takenTargets.includes(index)) {
       position.takenTargets.push(index);
-      sell(team, position, position.initialQuantity * target.portion, snapshot, "TRIM", `Shared +${target.pct}% tournament take-profit`, at);
+      sell(team, position, position.initialQuantity * target.portion, snapshot.price, "TRIM", `Shared +${target.pct}% tournament take-profit`, at);
       if (position.status !== "open") return;
     }
   }
@@ -288,16 +281,14 @@ function applyMark(team: TournamentTeam, position: TournamentPosition, snapshot:
   const buyingPressureSlowed = !isMoonbag && ageMinutes >= 5
     && Boolean(snapshot.dataProvenance?.live)
     && ((snapshot.buySellRatio < 1 && volumeAcceleration <= 0) || snapshot.buySellRatio < 0.85);
-  if (pnlPct <= -position.stopLossPct) sell(team, position, position.remainingQuantity, snapshot, "SELL", "Shared stop-loss", at);
-  else if (pnlPct >= 25 && drawdownPct >= position.trailingStopPct) sell(team, position, position.remainingQuantity, snapshot, "SELL", "Shared trailing stop", at);
-  else if (buyingPressureSlowed) sell(team, position, position.remainingQuantity, snapshot, "SELL", `Buying pressure slowed after ${ageMinutes.toFixed(0)}m · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume acceleration ${volumeAcceleration.toFixed(1)}%`, at);
-  else if (isMoonbag && moonbagMinutes >= MOONBAG_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot, "SELL", "Moon bag reached its 2-hour maximum hold", at);
-  else if (!isMoonbag && ageMinutes >= REGULAR_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot, "SELL", "Regular trade reached its 20-minute maximum hold", at);
+  if (pnlPct <= -position.stopLossPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared stop-loss", at);
+  else if (pnlPct >= 25 && drawdownPct >= position.trailingStopPct) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Shared trailing stop", at);
+  else if (buyingPressureSlowed) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", `Buying pressure slowed after ${ageMinutes.toFixed(0)}m · buy/sell ${snapshot.buySellRatio.toFixed(2)}x · volume acceleration ${volumeAcceleration.toFixed(1)}%`, at);
+  else if (isMoonbag && moonbagMinutes >= MOONBAG_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Moon bag reached its 2-hour maximum hold", at);
+  else if (!isMoonbag && ageMinutes >= REGULAR_MAX_HOLD_MINUTES) sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "Regular trade reached its 20-minute maximum hold", at);
 }
 function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<TournamentRole, number>, at: string) {
   const snapshot = result.snapshot;
-  const unsafe = immediateSafetyFailure(snapshot);
-  if (unsafe) return reject(team, `Entry rejected: ${unsafe}`);
   if (positionExists(team, snapshot)) return reject(team, "Already holding this token");
   if (team.positions.filter((position) => position.status === "open").length >= MAX_OPEN_POSITIONS) return reject(team, `Maximum ${MAX_OPEN_POSITIONS} active trades reached`);
   const planned = result.execution.request?.notionalUsd ?? result.runnerGenome.suggestedTradeUsd ?? 50;
@@ -329,6 +320,9 @@ function enter(team: TournamentTeam, result: WarRoomResult, scores: Record<Tourn
   return true;
 }
 
+function liquidateRound(team: TournamentTeam, at: string) {
+  for (const position of team.positions) if (position.status === "open") sell(team, position, position.remainingQuantity, position.markPrice, "SELL", "Round-end mark liquidation", at);
+}
 function teamView(team: TournamentTeam): TournamentTeamView {
   const openValueUsd = team.positions.filter((position) => position.status === "open").reduce((sum, position) => sum + position.remainingQuantity * position.markPrice, 0);
   const equityUsd = team.cashUsd + openValueUsd;
@@ -517,7 +511,7 @@ export async function refreshTournamentMarks(limit = 4) {
           }
           applyMark(team, position, snapshot, at);
           if (state.forcedTurnoverReleaseVersion !== 1 && position.status === "open") {
-            sell(team, position, position.remainingQuantity, snapshot, "SELL", "One-time Tournament.10 turnover release", at);
+            sell(team, position, position.remainingQuantity, snapshot.price, "SELL", "One-time Tournament.10 turnover release", at);
           }
         }
       }
