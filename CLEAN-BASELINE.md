@@ -2,7 +2,7 @@
 
 V3.6.3.6 is the flattened canonical base. It includes the read-only monitoring workspace and the full-exit policy without retaining active patch-chain behavior.
 
-The repository contains the real Next.js directory tree directly. Docker builds that tree as-is; there is no embedded source archive, extraction step, structure-restoration script, or historical patch chain.
+The repository contains the real Next.js directory tree directly. It also carries one generated `deployment-source.tar.gz` containing that exact canonical tree. Docker removes any stale nested source and restores this archive before compilation, protecting browser-based GitHub uploads that drop folders. This is not a historical update or patch chain.
 
 BUY thresholds, position sizing, liquidity/sellability gates, wallet accounting formulas, and autonomous scan cadence were not changed. Staged take profits total 100%; no residual runner allocation is created.
 

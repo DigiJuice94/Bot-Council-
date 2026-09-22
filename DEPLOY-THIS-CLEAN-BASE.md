@@ -8,7 +8,9 @@ source files in the repository. GitHub's file uploader merges files; it does not
 remove retired files automatically. Replace the old repository contents with
 the contents of this folder, then deploy the resulting commit.
 
-This package does not depend on `deployment-source.tar.gz`. Its Dockerfile builds the included `app/`, `components/`, `lib/`, and `public/` directories directly.
+This package includes a generated `deployment-source.tar.gz` containing the exact same canonical `app/`, `components/`, `lib/`, and `public/` tree. Railway restores it before building, so the deployment still works if GitHub's browser uploader drops nested folders.
+
+Do not delete `deployment-source.tar.gz`. It is the upload-safe copy of this same build, not an older version.
 
 Successful deployment is visually identifiable by the dashboard label:
 

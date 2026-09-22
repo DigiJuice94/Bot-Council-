@@ -7,6 +7,12 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# GitHub's browser uploader can retain root files while dropping nested source
+# folders. Restore the one canonical tree and remove any stale nested files
+# before compiling so Railway always builds the same verified source.
+RUN test -f deployment-source.tar.gz \
+  && rm -rf app components lib public \
+  && tar -xzf deployment-source.tar.gz
 RUN npm run build
 
 FROM node:22-alpine AS runner
