@@ -8,6 +8,8 @@ source files in the repository. GitHub's file uploader merges files; it does not
 remove retired files automatically. Replace the old repository contents with
 the contents of this folder, then deploy the resulting commit.
 
+This package does not depend on `deployment-source.tar.gz`. Its Dockerfile builds the included `app/`, `components/`, `lib/`, and `public/` directories directly.
+
 Successful deployment is visually identifiable by the dashboard label:
 
 `Bot War Room V3.6.3.6 · CANONICAL · FULL EXITS`

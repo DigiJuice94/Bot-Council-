@@ -40,10 +40,6 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    ".smoke",
-    "tests",
-    "smoke.ts",
-    "mock-market.ts"
+    "node_modules"
   ]
 }
