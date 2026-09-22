@@ -1,4 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { buildCabinetExport, type CabinetKind } from "@/lib/cabinet-export";
-export const dynamic="force-dynamic";
-export async function GET(request:NextRequest,{params}:{params:{kind:string}}){const kind=params.kind as CabinetKind;if(!["main","rug","proof"].includes(kind))return NextResponse.json({error:"Unknown cabinet"},{status:404});const data=await buildCabinetExport(kind);if(request.nextUrl.searchParams.get("download")==="1")return new NextResponse(JSON.stringify(data,null,2),{headers:{"Content-Type":"application/json","Content-Disposition":`attachment; filename="bot-war-room-${kind}-cabinet-${new Date().toISOString().slice(0,10)}.json"`,"Cache-Control":"no-store"}});return NextResponse.json(data,{headers:{"Cache-Control":"no-store"}})}
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+// V2.12 deliberately disables client/manual paper order injection.
+// The only code path allowed to create a new paper position is the server-side autonomous Council in lib/autopilot.ts.
+export async function POST() {
+  return NextResponse.json({
+    error: "Manual paper execution is disabled in V2.12. The autonomous War Room owns the paper wallet and only real-provider Council decisions may create entries.",
+  }, { status: 403, headers: { "Cache-Control": "no-store" } });
+}

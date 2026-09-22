@@ -17,13 +17,13 @@ export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, 
   const earlyRunnerPool = snapshot.marketCap >= 8_000 && snapshot.marketCap <= 80_000 && snapshot.ageMinutes <= 1_440;
   const firstTarget = conviction >= 88 ? 28 : conviction >= 80 ? 23 : conviction >= 72 ? 18 : 15;
 
-  // V2.8: never force-distribute 100% of a confirmed winner through staged TPs.
-  const moonbagPct = conviction >= 85 ? 20 : conviction >= 75 ? 15 : 10;
-  const runnerSellPct = Math.max(10, 100 - moonbagPct - 18 - 22 - 25);
+  // Every trade is fully realizable; staged targets sum to 100% with no residual bag.
+  const moonbagPct = 0;
+  const runnerSellPct = 35;
   const winnerTrailingStopPct = Number(clamp(trailingStopPct + (favorable ? 5 : 3), trailingStopPct, 32).toFixed(1));
   const moonbagTrailingStopPct = Number(clamp(trailingStopPct + (favorable ? 10 : 7), winnerTrailingStopPct, 36).toFixed(1));
   const winnerMaxHoldMinutes = favorable ? (regime?.id === "risk_on_trend" ? 2160 : 2880) : Math.max(maxHoldMinutes, 1440);
-  const moonbagMaxHoldMinutes = favorable ? 20_160 : 10_080; // 14d favorable / 7d defensive ceiling.
+  const moonbagMaxHoldMinutes = 20; // Legacy schema field; moon bags are disabled.
 
   return {
     stopLossPct,

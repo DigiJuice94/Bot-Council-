@@ -186,7 +186,7 @@ export async function registerPaperPosition(args: {
     updatedAt: now,
     lastMarketDataAt: now,
     lastAction: "HOLD",
-    lastReason: args.reentryCount ? `Controlled re-entry #${args.reentryCount} registered. Guardian will require fresh confirmation before scaling.` : "Position registered. Guardian will enter small, demand confirmation before scaling, and preserve a moonbag if the trade becomes a winner.",
+    lastReason: args.reentryCount ? `Controlled re-entry #${args.reentryCount} registered. Guardian will require fresh confirmation before scaling.` : "Position registered. Guardian will enter small, demand confirmation before scaling, and fully close the trade through exits.",
     takenProfitLabels: [],
     winnerState: "building",
     scaleIns: [],
@@ -216,7 +216,6 @@ export async function registerPaperPosition(args: {
       realizedCostAfterUsd: 0,
       positionRealizedPnlAfterUsd: 0,
       nextTargetPrice: nextTargetPrice(position),
-      moonbagExitFloorPrice: moonbagExitFloorPrice(position),
     });
     await appendFillJournal(fill, request.tokenAddress, position.id);
   } catch (error) {
@@ -233,11 +232,6 @@ function nextTakeProfit(position: ManagedPosition, pnlPct: number): ExitLevel | 
 function nextTargetPrice(position: ManagedPosition, takenLabels = position.takenProfitLabels) {
   const next = position.exitStrategy.takeProfits.find((level) => !takenLabels.includes(level.label));
   return next ? position.entryPrice * (1 + next.gainPct / 100) : undefined;
-}
-
-function moonbagExitFloorPrice(position: ManagedPosition) {
-  const trailingPct = Math.max(0, position.exitStrategy.moonbagTrailingStopPct ?? position.exitStrategy.trailingStopPct ?? 0);
-  return position.highWaterPrice > 0 ? position.highWaterPrice * (1 - trailingPct / 100) : undefined;
 }
 
 function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext): WarRoomResult {
@@ -264,9 +258,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const fresh = freshCouncil(position, snapshot, portfolio);
   const confirmation = confirmationScore(position, snapshot, fresh);
   const winnerState = determineWinnerState(position, rawMovePct, confirmation);
-  const moonbagStartedAt = winnerState === "moonbag"
-    ? (position.moonbagStartedAt ?? now)
-    : position.moonbagStartedAt;
+  const moonbagStartedAt = undefined;
   const controls = effectiveGuardianControls(position, winnerState);
   const exitStrategist = evaluateExitStrategist({ position, snapshot, portfolio, exitGenome });
   const genomeTrailingStopPct = exitGenome ? Math.max(6, Math.min(40, exitGenome.trailingStopPct)) : controls.trailingStopPct;
@@ -284,14 +276,10 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const liquidityTriggered = snapshot.liquidity < position.exitStrategy.liquidityFloorUsd;
   const securityTriggered = confirmedSellabilityFailure(snapshot) || snapshot.honeypot || snapshot.top10Pct > 80 || snapshot.bundledPct > 25;
   const authorityTriggered = snapshot.chainFamily === "solana" && (snapshot.mintAuthority || snapshot.freezeAuthority);
-  const moonbagHeldMinutes = moonbagStartedAt ? Math.max(0, (Date.now() - new Date(moonbagStartedAt).getTime()) / 60_000) : 0;
-  const turnoverMaxHoldMinutes = winnerState === "moonbag" ? 2_880 : 20;
-  const timeTriggered = winnerState === "moonbag"
-    ? moonbagHeldMinutes >= turnoverMaxHoldMinutes
-    : heldMinutes >= Math.min(activeMaxHoldMinutes, turnoverMaxHoldMinutes);
+  const turnoverMaxHoldMinutes = 20;
+  const timeTriggered = heldMinutes >= Math.min(activeMaxHoldMinutes, turnoverMaxHoldMinutes);
   const volumeAcceleration = snapshot.volumeAccelerationPct ?? snapshot.launchMetrics?.volumeAccelerationPct ?? 0;
-  const buyingPressureSlowed = winnerState !== "moonbag"
-    && heldMinutes >= 5
+  const buyingPressureSlowed = heldMinutes >= 5
     && Boolean(snapshot.dataProvenance?.live)
     && ((snapshot.buySellRatio < 1 && volumeAcceleration <= 0) || snapshot.buySellRatio < 0.85);
   const tp = nextTakeProfit(position, rawMovePct);
@@ -338,12 +326,10 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   } else if (timeTriggered) {
     lastAction = "EXIT";
     status = "exit_pending";
-    lastReason = winnerState === "moonbag"
-      ? "Exit: moon bag reached its 48-hour maximum hold."
-      : "Exit: regular trade reached the 20-minute maximum hold.";
+    lastReason = "Exit: regular trade reached the 20-minute maximum hold.";
   } else if (tp) {
     lastAction = "TRIM";
-    lastReason = `${tp.label}: +${tp.gainPct}% target reached; Guardian will realize ${tp.sellPct}% of scaled position once and preserve ${position.exitStrategy.moonbagPct ?? 0}% for the moonbag.`;
+    lastReason = `${tp.label}: +${tp.gainPct}% target reached; Guardian will realize ${tp.sellPct}% of scaled position once. The staged plan closes 100% of the trade.`;
   } else if (scaleStep) {
     lastAction = "SCALE_IN";
     pendingScaleLabel = scaleStep.label;
@@ -432,7 +418,6 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
     realizedCostAfterUsd: position.realizedCostUsd,
     positionRealizedPnlAfterUsd: position.realizedPnlUsd,
     nextTargetPrice: nextTargetPrice(scaledPosition),
-    moonbagExitFloorPrice: moonbagExitFloorPrice(scaledPosition),
   });
   await appendFillJournal(fill, position.tokenAddress, position.id);
 
@@ -492,7 +477,6 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
     realizedCostAfterUsd: realizedCostUsd,
     positionRealizedPnlAfterUsd: realizedPnlUsd,
     nextTargetPrice: nextTargetPrice(position, takenProfitLabels),
-    moonbagExitFloorPrice: moonbagExitFloorPrice({ ...position, highWaterPrice: Math.max(position.highWaterPrice, snapshot.price) }),
   });
   await appendFillJournal(fill, position.tokenAddress, position.id);
   return {
@@ -508,7 +492,7 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
     pendingScaleLabel: undefined,
     updatedAt: new Date().toISOString(),
     lastAction: "TRIM",
-    lastReason: `${level.label} filled: sold ${effectiveSellPct.toFixed(1)}% of scaled size @ ${fill.fillPrice}${sellPctOverride ? " under Claude Profit Optimizer sizing" : ""}. ${position.exitStrategy.moonbagPct ?? 0}% target moonbag remains protected by adaptive Guardian rules.`,
+    lastReason: `${level.label} filled: sold ${effectiveSellPct.toFixed(1)}% of scaled size @ ${fill.fillPrice}${sellPctOverride ? " under Claude Profit Optimizer sizing" : ""}. Remaining quantity stays an active trade until fully exited.`,
     profitCapturePct: Number(capture.toFixed(2)),
     status: remainingQuantity <= position.quantity * 0.001 ? "closed" : "open",
   };
@@ -640,6 +624,12 @@ async function auditForLockedCapital(position: ManagedPosition, snapshot: Market
 const guardianGlobal = globalThis as typeof globalThis & {
   __botWarRoomGuardianTimer?: ReturnType<typeof setInterval>;
   __botWarRoomGuardianBusy?: boolean;
+  __botWarRoomGuardianCycles?: number;
+  __botWarRoomGuardianFailures?: number;
+  __botWarRoomGuardianLastAttemptAt?: string;
+  __botWarRoomGuardianLastCompletedAt?: string;
+  __botWarRoomGuardianLastSuccessfulAt?: string;
+  __botWarRoomGuardianLastError?: string;
 };
 
 export function ensurePositionGuardianLoop() {
@@ -650,6 +640,7 @@ export function ensurePositionGuardianLoop() {
 }
 
 export async function refreshPositionGuardian(): Promise<PositionGuardianReport> {
+  guardianGlobal.__botWarRoomGuardianLastAttemptAt = new Date().toISOString();
   if (guardianGlobal.__botWarRoomGuardianBusy) {
     const storage = await positionStorageMode();
     return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };
@@ -748,6 +739,9 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
 
     const storage = await positionStorageMode();
     const activePositions = refreshed.filter((position) => position.status === "open" || position.status === "exit_pending");
+    guardianGlobal.__botWarRoomGuardianCycles = (guardianGlobal.__botWarRoomGuardianCycles ?? 0) + 1;
+    guardianGlobal.__botWarRoomGuardianLastSuccessfulAt = new Date().toISOString();
+    guardianGlobal.__botWarRoomGuardianLastError = undefined;
     return {
       storage,
       openCount: activePositions.length,
@@ -760,7 +754,25 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           ? `${staleCount} position(s) remain persisted but are waiting for a fresh market-data snapshot.`
           : undefined,
     };
+  } catch (error) {
+    guardianGlobal.__botWarRoomGuardianFailures = (guardianGlobal.__botWarRoomGuardianFailures ?? 0) + 1;
+    guardianGlobal.__botWarRoomGuardianLastError = error instanceof Error ? error.message : String(error);
+    throw error;
   } finally {
+    guardianGlobal.__botWarRoomGuardianLastCompletedAt = new Date().toISOString();
     guardianGlobal.__botWarRoomGuardianBusy = false;
   }
+}
+
+export function getPositionGuardianTelemetry() {
+  return {
+    running: Boolean(guardianGlobal.__botWarRoomGuardianTimer),
+    busy: Boolean(guardianGlobal.__botWarRoomGuardianBusy),
+    cycles: guardianGlobal.__botWarRoomGuardianCycles ?? 0,
+    failures: guardianGlobal.__botWarRoomGuardianFailures ?? 0,
+    lastAttemptAt: guardianGlobal.__botWarRoomGuardianLastAttemptAt,
+    lastCompletedAt: guardianGlobal.__botWarRoomGuardianLastCompletedAt,
+    lastSuccessfulAt: guardianGlobal.__botWarRoomGuardianLastSuccessfulAt,
+    lastError: guardianGlobal.__botWarRoomGuardianLastError,
+  };
 }

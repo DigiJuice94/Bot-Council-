@@ -165,34 +165,3 @@ export async function recordIndependentCouncilOutcome(position: ManagedPosition)
 
   await markOutcomeRecorded(position.id, namespace);
 }
-
-export async function recordTournamentEntityOutcome(args: {
-  namespace: string;
-  positionId: string;
-  symbol: string;
-  chain: string;
-  decisionId: string;
-  realizedPnlUsd: number;
-  realizedReturnPct: number;
-  closedAt: string;
-  exitReason: string;
-  opinions: Array<{ agentId: CouncilEntityId; vote: "BUY" | "WATCH" | "SKIP"; confidence: number; score: number }>;
-}) {
-  if (await outcomeAlreadyRecorded(args.positionId, args.namespace)) return;
-  const outcomeLabel = args.realizedPnlUsd > 0 ? "WIN" : args.realizedPnlUsd < 0 ? "LOSS" : "FLAT";
-  await Promise.all(args.opinions.map((opinion) => appendPrivateEntityMemory({
-    id: `${args.positionId}:${opinion.agentId}:outcome`,
-    agentId: opinion.agentId,
-    kind: "outcome",
-    createdAt: args.closedAt,
-    symbol: args.symbol,
-    chain: args.chain,
-    decisionId: args.decisionId,
-    vote: opinion.vote,
-    confidence: opinion.confidence,
-    realizedReturnPct: args.realizedReturnPct,
-    realizedPnlUsd: args.realizedPnlUsd,
-    lesson: `${outcomeLabel} on $${args.symbol}: ${args.realizedReturnPct.toFixed(2)}% / $${args.realizedPnlUsd.toFixed(2)}. This independent team member voted ${opinion.vote} at ${opinion.confidence}% with score ${opinion.score}. Exit: ${args.exitReason}`.slice(0, 1_200),
-  }, args.namespace)));
-  await markOutcomeRecorded(args.positionId, args.namespace);
-}

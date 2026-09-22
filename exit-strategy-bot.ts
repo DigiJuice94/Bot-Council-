@@ -23,14 +23,14 @@ export function profitFirstExitStrategy(exit: ExitStrategy): ExitStrategy {
   return {
     ...exit,
     // We are deliberately not waiting for 50/100/200/400 before banking anything.
-    // Sell 90% progressively and leave a 10% moonbag for exceptional runners.
+    // Realize the entire position progressively. No residual moon bag remains.
     takeProfits: [
       { gainPct: 25, sellPct: 20, label: "TP1" },
       { gainPct: 50, sellPct: 20, label: "TP2" },
       { gainPct: 100, sellPct: 25, label: "TP3" },
-      { gainPct: 200, sellPct: 25, label: "Runner" },
+      { gainPct: 200, sellPct: 35, label: "Runner" },
     ],
-    moonbagPct: 10,
+    moonbagPct: 0,
     // There is always another runner. Do not let a good paper trade turn into
     // dead capital for hours.
     stopLossPct: Math.min(exit.stopLossPct, 18),
@@ -40,7 +40,7 @@ export function profitFirstExitStrategy(exit: ExitStrategy): ExitStrategy {
     winnerTrailingStopPct: Math.min(exit.winnerTrailingStopPct ?? 16, 16),
     winnerMaxHoldMinutes: Math.min(exit.winnerMaxHoldMinutes ?? 20, 20),
     moonbagTrailingStopPct: Math.min(exit.moonbagTrailingStopPct ?? 24, 24),
-    moonbagMaxHoldMinutes: 2_880,
+    moonbagMaxHoldMinutes: 20,
     breakEvenBufferPct: Math.max(exit.breakEvenBufferPct ?? 2, 3),
     invalidationRules: [
       ...exit.invalidationRules,
@@ -108,7 +108,6 @@ export function evaluateExitStrategist(args: {
   if (rawMovePct >= 25) maxHoldMinutes = 120;
   if (rawMovePct >= 50) maxHoldMinutes = 180;
   if (rawMovePct >= 100 && continuation >= 70) maxHoldMinutes = 240;
-  if (position.winnerState === "moonbag") maxHoldMinutes = 2_880;
 
   const minimumTrainingCash = Math.max(1, Number(process.env.PAPER_TRAINING_MIN_BUY_USD ?? 50));
   const capitalRecycle = Boolean(

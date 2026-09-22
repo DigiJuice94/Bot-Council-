@@ -86,7 +86,7 @@ async function readList(key: string, memory: any[], limit: number) {
 }
 
 export async function getTradeJournal(limit = 100) {
-  const safeLimit = Math.max(1, Math.min(500, Math.round(limit)));
+  const safeLimit = Math.max(1, Math.min(MAX_ROWS, Math.round(limit)));
   const [decisions, fills] = await Promise.all([
     readList(DECISION_KEY, state.__bwrDecisionJournal ?? [], safeLimit),
     readList(FILL_KEY, state.__bwrFillJournal ?? [], safeLimit),

@@ -6,5 +6,9 @@ export async function register() {
       "Fresh verified PAPER ledger requested for Portfolio Auditor release",
       "v3-portfolio-auditor-reset-20260918",
     );
+    // The scanner and Guardian are server jobs. Starting them here prevents a
+    // closed browser tab from being mistaken for healthy inactivity.
+    const { ensureAutonomousWarRoom } = await import("./lib/autopilot");
+    ensureAutonomousWarRoom();
   }
 }

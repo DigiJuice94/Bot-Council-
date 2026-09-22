@@ -92,6 +92,23 @@ export type AutopilotStatus = {
   latestResult: WarRoomResult | null;
   recentDecisions: WarRoomResult[];
   chat: AutopilotChatRow[];
+  cycleAttempts: number;
+  cycleCompletions: number;
+  cycleFailures: number;
+  overlappingCycleSkips: number;
+  scansWithoutCandidate: number;
+  councilDecisionsCompleted: number;
+  entriesAttempted: number;
+  entriesCompleted: number;
+  entryFailures: number;
+  lastCycleAttemptAt?: string;
+  lastCycleCompletedAt?: string;
+  lastSuccessfulCycleAt?: string;
+  activeCycleStartedAt?: string;
+  lastCouncilDecisionAt?: string;
+  lastEntryAttemptAt?: string;
+  lastEntryCompletedAt?: string;
+  lastOperationalErrorAt?: string;
   lastError?: string;
 };
 
@@ -139,6 +156,15 @@ function initialState(): AutopilotStatus {
     latestResult: null,
     recentDecisions: [],
     chat: [],
+    cycleAttempts: 0,
+    cycleCompletions: 0,
+    cycleFailures: 0,
+    overlappingCycleSkips: 0,
+    scansWithoutCandidate: 0,
+    councilDecisionsCompleted: 0,
+    entriesAttempted: 0,
+    entriesCompleted: 0,
+    entryFailures: 0,
   };
 }
 
@@ -343,6 +369,7 @@ async function scanOneChain(chain: Chain) {
 
   const snapshot = await fetchLiveCandidate(chain);
   if (!snapshot) {
+    current.scansWithoutCandidate += 1;
     if (current.scanCount % CHAINS.length === 0) addChat("Launch Scout", `${chain}: no new qualifying real candidate. Provider waterfall is continuing automatically.`, "system");
     return;
   }
@@ -392,6 +419,8 @@ async function scanOneChain(chain: Chain) {
   }
 
   await observeCouncilResult(result);
+  current.councilDecisionsCompleted += 1;
+  current.lastCouncilDecisionAt = new Date().toISOString();
   current.latestResult = result;
   current.recentDecisions = [result, ...current.recentDecisions.filter((row) => row.decisionId !== result.decisionId)].slice(0, MAX_DECISIONS);
   current.lastError = undefined;
@@ -410,9 +439,17 @@ async function scanOneChain(chain: Chain) {
 
   let executed = false;
   if (result.decision === "BUY") {
+    current.entriesAttempted += 1;
+    current.lastEntryAttemptAt = new Date().toISOString();
     if (!result.risk.passed) recordRejection(result.risk.hardBlocks[0] ?? "Deterministic risk veto");
     else if (result.councilProcess.executorVote === "BLOCK") recordRejection("Executor blocked market feasibility");
     else executed = await autoExecute(result, fileCabinetPortfolio);
+    if (executed) {
+      current.entriesCompleted += 1;
+      current.lastEntryCompletedAt = new Date().toISOString();
+    } else {
+      current.entryFailures += 1;
+    }
   } else {
     recordRejection(`Team File Cabinet Council finished ${result.decision}`);
   }
@@ -432,8 +469,15 @@ async function runScannerMaintenance() {
 }
 
 export async function runAutonomousTick() {
-  if (globalState.__botWarRoomAutopilotBusyV14) return;
+  const current = state();
+  current.cycleAttempts += 1;
+  current.lastCycleAttemptAt = new Date().toISOString();
+  if (globalState.__botWarRoomAutopilotBusyV14) {
+    current.overlappingCycleSkips += 1;
+    return;
+  }
   globalState.__botWarRoomAutopilotBusyV14 = true;
+  current.activeCycleStartedAt = current.lastCycleAttemptAt;
   let releaseLease: (() => Promise<void>) | null = null;
   try {
     releaseLease = await acquireRuntimeLease("autopilot-tick", Math.max(60_000, intervalMs() * 10));
@@ -446,9 +490,13 @@ export async function runAutonomousTick() {
     // Two bounded lanes overlap provider/Council latency without creating an
     // unbounded worker pool or changing any candidate or safety decision.
     await Promise.all(chains.map((chain) => scanOneChain(chain)));
+    current.cycleCompletions += 1;
+    current.lastSuccessfulCycleAt = new Date().toISOString();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const current = state();
+    current.cycleFailures += 1;
+    current.lastOperationalErrorAt = new Date().toISOString();
     const nowMs = Date.now();
     const sameMessage = globalState.__botWarRoomLastErrorMessageV227 === message;
     const lastAt = globalState.__botWarRoomLastErrorAtV227 ?? 0;
@@ -462,8 +510,46 @@ export async function runAutonomousTick() {
     console.error("[autopilot] cycle failed", error);
   } finally {
     if (releaseLease) await releaseLease().catch(() => undefined);
+    current.lastCycleCompletedAt = new Date().toISOString();
+    current.activeCycleStartedAt = undefined;
     globalState.__botWarRoomAutopilotBusyV14 = false;
   }
+}
+
+export function getAutopilotTelemetrySnapshot() {
+  const current = state();
+  return {
+    running: current.running,
+    intervalMs: current.intervalMs,
+    scanWorkers: current.scanWorkers,
+    currentChain: current.currentChain,
+    scanCount: current.scanCount,
+    candidateCount: current.candidateCount,
+    buyCount: current.buyCount,
+    cycleAttempts: current.cycleAttempts,
+    cycleCompletions: current.cycleCompletions,
+    cycleFailures: current.cycleFailures,
+    overlappingCycleSkips: current.overlappingCycleSkips,
+    scansWithoutCandidate: current.scansWithoutCandidate,
+    councilDecisionsCompleted: current.councilDecisionsCompleted,
+    entriesAttempted: current.entriesAttempted,
+    entriesCompleted: current.entriesCompleted,
+    entryFailures: current.entryFailures,
+    lastScanAt: current.lastScanAt,
+    nextScanAt: current.nextScanAt,
+    lastCycleAttemptAt: current.lastCycleAttemptAt,
+    lastCycleCompletedAt: current.lastCycleCompletedAt,
+    lastSuccessfulCycleAt: current.lastSuccessfulCycleAt,
+    activeCycleStartedAt: current.activeCycleStartedAt,
+    lastCouncilDecisionAt: current.lastCouncilDecisionAt,
+    lastEntryAttemptAt: current.lastEntryAttemptAt,
+    lastEntryCompletedAt: current.lastEntryCompletedAt,
+    lastOperationalErrorAt: current.lastOperationalErrorAt,
+    lastError: current.lastError,
+    chainStats: structuredClone(current.chainStats),
+    funnel: structuredClone(current.funnel),
+    recentShadowReviews: current.shadowBook.filter((row) => row.reviewedAt).slice(0, 25),
+  };
 }
 
 export function ensureAutonomousWarRoom() {

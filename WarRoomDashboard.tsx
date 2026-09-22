@@ -92,24 +92,6 @@ function positionPnlUsd(position: ManagedPosition) {
   return (position.realizedProceedsUsd ?? 0) + openValue - (position.entryNotionalUsd ?? 0);
 }
 
-function isMoonBag(position: ManagedPosition) {
-  if (position.status === "closed" || position.status === "unsellable") return false;
-  if (position.winnerState === "moonbag") return true;
-  // A confirmed partial SELL means the main trade has already banked capital
-  // and the remaining quantity is the runner remainder shown as a Moon Bag.
-  // Do not wait for every future take-profit level before separating it from
-  // untouched Active Trades.
-  const hasRealizedPartialExit = (position.realizedProceedsUsd ?? 0) > 0.005
-    && (position.realizedCostUsd ?? 0) > 0.005
-    && Math.max(0, position.remainingQuantity ?? 0) > 0;
-  if (hasRealizedPartialExit) return true;
-  const targets = position.exitStrategy?.takeProfits ?? [];
-  const allTargetsTaken = targets.length > 0 && targets.every((target) => position.takenProfitLabels.includes(target.label));
-  const originalQuantity = Math.max(position.initialQuantity ?? position.quantity ?? 0, 0);
-  const remainingPct = originalQuantity > 0 ? (Math.max(0, position.remainingQuantity) / originalQuantity) * 100 : 100;
-  return allTargetsTaken && remainingPct <= (position.exitStrategy?.moonbagPct ?? 10) + 2;
-}
-
 function tokenAmount(value: number) {
   if (!Number.isFinite(value)) return "0";
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: value < 1 ? 8 : 4 }).format(value);
@@ -538,8 +520,7 @@ export default function WarRoomDashboard() {
   );
   const openPositions = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
   const unsellablePositions = positions.filter((position) => position.status === "unsellable");
-  const moonBagPositions = openPositions.filter(isMoonBag);
-  const activePositions = openPositions.filter((position) => !isMoonBag(position));
+  const activePositions = openPositions;
   // The server snapshot includes every open PAPER position; the UI list is display-capped.
   const openPositionValue = status?.paperWallet?.openExposureUsd ?? 0;
   const openPositionCost = status?.paperWallet?.openCostUsd ?? 0;
@@ -697,7 +678,6 @@ export default function WarRoomDashboard() {
         <button type="button" onClick={() => scrollToSection("live")}>WAR ROOM</button>
         <button type="button" onClick={() => scrollToSection("wallet-live")}>PORTFOLIO</button>
         <button type="button" onClick={() => scrollToSection("active-trades")}>ACTIVE TRADES</button>
-        <button type="button" onClick={() => scrollToSection("moon-bags")}>MOON BAGS</button>
         <button type="button" onClick={() => scrollToSection("unsellable-capital")}>UNSELLABLE</button>
         <button type="button" className={detailedTradeLogActive ? "active" : ""} onClick={openDetailedTradeLog}>DETAILED TRADE LOG</button>
         <button type="button" onClick={() => scrollToSection("diagnostics")}>WHY TRADES STOP</button>
@@ -705,7 +685,7 @@ export default function WarRoomDashboard() {
       </nav>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · MOON BAGS</small></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3</strong><small>FAST · FULL EXITS</small></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -848,33 +828,6 @@ export default function WarRoomDashboard() {
         {activePositions.length > 24 && <small className="active-trades-more">Showing 24 of {activePositions.length} active trades. Portfolio totals include every holding.</small>}
       </section>
 
-      <section id="moon-bags" className="moon-bags-panel page-panel">
-        <div className="wide-panel-head"><div><h2>🌙 Moon Bags</h2><p>Partial profits were already taken; these smaller remainders continue under Moon Bag protection for no more than 48 hours.</p></div><span className="moonbag-chip">{moonBagPositions.length} moon bag{moonBagPositions.length === 1 ? "" : "s"}</span></div>
-        <div className="moon-bags-grid">
-          {moonBagPositions.length ? moonBagPositions.slice(0, 24).map((position) => {
-            const remainingValue = Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0);
-            const remainingCost = Math.max(0, position.remainingNotionalUsd ?? ((position.remainingQuantity ?? 0) * (position.entryPrice ?? 0)));
-            const unrealizedPnl = remainingValue - remainingCost;
-            const realizedPnl = position.realizedPnlUsd ?? 0;
-            const totalPnl = realizedPnl + unrealizedPnl;
-            return <article className="moon-bag-card" key={position.id}>
-              <div className="moon-bag-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em>MOON BAG</em></div>
-              <div className="moon-bag-values">
-                <span><small>REMAINING VALUE</small><b>${remainingValue.toFixed(2)}</b></span>
-                <span><small>REMAINING TOKENS</small><b>{tokenAmount(position.remainingQuantity ?? 0)}</b></span>
-                <span><small>CURRENT MARK</small><b>{price(position.markPrice)}</b></span>
-                <span><small>ORIGINAL ENTRY</small><b>{price(position.initialEntryPrice ?? position.entryPrice)}</b></span>
-                <span><small>REALIZED PROFIT</small><b className={realizedPnl >= 0 ? "positive" : "negative"}>{realizedPnl >= 0 ? "+" : "-"}${Math.abs(realizedPnl).toFixed(2)}</b></span>
-                <span><small>MOON BAG P/L</small><b className={unrealizedPnl >= 0 ? "positive" : "negative"}>{unrealizedPnl >= 0 ? "+" : "-"}${Math.abs(unrealizedPnl).toFixed(2)}</b></span>
-              </div>
-              <div className="moon-bag-total"><span>Total Trade P/L</span><b className={totalPnl >= 0 ? "positive" : "negative"}>{totalPnl >= 0 ? "+" : "-"}${Math.abs(totalPnl).toFixed(2)}</b></div>
-              <small className="active-trade-meta">{position.chain} · {position.takenProfitLabels.join(" · ") || "partial profits banked"} · {ago(position.openedAt)}</small>
-            </article>;
-          }) : <div className="empty-row">No Moon Bags yet. A position moves here automatically as soon as a partial-profit sell is confirmed.</div>}
-        </div>
-        {moonBagPositions.length > 24 && <small className="active-trades-more">Showing 24 of {moonBagPositions.length} Moon Bags. Portfolio totals include every holding.</small>}
-      </section>
-
       <section id="unsellable-capital" className="unsellable-panel page-panel">
         <div className="wide-panel-head"><div><h2>⚠ Unsellable / Locked Capital</h2><p>Tokens the Guardian could not sell. No proceeds are credited; remaining cost is counted as a loss and retained for learning.</p></div><span className="unsellable-chip">{unsellablePositions.length} lost trade{unsellablePositions.length === 1 ? "" : "s"}</span></div>
         <div className="unsellable-grid">
@@ -907,7 +860,7 @@ export default function WarRoomDashboard() {
           <div className="detailed-log-scroll">
             <div className="detailed-log-table">
               <div className="detailed-log-row detailed-log-head">
-                <span>Time / Action</span><span>Token / CA</span><span>Chain</span><span>USD Filled</span><span>Coins Bought / Sold</span><span>Entry Price</span><span>Fill Price</span><span>Coins Remaining</span><span>Next Profit Target</span><span>Moon Bag Exit Floor</span><span>Realized P/L</span><span>Cash After</span><span>Portfolio After</span><span>Fee / Slippage</span>
+                <span>Time / Action</span><span>Token / CA</span><span>Chain</span><span>USD Filled</span><span>Coins Bought / Sold</span><span>Entry Price</span><span>Fill Price</span><span>Coins Remaining</span><span>Next Profit Target</span><span>Realized P/L</span><span>Cash After</span><span>Portfolio After</span><span>Fee / Slippage</span>
               </div>
               {detailedTradeRows.length ? detailedTradeRows.map((fill) => {
                 const isSell = fill.side === "SELL";
@@ -920,9 +873,8 @@ export default function WarRoomDashboard() {
                   <span><b>{tokenAmount(fill.quantity ?? 0)}</b><small>{isSell ? "sold" : "received"}</small></span>
                   <span>{fill.entryPrice ? price(fill.entryPrice) : "—"}</span>
                   <span>{price(fill.fillPrice)}</span>
-                  <span><b>{tokenAmount(fill.remainingQuantityAfter ?? 0)}</b><small>{isSell && (fill.remainingQuantityAfter ?? 0) > 0 ? "remaining / moon bag" : (fill.remainingQuantityAfter ?? 0) === 0 ? "fully closed" : "held"}</small></span>
+                  <span><b>{tokenAmount(fill.remainingQuantityAfter ?? 0)}</b><small>{isSell && (fill.remainingQuantityAfter ?? 0) > 0 ? "active remainder" : (fill.remainingQuantityAfter ?? 0) === 0 ? "fully closed" : "held"}</small></span>
                   <span>{fill.nextTargetPrice ? price(fill.nextTargetPrice) : "—"}</span>
-                  <span>{fill.moonbagExitFloorPrice ? <><b>{price(fill.moonbagExitFloorPrice)}</b><small>adaptive high-water floor</small></> : "—"}</span>
                   <strong className={typeof realized === "number" ? realized >= 0 ? "positive" : "negative" : ""}>{typeof realized === "number" ? `${realized >= 0 ? "+" : "-"}$${Math.abs(realized).toFixed(2)}` : "—"}</strong>
                   <span>{typeof fill.cashAfterUsd === "number" ? `$${fill.cashAfterUsd.toFixed(2)}` : "—"}</span>
                   <span>{typeof fill.portfolioEquityAfterUsd === "number" ? `$${fill.portfolioEquityAfterUsd.toFixed(2)}` : "—"}</span>
@@ -978,7 +930,7 @@ export default function WarRoomDashboard() {
 
       <section id="system" className="system-strip page-panel">
         <div><b>Autonomous paper execution</b><span>There is intentionally no Scan button and no Execute Paper button. Approved paper orders are created server-side from real market observations; placeholder/demo candidates are disabled. Decisions and fills are journaled for later analysis.</span></div>
-        <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and moonbag logic remain server-owned.</span></div>
+        <div><b>Guardian 24/7</b><span>Scaling, trims, stops, re-entry rules and complete exits remain server-owned.</span></div>
         <div><b>Entities cannot vote around hard safety</b><span>The eight entities decide independently, but deterministic Executor/Guardian infrastructure still enforces explicit sellability, honeypot, authority and accounting constraints.</span></div>
       </section>
     </main>
