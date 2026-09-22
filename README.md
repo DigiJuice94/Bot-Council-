@@ -3,14 +3,14 @@
 This is the flattened canonical baseline for the current Bot War Room.
 
 ## Locked trading behavior
-- Main File Cabinet strategy retains the established Team 10 compatibility memory namespace.
+- Main File Cabinet strategy runs from one canonical `main:file-cabinet` memory namespace.
 - BUY threshold: 54 points.
 - Sizing multiplier: 0.97.
 - Entry range: $25–$125.
 - Maximum active positions: 12.
 - BUY decisions execute; WATCH and SKIP remain observational.
 - Existing liquidity, sellability, Guardian exit, accounting, and learning behavior remains in place.
-- Moon bags are disabled. Staged profit targets realize 20% / 20% / 25% / 35% of the original scaled quantity, totaling 100%.
+- Residual hold allocations are removed. Staged profit targets realize 20% / 20% / 25% / 35% of the original scaled quantity, totaling 100%.
 - A partial take-profit remains an Active Trade until the remaining quantity is fully exited.
 
 ## Monitoring workspace
@@ -25,9 +25,10 @@ Proof of Work independently reconstructs persisted paper fills, wallet cash, ope
 
 ## Cleanup performed
 - Removed the redundant embedded deployment-source archive.
-- Removed stale patch-chain baseline documentation.
-- Removed retired tournament wording from the visible UI while preserving compatibility identifiers required by the active strategy.
+- Removed stale patch-chain release overrides and hard-coded old build labels.
+- Migrates accumulated File Cabinet memory into the canonical namespace at startup.
+- Immediately rewrites saved open positions to the canonical full-exit policy.
 - Kept runtime source, API routes, CSS, trading logic, monitoring, and cabinet exports intact.
 - Starts the autonomous scanner and Guardian from the server runtime rather than waiting for a browser visit.
 
-Do not rename the legacy `tournament:team-10` memory namespace without a deliberate migration; it is retained only so the current strategy continues reading the same accumulated memory.
+The retired tournament namespace is migration input only. The active Council does not read or write it after startup migration.

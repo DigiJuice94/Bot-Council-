@@ -4,7 +4,7 @@ import { fetchLivePositionSnapshot } from "./market-data";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
-import { acquireRuntimeLease, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
+import { acquireRuntimeLease, claimRuntimeMigration, listManagedPositions, positionStorageMode, removeManagedPosition, saveManagedPosition } from "./position-store";
 import { reflectOnClosedPosition } from "./reflection";
 import { evaluateExitStrategist, profitFirstExitStrategy } from "./exit-strategy-bot";
 import { entryLiquidityExitFloor } from "./exit-strategy";
@@ -17,6 +17,7 @@ const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Numbe
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
 
 function normalizedPosition(position: ManagedPosition): ManagedPosition {
+  const { moonbagStartedAt: _removedResidualState, ...canonicalPosition } = position as ManagedPosition & { moonbagStartedAt?: string };
   const entryLiquidity = position.entryContext?.snapshot?.liquidity;
   const strategy = profitFirstExitStrategy(position.exitStrategy);
   // Repair the old $15k floor only when the stored entry itself was a valid
@@ -25,7 +26,7 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     ? { ...strategy, liquidityFloorUsd: entryLiquidityExitFloor(Number(entryLiquidity), true) }
     : strategy;
   return {
-    ...position,
+    ...canonicalPosition,
     remainingQuantity: safe(position.remainingQuantity, position.quantity),
     initialQuantity: safe(position.initialQuantity, position.quantity),
     initialEntryPrice: safe(position.initialEntryPrice, position.entryPrice),
@@ -38,7 +39,7 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     maxAdverseExcursionPct: safe(position.maxAdverseExcursionPct),
     profitCapturePct: safe(position.profitCapturePct),
     takenProfitLabels: position.takenProfitLabels ?? [],
-    winnerState: position.winnerState ?? "building",
+    winnerState: String(position.winnerState) === "moonbag" ? "runner" : (position.winnerState ?? "building"),
     scaleIns: position.scaleIns ?? [],
     lastConfirmationScore: safe(position.lastConfirmationScore),
     maxGrossExposurePct: safe(position.maxGrossExposurePct, Math.max(5, Math.min(20, Number(process.env.PAPER_WINNER_MAX_GROSS_PCT ?? 15)))),
@@ -58,6 +59,30 @@ function normalizedPosition(position: ManagedPosition): ManagedPosition {
     sellAuditConsecutiveFailures: Math.max(0, Math.round(safe(position.sellAuditConsecutiveFailures))),
     sellAuditConsecutiveUnknowns: Math.max(0, Math.round(safe(position.sellAuditConsecutiveUnknowns))),
   };
+}
+
+export async function migratePersistedPositionsToCanonicalPolicy(): Promise<number> {
+  if (!await claimRuntimeMigration("canonical-full-exit-v3636")) return 0;
+  const positions = await listManagedPositions();
+  let migrated = 0;
+  for (const position of positions) {
+    const legacyStrategy = position.exitStrategy as ExitStrategy & {
+      moonbagPct?: number;
+      moonbagTrailingStopPct?: number;
+      moonbagMaxHoldMinutes?: number;
+    };
+    const hasLegacyState = String(position.winnerState) === "moonbag"
+      || "moonbagStartedAt" in position
+      || "moonbagPct" in legacyStrategy
+      || "moonbagTrailingStopPct" in legacyStrategy
+      || "moonbagMaxHoldMinutes" in legacyStrategy;
+    const canonical = normalizedPosition(position);
+    if (hasLegacyState || JSON.stringify(canonical.exitStrategy) !== JSON.stringify(position.exitStrategy)) {
+      await saveManagedPosition(canonical);
+      migrated += 1;
+    }
+  }
+  return migrated;
 }
 
 function markToMarketPnlPct(position: ManagedPosition, mark: number) {
@@ -258,7 +283,6 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   const fresh = freshCouncil(position, snapshot, portfolio);
   const confirmation = confirmationScore(position, snapshot, fresh);
   const winnerState = determineWinnerState(position, rawMovePct, confirmation);
-  const moonbagStartedAt = undefined;
   const controls = effectiveGuardianControls(position, winnerState);
   const exitStrategist = evaluateExitStrategist({ position, snapshot, portfolio, exitGenome });
   const genomeTrailingStopPct = exitGenome ? Math.max(6, Math.min(40, exitGenome.trailingStopPct)) : controls.trailingStopPct;
@@ -353,7 +377,6 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     maxAdverseExcursionPct: Number(mae.toFixed(3)),
     profitCapturePct: Number(capture.toFixed(2)),
     winnerState,
-    moonbagStartedAt,
     lastConfirmationScore: confirmation,
     breakEvenArmed,
     lastHighWaterAt,

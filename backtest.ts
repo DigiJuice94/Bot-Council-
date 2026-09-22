@@ -52,23 +52,15 @@ function simulatePath(result: WarRoomResult, snapshot: MarketSnapshot, path: His
     const pnl = (price - entry) / entry * 100;
     const drawdownFromHigh = high > 0 ? (high - price) / high * 100 : 0;
     const heldMinutes = Math.max(0, (new Date(mark.timestamp).getTime() - opened) / 60_000);
-    const moonbagPct = exit.moonbagPct ?? 0;
-    const remainingPct = remaining * 100;
-    const state = moonbagPct > 0 && taken.size >= exit.takeProfits.length && remainingPct <= moonbagPct + 2
-      ? "moonbag"
-      : taken.has("TP2") || taken.has("TP3") || taken.has("Runner") || pnl >= (exit.takeProfits[1]?.gainPct ?? 40)
+    const state = taken.has("TP2") || taken.has("TP3") || taken.has("Runner") || pnl >= (exit.takeProfits[1]?.gainPct ?? 40)
         ? "runner"
         : taken.has("TP1") || pnl >= (exit.winnerActivationPct ?? Math.max(6, (exit.takeProfits[0]?.gainPct ?? 18) * 0.4))
           ? "confirmed"
           : "building";
-    const effectiveTrail = state === "moonbag"
-      ? (exit.moonbagTrailingStopPct ?? exit.trailingStopPct)
-      : state === "runner" || state === "confirmed"
+    const effectiveTrail = state === "runner" || state === "confirmed"
         ? (exit.winnerTrailingStopPct ?? exit.trailingStopPct)
         : exit.trailingStopPct;
-    const effectiveHold = state === "moonbag"
-      ? (exit.moonbagMaxHoldMinutes ?? exit.maxHoldMinutes)
-      : state === "runner" || state === "confirmed"
+    const effectiveHold = state === "runner" || state === "confirmed"
         ? (exit.winnerMaxHoldMinutes ?? exit.maxHoldMinutes)
         : exit.maxHoldMinutes;
     const highGainPct = (high - entry) / entry * 100;
@@ -190,7 +182,7 @@ export function runProfitabilityBenchmark(frames: HistoricalFrame[], config: Ben
   if (sorted.length < 200) warnings.push("Fewer than 200 historical decision points; treat profitability estimates as preliminary.");
   if (!baseline.length) warnings.push("No baselineReturnPct series supplied; excess-return comparison is incomplete.");
   if (!sorted.some((frame) => frame.futurePath?.length)) warnings.push("No intratrade price paths supplied; Guardian exits are approximated by fixed-horizon returns.");
-  warnings.push("V2.8 Guardian runner/moonbag exits are replayed when futurePath is present; dynamic pyramiding is intentionally NOT simulated unless a future event-driven benchmark supplies full contemporaneous snapshots for each add decision.");
+  warnings.push("Guardian runner exits are replayed when futurePath is present; dynamic pyramiding is intentionally not simulated unless a future event-driven benchmark supplies full contemporaneous snapshots for each add decision.");
   warnings.push("Benchmark compounds risk-sized portfolio returns sequentially; overlapping live positions and portfolio correlation require a full event-driven portfolio simulator before live promotion.");
 
   const metrics: ProfitabilityMetrics = {

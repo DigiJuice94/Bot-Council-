@@ -41,9 +41,6 @@ export function confirmationScore(position: ManagedPosition, snapshot: MarketSna
 export function determineWinnerState(position: ManagedPosition, rawMovePct: number, confirmation: number): WinnerState {
   const levels = position.exitStrategy.takeProfits;
   const taken = new Set(position.takenProfitLabels ?? []);
-  const moonbagPct = position.exitStrategy.moonbagPct ?? 0;
-  const remainingPct = position.quantity > 0 ? position.remainingQuantity / position.quantity * 100 : 0;
-  if (moonbagPct > 0 && taken.size >= levels.length && remainingPct <= moonbagPct + 2) return "moonbag";
   if (taken.has("TP2") || taken.has("TP3") || taken.has("Runner") || rawMovePct >= (levels[1]?.gainPct ?? 40)) return "runner";
   const activation = position.exitStrategy.winnerActivationPct ?? Math.max(6, (levels[0]?.gainPct ?? 18) * 0.4);
   if (taken.has("TP1") || (rawMovePct >= activation && confirmation >= 68)) return "confirmed";
@@ -52,12 +49,6 @@ export function determineWinnerState(position: ManagedPosition, rawMovePct: numb
 
 export function effectiveGuardianControls(position: ManagedPosition, state: WinnerState) {
   const exit = position.exitStrategy;
-  if (state === "moonbag") {
-    return {
-      trailingStopPct: exit.moonbagTrailingStopPct ?? Math.min(35, exit.trailingStopPct + 10),
-      maxHoldMinutes: Math.min(exit.moonbagMaxHoldMinutes ?? 2_880, 2_880),
-    };
-  }
   if (state === "runner" || state === "confirmed") {
     return {
       trailingStopPct: exit.winnerTrailingStopPct ?? Math.min(32, exit.trailingStopPct + 5),

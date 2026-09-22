@@ -21,32 +21,28 @@ const clamp = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max,
 
 export function profitFirstExitStrategy(exit: ExitStrategy): ExitStrategy {
   return {
-    ...exit,
+    stopLossPct: Math.min(exit.stopLossPct, 18),
+    trailingStopPct: Math.min(exit.trailingStopPct, 14),
+    maxHoldMinutes: Math.min(exit.maxHoldMinutes, 20),
+    liquidityFloorUsd: exit.liquidityFloorUsd,
+    invalidationRules: [
+      ...exit.invalidationRules,
+      "Exit Strategist releases stale capital when a setup stops behaving like a runner",
+      "Exit Strategist protects large high-water gains instead of round-tripping them",
+    ],
+    emergencyRules: [...exit.emergencyRules],
     // We are deliberately not waiting for 50/100/200/400 before banking anything.
-    // Realize the entire position progressively. No residual moon bag remains.
+    // Realize the entire position progressively; no residual allocation remains.
     takeProfits: [
       { gainPct: 25, sellPct: 20, label: "TP1" },
       { gainPct: 50, sellPct: 20, label: "TP2" },
       { gainPct: 100, sellPct: 25, label: "TP3" },
       { gainPct: 200, sellPct: 35, label: "Runner" },
     ],
-    moonbagPct: 0,
-    // There is always another runner. Do not let a good paper trade turn into
-    // dead capital for hours.
-    stopLossPct: Math.min(exit.stopLossPct, 18),
-    trailingStopPct: Math.min(exit.trailingStopPct, 14),
-    maxHoldMinutes: Math.min(exit.maxHoldMinutes, 20),
     winnerActivationPct: Math.min(exit.winnerActivationPct ?? 20, 20),
     winnerTrailingStopPct: Math.min(exit.winnerTrailingStopPct ?? 16, 16),
     winnerMaxHoldMinutes: Math.min(exit.winnerMaxHoldMinutes ?? 20, 20),
-    moonbagTrailingStopPct: Math.min(exit.moonbagTrailingStopPct ?? 24, 24),
-    moonbagMaxHoldMinutes: 20,
     breakEvenBufferPct: Math.max(exit.breakEvenBufferPct ?? 2, 3),
-    invalidationRules: [
-      ...exit.invalidationRules,
-      "Exit Strategist releases stale capital when a setup stops behaving like a runner",
-      "Exit Strategist protects large high-water gains instead of round-tripping them",
-    ],
   };
 }
 

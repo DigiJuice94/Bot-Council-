@@ -18,12 +18,9 @@ export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, 
   const firstTarget = conviction >= 88 ? 28 : conviction >= 80 ? 23 : conviction >= 72 ? 18 : 15;
 
   // Every trade is fully realizable; staged targets sum to 100% with no residual bag.
-  const moonbagPct = 0;
   const runnerSellPct = 35;
   const winnerTrailingStopPct = Number(clamp(trailingStopPct + (favorable ? 5 : 3), trailingStopPct, 32).toFixed(1));
-  const moonbagTrailingStopPct = Number(clamp(trailingStopPct + (favorable ? 10 : 7), winnerTrailingStopPct, 36).toFixed(1));
   const winnerMaxHoldMinutes = favorable ? (regime?.id === "risk_on_trend" ? 2160 : 2880) : Math.max(maxHoldMinutes, 1440);
-  const moonbagMaxHoldMinutes = 20; // Legacy schema field; moon bags are disabled.
 
   return {
     stopLossPct,
@@ -36,12 +33,9 @@ export function buildExitStrategy(snapshot: MarketSnapshot, conviction: number, 
     ],
     maxHoldMinutes,
     liquidityFloorUsd: entryLiquidityExitFloor(snapshot.liquidity, earlyRunnerPool),
-    moonbagPct,
     winnerActivationPct: Number(Math.max(6, firstTarget * 0.4).toFixed(1)),
     winnerTrailingStopPct,
     winnerMaxHoldMinutes,
-    moonbagTrailingStopPct,
-    moonbagMaxHoldMinutes,
     breakEvenBufferPct: 1.5,
     invalidationRules: [
       "Smart-money flow flips decisively net-sell",

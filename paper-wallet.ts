@@ -453,7 +453,6 @@ export async function applyPaperFillToWallet(args: {
   realizedCostAfterUsd?: number;
   positionRealizedPnlAfterUsd?: number;
   nextTargetPrice?: number;
-  moonbagExitFloorPrice?: number;
 }): Promise<PaperWalletSnapshot> {
   let out!: PaperWalletSnapshot;
   const task = mutationLock.then(async () => {
@@ -506,7 +505,6 @@ export async function applyPaperFillToWallet(args: {
       portfolioEquityAfterUsd,
       positionRealizedPnlAfterUsd: args.positionRealizedPnlAfterUsd,
       nextTargetPrice: args.nextTargetPrice,
-      moonbagExitFloorPrice: args.moonbagExitFloorPrice,
     };
     const next: PaperWalletState = {
       ...current,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./v213.css";
-import "./v214.css";
+import "./diagnostics.css";
+import "./dashboard.css";
 
 export const metadata: Metadata = {
   title: "Bot War Room V3",

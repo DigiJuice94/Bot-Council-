@@ -30,7 +30,7 @@ const FILE_CABINET_MAX_OPEN_POSITIONS = 12;
 const MAIN_FILE_CABINET_PROFILE: IndependentCouncilProfile = {
   teamId: "team-10",
   teamName: "Team File Cabinet",
-  memoryNamespace: "tournament:team-10",
+  memoryNamespace: "main:file-cabinet",
   roleBias: {},
   thresholdDelta: -3,
   fileCabinet: true,

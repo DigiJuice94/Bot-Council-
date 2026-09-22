@@ -1,7 +1,7 @@
 # Clean Baseline
 
-Created from V3.6.3.4 and flattened as the new canonical base. V3.6.3.5 adds the read-only monitoring workspace and the explicitly requested no-moon-bag exit policy.
+V3.6.3.6 is the flattened canonical base. It includes the read-only monitoring workspace and the full-exit policy without retaining active patch-chain behavior.
 
-BUY thresholds, position sizing, liquidity/sellability gates, wallet accounting formulas, and autonomous scan cadence were not changed. The only intentional trading-policy change is that staged take profits now total 100%; no moon bag or residual runner allocation is created.
+BUY thresholds, position sizing, liquidity/sellability gates, wallet accounting formulas, and autonomous scan cadence were not changed. Staged take profits total 100%; no residual runner allocation is created.
 
-The retired tournament is not an active product mode. A legacy internal memory namespace remains for compatibility with the strategy that graduated from that testing phase.
+The retired tournament is not an active product mode. Existing File Cabinet learning is copied once into the canonical namespace, and all new learning uses only that canonical namespace.

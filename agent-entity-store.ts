@@ -3,6 +3,7 @@ import type { CouncilEntityId, IndependentEntityOpinion, ManagedPosition } from 
 
 const PREFIX = "bot-war-room:entity-memory:v226";
 const MAX_MEMORY = 60;
+const ENTITY_IDS: CouncilEntityId[] = ["launch", "social", "wallet", "quant", "contract", "bear", "portfolio", "cio"];
 
 export type EntityMemoryRecord = {
   id: string;
@@ -81,6 +82,45 @@ export async function appendPrivateEntityMemory(record: EntityMemoryRecord, name
   }
   await redis.lPush(memoryKey, JSON.stringify(record));
   await redis.lTrim(memoryKey, 0, MAX_MEMORY - 1);
+}
+
+export async function migrateEntityMemoryNamespace(fromNamespace: string, toNamespace: string): Promise<number> {
+  if (cleanNamespace(fromNamespace) === cleanNamespace(toNamespace)) return 0;
+  const redis = await getRedis();
+  let migrated = 0;
+  for (const agentId of ENTITY_IDS) {
+    const sourceKey = key(agentId, fromNamespace);
+    const targetKey = key(agentId, toNamespace);
+    if (!redis) {
+      const source = memoryFallback.get(sourceKey) ?? [];
+      const target = memoryFallback.get(targetKey) ?? [];
+      const existing = new Set(target.map((row) => row.id));
+      const additions = source.filter((row) => !existing.has(row.id));
+      if (additions.length) memoryFallback.set(targetKey, [...target, ...additions].slice(0, MAX_MEMORY));
+      migrated += additions.length;
+      continue;
+    }
+    const [sourceRows, targetRows] = await Promise.all([
+      redis.lRange(sourceKey, 0, MAX_MEMORY - 1),
+      redis.lRange(targetKey, 0, MAX_MEMORY - 1),
+    ]);
+    const targetIds = new Set(targetRows.flatMap((raw: string) => {
+      try { return [String((JSON.parse(raw) as EntityMemoryRecord).id)]; } catch { return []; }
+    }));
+    const additions = sourceRows.filter((raw: string) => {
+      try { return !targetIds.has(String((JSON.parse(raw) as EntityMemoryRecord).id)); } catch { return false; }
+    });
+    if (additions.length) {
+      await redis.rPush(targetKey, additions);
+      await redis.lTrim(targetKey, 0, MAX_MEMORY - 1);
+      migrated += additions.length;
+    }
+  }
+  if (redis) {
+    const sourceOutcomes = await redis.sMembers(outcomeKey(fromNamespace));
+    if (sourceOutcomes.length) await redis.sAdd(outcomeKey(toNamespace), sourceOutcomes);
+  }
+  return migrated;
 }
 
 export async function recordEntityDecision(args: {

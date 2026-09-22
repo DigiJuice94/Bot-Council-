@@ -307,12 +307,9 @@ export type ExitStrategy = {
   liquidityFloorUsd: number;
   invalidationRules: string[];
   emergencyRules: string[];
-  moonbagPct?: number;
   winnerActivationPct?: number;
   winnerTrailingStopPct?: number;
   winnerMaxHoldMinutes?: number;
-  moonbagTrailingStopPct?: number;
-  moonbagMaxHoldMinutes?: number;
   breakEvenBufferPct?: number;
 };
 
@@ -448,7 +445,7 @@ export type PositionEntryContext = {
   portfolioEquityUsd?: number;
 };
 
-export type WinnerState = "building" | "confirmed" | "runner" | "moonbag";
+export type WinnerState = "building" | "confirmed" | "runner";
 
 export type PositionScaleFill = {
   label: string;
@@ -502,7 +499,6 @@ export type ManagedPosition = {
   lastReason: string;
   takenProfitLabels: string[];
   winnerState?: WinnerState;
-  moonbagStartedAt?: string;
   forcedExitReleaseVersion?: number;
   scaleIns?: PositionScaleFill[];
   lastConfirmationScore?: number;
@@ -560,7 +556,6 @@ export type PaperWalletFillRecord = {
   portfolioEquityAfterUsd?: number;
   positionRealizedPnlAfterUsd?: number;
   nextTargetPrice?: number;
-  moonbagExitFloorPrice?: number;
 };
 
 export type PaperEquityHistoryPoint = {

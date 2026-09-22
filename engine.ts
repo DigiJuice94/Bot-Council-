@@ -225,13 +225,10 @@ export function runWarRoom(snapshot: MarketSnapshot, options?: {
       { gainPct: 200, sellPct: 20, label: "TP3" },
       { gainPct: 400, sellPct: 45, label: "Runner" },
     ],
-    moonbagPct: 0,
     liquidityFloorUsd: Math.max(500, Math.round(snapshot.liquidity * 0.25)),
     winnerActivationPct: 35,
     winnerTrailingStopPct: Math.max(baseExitStrategy.winnerTrailingStopPct ?? baseExitStrategy.trailingStopPct, 22),
     winnerMaxHoldMinutes: Math.max(baseExitStrategy.winnerMaxHoldMinutes ?? baseExitStrategy.maxHoldMinutes, 1_440),
-    moonbagTrailingStopPct: Math.max(baseExitStrategy.moonbagTrailingStopPct ?? baseExitStrategy.trailingStopPct, 30),
-    moonbagMaxHoldMinutes: 20,
     invalidationRules: [...baseExitStrategy.invalidationRules, "Exit Genome confirms distribution / runner continuation failure"],
   } : baseExitStrategy;
   const baseAllocationMultiplier = earlyRunnerZone

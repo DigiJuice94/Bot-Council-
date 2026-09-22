@@ -20,10 +20,6 @@ export async function GET(request: Request) {
     const nextTargetPrice = fill.nextTargetPrice ?? (nextUntaken && position
       ? position.entryPrice * (1 + nextUntaken.gainPct / 100)
       : undefined);
-    const moonbagExitFloorPrice = fill.moonbagExitFloorPrice ?? (position?.highWaterPrice
-      ? position.highWaterPrice * (1 - (position.exitStrategy?.moonbagTrailingStopPct ?? position.exitStrategy?.trailingStopPct ?? 0) / 100)
-      : undefined);
-
     return {
       ...fill,
       action: fill.action ?? (fill.side === "BUY" ? "ENTRY" : fill.remainingQuantityAfter === 0 ? "EXIT" : "TRIM"),
@@ -36,7 +32,6 @@ export async function GET(request: Request) {
       status: position?.status,
       realizedPnlAfterUsd: fill.positionRealizedPnlAfterUsd,
       nextTargetPrice,
-      moonbagExitFloorPrice,
     };
   });
 

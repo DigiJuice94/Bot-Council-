@@ -1,5 +1,6 @@
 import { getChainConfig } from "./chains";
 import { verifyPaperRoute } from "./route-feasibility";
+import { auditSellQuantity } from "./sellability-auditor";
 import type { ExecutionPlan, ExecutionRequest, MarketSnapshot, PaperFill, PortfolioRiskContext, RiskCheck, StrategyExperiment, TradingMode } from "./types";
 
 export function buildExecutionPlan(args: {
@@ -56,11 +57,19 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   // similarly to the old model, while very large trades asymptotically approach 65%.
   const tradeToLiquidity = request.notionalUsd / Math.max(snapshot.liquidity, 1);
   const liquidityModelBps = Math.max(8, Math.round((tradeToLiquidity / (1 + tradeToLiquidity)) * 6_500 + snapshot.volatility * 18));
-  const route = await verifyPaperRoute(request, snapshot);
-  if (request.chain === "Solana" && request.side === "BUY" && route.verified && !route.available) {
-    throw new Error(`Paper BUY rejected: live Jupiter route check failed. ${route.reason}`);
+  const buyRoute = request.side === "BUY" ? await verifyPaperRoute(request, snapshot) : null;
+  const sellAudit = request.side === "SELL"
+    ? await auditSellQuantity(snapshot, request.notionalUsd / Math.max(snapshot.price, 1e-12))
+    : null;
+  if (request.side === "SELL" && (!sellAudit || sellAudit.status !== "pass" || !sellAudit.routeVerified)) {
+    throw new Error(`Paper SELL unresolved: no verified executable reverse route. ${sellAudit?.reason ?? "Sell-route audit unavailable."}`);
   }
-  const routeBps = route.estimatedSlippageBps ?? 0;
+  if (request.chain === "Solana" && request.side === "BUY" && buyRoute?.verified && !buyRoute.available) {
+    throw new Error(`Paper BUY rejected: live Jupiter route check failed. ${buyRoute.reason}`);
+  }
+  const routeBps = request.side === "SELL"
+    ? Math.max(0, Math.round((sellAudit?.priceImpactPct ?? 0) * 100))
+    : (buyRoute?.estimatedSlippageBps ?? 0);
   const observedSlippageBps = Math.max(liquidityModelBps, routeBps);
   const forcedPaperExit = request.mode === "paper" && request.side === "SELL" && request.decisionId.endsWith("-EXIT");
 
@@ -93,11 +102,11 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
     fillPrice: snapshot.price * priceImpact,
     slippageBps: simulatedSlippageBps,
     feeUsd: Number(feeUsd.toFixed(4)),
-    routeVerified: route.verified && route.available,
-    routeProvider: route.provider,
+    routeVerified: request.side === "SELL" ? true : Boolean(buyRoute?.verified && buyRoute.available),
+    routeProvider: request.side === "SELL" ? sellAudit!.provider : (buyRoute?.provider ?? "liquidity-model"),
     routeNote: distressed
-      ? `DISTRESSED PAPER EXIT: normal limit ${request.maxSlippageBps} bps was exceeded; Guardian forced liquidation at modeled ${simulatedSlippageBps} bps impact instead of leaving the position trapped. Source estimate: ${observedSlippageBps} bps. ${route.reason}`
-      : route.reason,
+      ? `DISTRESSED PAPER EXIT: normal limit ${request.maxSlippageBps} bps was exceeded; the verified reverse route was modeled at ${simulatedSlippageBps} bps impact. Source estimate: ${observedSlippageBps} bps. ${sellAudit!.reason}`
+      : (request.side === "SELL" ? sellAudit!.reason : buyRoute!.reason),
     createdAt: new Date().toISOString(),
   };
 }
