@@ -12,6 +12,8 @@
     "lib/types.ts",
     "lib/paper-accounting.ts",
     "lib/position-lifecycle.ts",
+    "lib/sell-execution-proof.ts",
+    "lib/sellability-auditor.ts",
     "tests/accounting-guardian-regression.test.ts"
   ]
 }

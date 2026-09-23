@@ -469,14 +469,14 @@ async function executeScaleIn(positionInput: ManagedPosition, snapshot: MarketSn
   };
 }
 
-async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel, sellPctOverride?: number): Promise<ManagedPosition> {
+async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, level: ExitLevel, sellPctOverride?: number, sellProof?: SellabilityAudit): Promise<ManagedPosition> {
   const effectiveSellPct = Number.isFinite(sellPctOverride) && Number(sellPctOverride) > 0
     ? Math.max(10, Math.min(35, Number(sellPctOverride)))
     : level.sellPct;
   const originalQtyTarget = position.quantity * (effectiveSellPct / 100);
   const sellQty = Math.min(position.remainingQuantity, originalQtyTarget);
   if (sellQty <= 0) return position;
-  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot);
+  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, `TP-${level.label}`), snapshot, sellProof);
   const cost = sellQty * position.entryPrice;
   const remainingQuantity = Math.max(0, position.remainingQuantity - sellQty);
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
@@ -522,10 +522,10 @@ async function executeTrim(position: ManagedPosition, snapshot: MarketSnapshot, 
   };
 }
 
-async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapshot): Promise<ManagedPosition> {
+async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapshot, sellProof?: SellabilityAudit): Promise<ManagedPosition> {
   if (position.remainingQuantity <= 0) return { ...position, status: "closed" };
   const sellQty = position.remainingQuantity;
-  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, "EXIT"), snapshot);
+  const fill = await executePaper(paperRequest(position, "SELL", sellQty * snapshot.price, "EXIT"), snapshot, sellProof);
   const cost = sellQty * position.entryPrice;
   const realizedProceedsUsd = position.realizedProceedsUsd + fill.filledUsd;
   const realizedCostUsd = position.realizedCostUsd + cost;
@@ -608,14 +608,27 @@ function sellAuditDue(position: ManagedPosition) {
   return !Number.isFinite(checkedMs) || checkedMs <= 0 || Date.now() - checkedMs >= refreshMs;
 }
 
+function persistedSellAudit(position: ManagedPosition): SellabilityAudit | undefined {
+  if (!position.sellAuditStatus || !position.sellAuditProvider || !position.sellAuditCheckedAt || !position.sellAuditReason) return undefined;
+  return {
+    status: position.sellAuditStatus,
+    provider: position.sellAuditProvider,
+    checkedAt: position.sellAuditCheckedAt,
+    routeVerified: position.sellAuditStatus !== "unknown",
+    reason: position.sellAuditReason,
+    expectedOutUsd: position.sellAuditExpectedOutUsd,
+    priceImpactPct: position.sellAuditPriceImpactPct,
+  };
+}
+
 /**
  * Audit Bot is observational infrastructure, not a trading gate.
  * PASS records that a route exists. UNKNOWN never blocks a buy, sell, chain, or
  * Council decision. Only two immediate, consecutive positive FAIL results are
  * treated as confirmed locked capital.
  */
-async function auditForLockedCapital(position: ManagedPosition, snapshot: MarketSnapshot, force = false): Promise<{ position: ManagedPosition; locked: boolean }> {
-  if (!force && !sellAuditDue(position)) return { position, locked: false };
+async function auditForLockedCapital(position: ManagedPosition, snapshot: MarketSnapshot, force = false): Promise<{ position: ManagedPosition; locked: boolean; audit?: SellabilityAudit }> {
+  if (!force && !sellAuditDue(position)) return { position, locked: false, audit: persistedSellAudit(position) };
 
   const first = await auditPositionSellability(position, snapshot);
   let next = applySellAudit(
@@ -625,7 +638,7 @@ async function auditForLockedCapital(position: ManagedPosition, snapshot: Market
     first.status === "unknown" ? (position.sellAuditConsecutiveUnknowns ?? 0) + 1 : 0,
   );
 
-  if (first.status !== "fail") return { position: next, locked: false };
+  if (first.status !== "fail") return { position: next, locked: false, audit: first };
 
   // A single provider failure is never enough to kill a position. Recheck now.
   // If the second check recovers or is UNKNOWN, normal trading continues.
@@ -637,11 +650,12 @@ async function auditForLockedCapital(position: ManagedPosition, snapshot: Market
     second.status === "unknown" ? (next.sellAuditConsecutiveUnknowns ?? 0) + 1 : 0,
   );
 
-  if (second.status !== "fail") return { position: next, locked: false };
+  if (second.status !== "fail") return { position: next, locked: false, audit: second };
 
   return {
     position: markUnsellable(next, snapshot, `Audit Bot independently confirmed locked/unsellable capital twice. ${second.reason}`),
     locked: true,
+    audit: second,
   };
 }
 
@@ -696,7 +710,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
 
           // Background audit: observe open capital without changing entry rules.
           // Unsupported providers/chains return UNKNOWN and trading continues normally.
-          if (next.mode === "paper") {
+          if (next.mode === "paper" && next.status !== "exit_pending") {
             const watched = await auditForLockedCapital(next, snapshot, false);
             next = watched.position;
             if (watched.locked) {
@@ -726,9 +740,11 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           } else if (next.status === "exit_pending" && next.mode === "paper") {
             // UNKNOWN audit coverage does not freeze exits. Only a confirmed double FAIL
             // above can convert the position to locked capital.
-            const audited = await auditForLockedCapital(next, snapshot, true);
+            const audited = await auditForLockedCapital(next, snapshot, false);
             next = audited.position;
-            if (!audited.locked) next = await executeFullExit(next, snapshot);
+            if (!audited.locked && audited.audit?.status === "pass" && audited.audit.routeVerified) {
+              next = await executeFullExit(next, snapshot, audited.audit);
+            }
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
 
@@ -736,16 +752,18 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
               if (next.lastAction === "SCALE_IN" && snapshot.sellable && !snapshot.honeypot) {
                 next = await executeScaleIn(next, snapshot, portfolio);
               } else if (next.lastAction === "TRIM") {
-                const audited = await auditForLockedCapital(next, snapshot, true);
+                const audited = await auditForLockedCapital(next, snapshot, false);
                 next = audited.position;
-                if (!audited.locked) {
+                if (!audited.locked && audited.audit?.status === "pass" && audited.audit.routeVerified) {
                   const level = nextTakeProfit(next, ((snapshot.price - next.entryPrice) / Math.max(next.entryPrice, 1e-12)) * 100);
-                  if (level) next = await executeTrim(next, snapshot, level);
+                  if (level) next = await executeTrim(next, snapshot, level, undefined, audited.audit);
                 }
               } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
-                const audited = await auditForLockedCapital(next, snapshot, true);
+                const audited = await auditForLockedCapital(next, snapshot, false);
                 next = audited.position;
-                if (!audited.locked) next = await executeFullExit(next, snapshot);
+                if (!audited.locked && audited.audit?.status === "pass" && audited.audit.routeVerified) {
+                  next = await executeFullExit(next, snapshot, audited.audit);
+                }
               }
             }
           }

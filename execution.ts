@@ -1,6 +1,7 @@
 import { getChainConfig } from "./chains";
 import { verifyPaperRoute } from "./route-feasibility";
-import { auditSellQuantity } from "./sellability-auditor";
+import { auditEntrySellability, auditSellQuantity, type SellabilityAudit } from "./sellability-auditor";
+import { isFreshVerifiedSellProof } from "./sell-execution-proof";
 import type { ExecutionPlan, ExecutionRequest, MarketSnapshot, PaperFill, PortfolioRiskContext, RiskCheck, StrategyExperiment, TradingMode } from "./types";
 
 export function buildExecutionPlan(args: {
@@ -42,7 +43,7 @@ export function buildExecutionPlan(args: {
   return { allowed: true, mode, request, allocationMultiplier, reason: `${mode.toUpperCase()} execution approved by Council + deterministic risk gate using current wallet equity/cash.` };
 }
 
-export async function executePaper(request: ExecutionRequest, snapshot: MarketSnapshot): Promise<PaperFill> {
+export async function executePaper(request: ExecutionRequest, snapshot: MarketSnapshot, verifiedSellProof?: SellabilityAudit): Promise<PaperFill> {
   if (request.mode !== "paper") throw new Error("Paper executor only accepts paper requests");
   getChainConfig(request.chain);
   // Final execution backstop: no caller can create a PAPER position from a
@@ -57,9 +58,15 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   // similarly to the old model, while very large trades asymptotically approach 65%.
   const tradeToLiquidity = request.notionalUsd / Math.max(snapshot.liquidity, 1);
   const liquidityModelBps = Math.max(8, Math.round((tradeToLiquidity / (1 + tradeToLiquidity)) * 6_500 + snapshot.volatility * 18));
+  const entrySellAudit = request.side === "BUY" ? await auditEntrySellability(snapshot, request.notionalUsd) : null;
+  if (request.side === "BUY" && (!entrySellAudit || entrySellAudit.status !== "pass" || !entrySellAudit.routeVerified)) {
+    throw new Error(`Paper BUY rejected: no verified executable reverse route. ${entrySellAudit?.reason ?? "Sell-route audit unavailable."}`);
+  }
   const buyRoute = request.side === "BUY" ? await verifyPaperRoute(request, snapshot) : null;
   const sellAudit = request.side === "SELL"
-    ? await auditSellQuantity(snapshot, request.notionalUsd / Math.max(snapshot.price, 1e-12))
+    ? (isFreshVerifiedSellProof(verifiedSellProof)
+      ? verifiedSellProof
+      : await auditSellQuantity(snapshot, request.notionalUsd / Math.max(snapshot.price, 1e-12)))
     : null;
   if (request.side === "SELL" && (!sellAudit || sellAudit.status !== "pass" || !sellAudit.routeVerified)) {
     throw new Error(`Paper SELL unresolved: no verified executable reverse route. ${sellAudit?.reason ?? "Sell-route audit unavailable."}`);
@@ -102,11 +109,11 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
     fillPrice: snapshot.price * priceImpact,
     slippageBps: simulatedSlippageBps,
     feeUsd: Number(feeUsd.toFixed(4)),
-    routeVerified: request.side === "SELL" ? true : Boolean(buyRoute?.verified && buyRoute.available),
-    routeProvider: request.side === "SELL" ? sellAudit!.provider : (buyRoute?.provider ?? "liquidity-model"),
+    routeVerified: request.side === "SELL" ? true : Boolean(entrySellAudit?.routeVerified && (request.chain !== "Solana" || (buyRoute?.verified && buyRoute.available))),
+    routeProvider: request.side === "SELL" ? sellAudit!.provider : (entrySellAudit?.provider ?? buyRoute?.provider ?? "liquidity-model"),
     routeNote: distressed
       ? `DISTRESSED PAPER EXIT: normal limit ${request.maxSlippageBps} bps was exceeded; the verified reverse route was modeled at ${simulatedSlippageBps} bps impact. Source estimate: ${observedSlippageBps} bps. ${sellAudit!.reason}`
-      : (request.side === "SELL" ? sellAudit!.reason : buyRoute!.reason),
+      : (request.side === "SELL" ? sellAudit!.reason : `${buyRoute!.reason} Reverse-route check: ${entrySellAudit!.reason}`),
     createdAt: new Date().toISOString(),
   };
 }

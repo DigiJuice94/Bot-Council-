@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { reconcilePaperWalletState, reconstructPortfolio } from "../lib/paper-accounting";
 import { markOverduePositionExitPending } from "../lib/position-lifecycle";
+import { isFreshVerifiedSellProof } from "../lib/sell-execution-proof";
 import type { ManagedPosition, PaperWalletFillRecord, PaperWalletState } from "../lib/types";
 
 function fill(id: string, side: "BUY" | "SELL", amount: number, routeVerified = true): PaperWalletFillRecord {
@@ -83,4 +84,12 @@ test("20-minute deadline becomes pending without fabricating a fill", () => {
   assert.equal(overdue.realizedProceedsUsd, 0);
   const fresh = markOverduePositionExitPending(position({ openedAt: "2026-01-01T00:02:00.000Z" }), now);
   assert.equal(fresh.status, "open");
+});
+
+test("only one fresh PASS audit can authorize paper proceeds", () => {
+  const now = Date.parse("2026-01-01T00:01:00.000Z");
+  const pass = { status: "pass" as const, provider: "jupiter" as const, checkedAt: "2026-01-01T00:00:30.000Z", routeVerified: true, reason: "route" };
+  assert.equal(isFreshVerifiedSellProof(pass, now), true);
+  assert.equal(isFreshVerifiedSellProof({ ...pass, status: "unknown", routeVerified: false }, now), false);
+  assert.equal(isFreshVerifiedSellProof({ ...pass, checkedAt: "2025-12-31T23:59:00.000Z" }, now), false);
 });

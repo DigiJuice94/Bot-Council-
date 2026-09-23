@@ -685,7 +685,7 @@ export default function WarRoomDashboard() {
       </nav>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3.6.3.7</strong><small>ACCOUNTING VERIFIED · GUARDIAN RECOVERY</small></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3.6.3.8</strong><small>VERIFIED EXIT HANDOFF</small></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -821,7 +821,10 @@ export default function WarRoomDashboard() {
               <div className="active-trade-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em className={`status-${position.status}`}>{position.status === "exit_pending" ? "Exit Pending" : "Open"}</em></div>
               <div className="active-trade-values"><span><small>MARK</small><b>{price(position.markPrice)}</b></span><span><small>VALUE</small><b>${(Math.max(0, position.remainingQuantity ?? 0) * Math.max(0, position.markPrice ?? 0)).toFixed(2)}</b></span><span><small>P/L</small><b className={pnlUsd >= 0 ? "positive" : "negative"}>{pnlUsd >= 0 ? "+" : "-"}${Math.abs(pnlUsd).toFixed(2)}</b></span></div>
               <small className="active-trade-meta">{position.chain} · entry {price(position.entryPrice)} · {ago(position.openedAt)}</small>
-              {position.status === "exit_pending" && <small className="active-trade-reason" title={position.lastReason}>{position.lastReason}</small>}
+              {position.status === "exit_pending" && <>
+                <small className="active-trade-reason" title={position.lastReason}>{position.lastReason}</small>
+                {position.sellAuditReason && <small className="active-trade-reason" title={position.sellAuditReason}>Sell verification: {(position.sellAuditStatus ?? "unknown").toUpperCase()} · {position.sellAuditReason}</small>}
+              </>}
             </article>;
           }) : <div className="empty-row">No active PAPER trades. New Council-approved entries will appear here.</div>}
         </div>
