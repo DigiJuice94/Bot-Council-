@@ -14,11 +14,11 @@ Do not delete `deployment-source.tar.gz`. It is the upload-safe copy of this sam
 
 Successful deployment is visually identifiable by the dashboard label:
 
-`Bot War Room V3.6.3.6 · CANONICAL · FULL EXITS`
+`Bot War Room V3.6.3.7 · ACCOUNTING VERIFIED · GUARDIAN RECOVERY`
 
 The Proof of Work cabinet also reports:
 
-`V3.6.3.6 Clean Canonical / Proof of Work`
+`V3.6.3.7 Accounting Reconciled / Guardian Recovery`
 
 If either older label is still visible, Railway is building an older commit or
 the project root is pointed at a nested/previous folder.

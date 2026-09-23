@@ -770,10 +770,14 @@ export async function fetchLivePositionSnapshot(position: ManagedPosition): Prom
       const url = new URL("/snapshot", base);
       url.searchParams.set("chain", position.chain); url.searchParams.set("address", position.tokenAddress);
       const response = await fetch(url, { headers: adapterHeaders(), cache: "no-store", signal: AbortSignal.timeout(4_500) });
-      if (!response.ok) return null;
-      const payload = await response.json();
-      return looksLikeSnapshot(payload) ? payload : null;
-    } catch { return null; }
+      if (response.ok) {
+        const payload = await response.json();
+        if (looksLikeSnapshot(payload)) return payload;
+      }
+    } catch {
+      // Position management must remain operational when the optional adapter
+      // is down. Fall through to the existing direct DEX lookup below.
+    }
   }
   const pairs = await dexPairsForToken(position.chain, position.tokenAddress);
   const pair = chooseBestPair(pairs, position.tokenAddress);

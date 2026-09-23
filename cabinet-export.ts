@@ -4,6 +4,7 @@ import { getPositionGuardianTelemetry } from "./position-manager";
 import { listManagedPositions } from "./position-store";
 import { getProviderHealth } from "./provider-health";
 import { getWaterfallProviderHealth } from "./provider-waterfall";
+import { isCreditedPaperFill, reconstructCashUsd, reconstructPortfolio, uniqueManagedPositions, uniquePaperFills } from "./paper-accounting";
 import { getRunnerResearchSnapshot } from "./runner-research";
 import { getTradeJournal } from "./trade-journal";
 import type { ManagedPosition, PaperWalletFillRecord, PaperWalletSnapshot } from "./types";
@@ -12,14 +13,16 @@ export type CabinetKind = "main" | "rug" | "proof";
 type VerificationState = "CONFIRMED" | "PARTIALLY_CONFIRMED" | "UNCONFIRMED" | "DISCREPANCY";
 
 const SCHEMA_VERSION = "bot-war-room-cabinet/v1";
-const BUILD = "V3.6.3.6 Clean Canonical / Proof of Work";
+const BUILD = "V3.6.3.7 Accounting Reconciled / Guardian Recovery";
 const round = (value: number, digits = 6) => Number((Number.isFinite(value) ? value : 0).toFixed(digits));
 const amount = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
 function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRecord[], decision: any) {
-  const ordered = [...fills].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const buys = ordered.filter((fill) => fill.side === "BUY");
-  const sells = ordered.filter((fill) => fill.side === "SELL");
+  const ordered = uniquePaperFills(fills).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const credited = ordered.filter(isCreditedPaperFill);
+  const buys = credited.filter((fill) => fill.side === "BUY");
+  const sells = credited.filter((fill) => fill.side === "SELL");
+  const uncreditedSells = ordered.filter((fill) => fill.side === "SELL" && !isCreditedPaperFill(fill));
   const buyQuantity = buys.reduce((sum, fill) => sum + amount(fill.quantity ?? (fill.fillPrice > 0 ? fill.filledUsd / fill.fillPrice : 0)), 0);
   const soldQuantity = sells.reduce((sum, fill) => sum + amount(fill.quantity ?? (fill.fillPrice > 0 ? fill.requestedUsd / fill.fillPrice : 0)), 0);
   const totalCostUsd = buys.reduce((sum, fill) => sum + amount(fill.requestedUsd), 0);
@@ -44,7 +47,7 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
     || (position.status !== "open" && position.status !== "exit_pending" && Math.abs(realizedPnlDeltaUsd) > 0.02);
   const sellEvidenceResolved = position.status === "unsellable"
     ? Boolean(position.unsellableReason || position.sellAuditStatus === "fail")
-    : sells.every((fill) => fill.routeVerified === true);
+    : uncreditedSells.length === 0 && sells.every((fill) => fill.routeVerified === true);
   const verificationState: VerificationState = hasMaterialDiscrepancy
     ? "DISCREPANCY"
     : !sufficientEvidence
@@ -101,32 +104,40 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
       expectedOutUsd: position.sellAuditExpectedOutUsd,
       lockedCapitalLossUsd: amount(position.lockedCapitalLossUsd),
     },
-    errorsOrFailures: [position.unsellableReason, position.lastReason, ...ordered.map((fill) => fill.routeNote)].filter(Boolean),
+    errorsOrFailures: [
+      position.unsellableReason,
+      position.lastReason,
+      ...uncreditedSells.map((fill) => `SELL ${fill.id} was not credited because executable route evidence was not verified.`),
+      ...ordered.map((fill) => fill.routeNote),
+    ].filter(Boolean),
     updatedAt: position.updatedAt,
   };
 }
 
 function reconstructWallet(wallet: PaperWalletSnapshot, positions: ManagedPosition[]) {
-  const chronological = [...wallet.recentFills].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const chronological = uniquePaperFills(wallet.recentFills).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   let reconstructedCashUsd = amount(wallet.startingCashUsd) + amount(wallet.capitalContributionsUsd);
   const cashLedger = chronological.map((fill) => {
-    reconstructedCashUsd += fill.side === "BUY" ? -amount(fill.requestedUsd) : amount(fill.filledUsd);
+    const credited = isCreditedPaperFill(fill);
+    if (credited) reconstructedCashUsd += fill.side === "BUY" ? -amount(fill.requestedUsd) : amount(fill.filledUsd);
     const reportedCashAfterUsd = typeof fill.cashAfterUsd === "number" ? fill.cashAfterUsd : null;
     return {
       fillId: fill.id,
       at: fill.createdAt,
       side: fill.side,
+      credited,
       reconstructedCashAfterUsd: round(reconstructedCashUsd, 2),
       reportedCashAfterUsd,
       deltaUsd: reportedCashAfterUsd == null ? null : round(reportedCashAfterUsd - reconstructedCashUsd, 2),
     };
   });
-  const active = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
-  const independentlyReconstructedOpenValueUsd = round(active.reduce((sum, position) => sum + amount(position.remainingQuantity) * amount(position.markPrice), 0), 2);
-  const independentlyReconstructedOpenCostUsd = round(active.reduce((sum, position) => sum + Math.max(0, amount(position.entryNotionalUsd) - amount(position.realizedCostUsd)), 0), 2);
-  const independentlyReconstructedEquityUsd = round(reconstructedCashUsd + independentlyReconstructedOpenValueUsd, 2);
-  const independentlyReconstructedTotalPnlUsd = round(independentlyReconstructedEquityUsd - amount(wallet.startingCashUsd) - amount(wallet.capitalContributionsUsd), 2);
-  const ledgerComplete = wallet.recentFills.length >= wallet.buyFills + wallet.sellFills;
+  reconstructedCashUsd = reconstructCashUsd(wallet);
+  const accounting = reconstructPortfolio(wallet, positions);
+  const independentlyReconstructedOpenValueUsd = accounting.openExposureUsd;
+  const independentlyReconstructedOpenCostUsd = accounting.openCostUsd;
+  const independentlyReconstructedEquityUsd = accounting.equityUsd;
+  const independentlyReconstructedTotalPnlUsd = accounting.totalPnlUsd;
+  const ledgerComplete = chronological.length >= wallet.buyFills + wallet.sellFills;
   const cashDeltaUsd = round(amount(wallet.cashUsd) - reconstructedCashUsd, 2);
   const equityDeltaUsd = round(amount(wallet.equityUsd) - independentlyReconstructedEquityUsd, 2);
   return {
@@ -150,7 +161,7 @@ function reconstructWallet(wallet: PaperWalletSnapshot, positions: ManagedPositi
     reportedTotalPnlUsd: wallet.totalPnlUsd,
     independentlyReconstructedTotalPnlUsd,
     lockedCapitalLossUsd: wallet.lockedCapitalLossUsd,
-    accountingVerified: ledgerComplete && Math.abs(cashDeltaUsd) <= 0.02 && Math.abs(equityDeltaUsd) <= 0.02,
+    accountingVerified: ledgerComplete && Math.abs(cashDeltaUsd) <= 0.01 && Math.abs(equityDeltaUsd) <= 0.01,
     cashLedger,
   };
 }
@@ -189,7 +200,8 @@ function operationalHealth(positions: ManagedPosition[]) {
 
 export async function buildCabinetExport(kind: CabinetKind) {
   const generatedAt = new Date().toISOString();
-  const [journal, positions, wallet, resetMeta] = await Promise.all([getTradeJournal(1_000), listManagedPositions(), getPaperWallet(), getPaperWalletResetMeta()]);
+  const [journal, storedPositions, wallet, resetMeta] = await Promise.all([getTradeJournal(1_000), listManagedPositions(), getPaperWallet(), getPaperWalletResetMeta()]);
+  const positions = uniqueManagedPositions(storedPositions);
   const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
   const research = kind === "proof" ? null : await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
   const common = { schemaVersion: SCHEMA_VERSION, build: BUILD, generatedAt, mode: "paper" as const, storage: { wallet: wallet.storage, research: process.env.REDIS_URL ? "redis" : "memory" } };

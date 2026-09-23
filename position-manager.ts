@@ -1,6 +1,7 @@
 import { runWarRoom } from "./engine";
 import { executePaper } from "./execution";
 import { fetchLivePositionSnapshot } from "./market-data";
+import { markOverduePositionExitPending } from "./position-lifecycle";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
@@ -681,6 +682,13 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
         const latest = (await listManagedPositions()).find((row) => row.id === position.id);
         if (!latest || latest.status === "closed" || latest.status === "unsellable") continue;
         next = normalizedPosition(latest);
+        const deadlineState = markOverduePositionExitPending(next);
+        if (deadlineState !== next) {
+          next = deadlineState;
+          // Persist the existing 20-minute rule even if every mark provider is
+          // temporarily unavailable. No proceeds are credited here.
+          await saveManagedPosition(next);
+        }
         const snapshot = await fetchLivePositionSnapshot(next);
         if (snapshot) {
           const portfolio = await getPaperPortfolioContext(next.chain);

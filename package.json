@@ -1,12 +1,13 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.6.3-6-clean-canonical",
+  "version": "3.6.3-7-accounting-guardian",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "NODE_OPTIONS=--max-old-space-size=3072 next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:regression": "tsc -p tsconfig.regression.json && node --test .regression-test/tests/accounting-guardian-regression.test.js"
   },
   "engines": {
     "node": ">=20"

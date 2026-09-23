@@ -1,6 +1,7 @@
 import { createClient } from "redis";
 import { acquireRuntimeLease, listManagedPositions, removeManagedPosition } from "./position-store";
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
+import { ledgerAmount, reconcilePaperWalletState, reconstructPortfolio, uniqueManagedPositions } from "./paper-accounting";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
 const REDIS_KEY = "bot-war-room:paper-wallet:v2-real-market";
@@ -91,6 +92,8 @@ async function readState(): Promise<{ state: PaperWalletState; storage: "redis" 
   const redis = await getRedis();
   if (!redis) {
     if (!memoryState) memoryState = freshState();
+    const reconciled = reconcilePaperWalletState(memoryState);
+    if (reconciled.changed) memoryState = reconciled.state;
     return { state: memoryState, storage: "memory" };
   }
   const raw = await redis.get(REDIS_KEY);
@@ -100,7 +103,11 @@ async function readState(): Promise<{ state: PaperWalletState; storage: "redis" 
     return { state, storage: "redis" };
   }
   try {
-    return { state: JSON.parse(raw) as PaperWalletState, storage: "redis" };
+    const parsed = JSON.parse(raw) as PaperWalletState;
+    const reconciled = reconcilePaperWalletState(parsed);
+    if (reconciled.changed) await redis.set(REDIS_KEY, JSON.stringify(reconciled.state));
+    memoryState = reconciled.state;
+    return { state: reconciled.state, storage: "redis" };
   } catch {
     const state = freshState();
     await redis.set(REDIS_KEY, JSON.stringify(state));
@@ -176,26 +183,27 @@ async function calculateSnapshot(
 ): Promise<PaperWalletSnapshot> {
   let state = stateInput;
   const storedPositions = await listManagedPositions();
-  const positions = positionOverride
+  const positions = uniqueManagedPositions(positionOverride
     ? storedPositions.map((position) => position.id === positionOverride.id ? { ...position, ...positionOverride } : position)
-    : storedPositions;
-  const open = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
-  const unsellable = positions.filter((position) => position.status === "unsellable");
+    : storedPositions);
+  const accounting = reconstructPortfolio(state, positions);
+  const open = accounting.active;
+  const unsellable = accounting.unsellable;
   const cents = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
-  const cashUsd = cents(Math.max(0, state.cashUsd));
-  const openExposureUsd = cents(open.reduce((sum, position) => sum + Math.max(0, position.remainingQuantity * position.markPrice), 0));
-  const openCostUsd = cents(open.reduce((sum, position) => sum + Math.max(0, position.entryNotionalUsd - (position.realizedCostUsd || 0)), 0));
-  const unrealizedPnlUsd = cents(openExposureUsd - openCostUsd);
-  const equityUsd = cents(cashUsd + openExposureUsd);
+  const cashUsd = accounting.cashUsd;
+  const openExposureUsd = accounting.openExposureUsd;
+  const openCostUsd = accounting.openCostUsd;
+  const unrealizedPnlUsd = accounting.unrealizedPnlUsd;
+  const equityUsd = accounting.equityUsd;
   const capitalContributionsUsd = cents(Math.max(0, state.capitalContributionsUsd ?? 0));
-  const totalPnlUsd = cents(equityUsd - state.startingCashUsd - capitalContributionsUsd);
+  const totalPnlUsd = accounting.totalPnlUsd;
 
   // Portfolio Auditor: realized profit is the balancing figure from the actual
   // wallet cash and all open cost/value. This keeps the four accounting
   // identities exact even when the UI only receives a limited trade list.
   // Per-position realized values remain useful trade analytics, but can never
   // again be used as the top-level wallet total.
-  const realizedPnlUsd = cents(totalPnlUsd - unrealizedPnlUsd);
+  const realizedPnlUsd = accounting.realizedPnlUsd;
   const historyUpdate = updatePersistentEquityHistory(state, equityUsd, openExposureUsd);
   state = historyUpdate.state;
 
@@ -223,7 +231,7 @@ async function calculateSnapshot(
     dailyPnlPct: state.dayStartEquityUsd > 0 ? Number(((equityUsd - state.dayStartEquityUsd) / state.dayStartEquityUsd * 100).toFixed(3)) : 0,
     openPositions: open.length,
     unsellablePositions: unsellable.length,
-    lockedCapitalLossUsd: cents(unsellable.reduce((sum, position) => sum + Math.max(0, position.lockedCapitalLossUsd ?? (position.entryNotionalUsd - position.realizedCostUsd)), 0)),
+    lockedCapitalLossUsd: accounting.lockedCapitalLossUsd,
     storage,
     accountingVerified: true,
     accountingVerifiedAt: new Date().toISOString(),
@@ -464,11 +472,14 @@ export async function applyPaperFillToWallet(args: {
       out = await calculateSnapshot(current, storage);
       return;
     }
+    if (fill.side === "SELL" && fill.routeVerified !== true) {
+      throw new Error("Paper wallet refused unverified SELL proceeds.");
+    }
     const spendOrProceeds = fill.side === "BUY" ? fill.requestedUsd : fill.filledUsd;
     if (fill.side === "BUY" && spendOrProceeds > current.cashUsd + 0.005) {
       throw new Error(`Paper wallet cash check failed: $${current.cashUsd.toFixed(2)} available, $${spendOrProceeds.toFixed(2)} requested.`);
     }
-    const nextCashUsd = Number((fill.side === "BUY" ? current.cashUsd - fill.requestedUsd : current.cashUsd + fill.filledUsd).toFixed(2));
+    const nextCashUsd = ledgerAmount(fill.side === "BUY" ? current.cashUsd - fill.requestedUsd : current.cashUsd + fill.filledUsd);
     const positions = await listManagedPositions();
     const currentPosition = args.positionId ? positions.find((position) => position.id === args.positionId) : undefined;
     const openExposureBefore = positions
