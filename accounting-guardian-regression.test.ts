@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { reconcilePaperWalletState, reconstructPortfolio } from "../lib/paper-accounting";
 import { markOverduePositionExitPending } from "../lib/position-lifecycle";
 import { isFreshVerifiedSellProof } from "../lib/sell-execution-proof";
-import type { ManagedPosition, PaperWalletFillRecord, PaperWalletState } from "../lib/types";
+import { executePaper } from "../lib/execution";
+import type { ExecutionRequest, ManagedPosition, MarketSnapshot, PaperWalletFillRecord, PaperWalletState } from "../lib/types";
 
 function fill(id: string, side: "BUY" | "SELL", amount: number, routeVerified = true): PaperWalletFillRecord {
   return {
@@ -92,4 +93,19 @@ test("only one fresh PASS audit can authorize paper proceeds", () => {
   assert.equal(isFreshVerifiedSellProof(pass, now), true);
   assert.equal(isFreshVerifiedSellProof({ ...pass, status: "unknown", routeVerified: false }, now), false);
   assert.equal(isFreshVerifiedSellProof({ ...pass, checkedAt: "2025-12-31T23:59:00.000Z" }, now), false);
+});
+
+test("BUY remains possible with valid liquidity when no reverse-route API is configured", async () => {
+  const snapshot = { chain: "Robinhood Chain", chainFamily: "evm", tokenAddress: "TOKEN", symbol: "T", liquidity: 100_000, price: 1, volatility: 0 } as MarketSnapshot;
+  const request: ExecutionRequest = { mode: "paper", chain: "Robinhood Chain", tokenAddress: "TOKEN", symbol: "T", side: "BUY", notionalUsd: 50, maxSlippageBps: 90, strategyId: "S", decisionId: "D" };
+  const trade = await executePaper(request, snapshot);
+  assert.equal(trade.side, "BUY");
+  assert.equal(trade.routeVerified, false);
+  assert.ok(trade.filledUsd > 0);
+});
+
+test("zero liquidity remains an absolute BUY rejection", async () => {
+  const snapshot = { chain: "Robinhood Chain", chainFamily: "evm", tokenAddress: "TOKEN", symbol: "T", liquidity: 0, price: 1, volatility: 0 } as MarketSnapshot;
+  const request: ExecutionRequest = { mode: "paper", chain: "Robinhood Chain", tokenAddress: "TOKEN", symbol: "T", side: "BUY", notionalUsd: 50, maxSlippageBps: 90, strategyId: "S", decisionId: "D" };
+  await assert.rejects(executePaper(request, snapshot), /zero executable liquidity/);
 });

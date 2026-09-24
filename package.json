@@ -1,6 +1,6 @@
 {
   "name": "bot-war-room-v3",
-  "version": "3.6.3-8-exit-handoff",
+  "version": "3.6.3-9-entry-rollback",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -1,6 +1,6 @@
 # Clean Baseline
 
-V3.6.3.8 is the flattened canonical base. It retains the Council strategy and adds ledger reconciliation, Guardian data-path recovery, and a single verified sell-audit handoff into execution.
+V3.6.3.9 is the flattened canonical base. It restores the V3.6.3.7 BUY path while retaining ledger reconciliation, Guardian data-path recovery, and a single verified sell-audit handoff into execution.
 
 The repository contains the real Next.js directory tree directly. It also carries one generated `deployment-source.tar.gz` containing that exact canonical tree. Docker removes any stale nested source and restores this archive before compilation, protecting browser-based GitHub uploads that drop folders. This is not a historical update or patch chain.
 

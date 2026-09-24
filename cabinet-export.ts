@@ -13,7 +13,7 @@ export type CabinetKind = "main" | "rug" | "proof";
 type VerificationState = "CONFIRMED" | "PARTIALLY_CONFIRMED" | "UNCONFIRMED" | "DISCREPANCY";
 
 const SCHEMA_VERSION = "bot-war-room-cabinet/v1";
-const BUILD = "V3.6.3.8 Verified Exit Handoff";
+const BUILD = "V3.6.3.9 Entry Rollback / Verified Exit Handoff";
 const round = (value: number, digits = 6) => Number((Number.isFinite(value) ? value : 0).toFixed(digits));
 const amount = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 

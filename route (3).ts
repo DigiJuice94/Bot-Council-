@@ -1,65 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
-import { runWarRoom } from "@/lib/engine";
-import { fetchLiveCandidate, liveMarketDataMode } from "@/lib/market-data";
-import { ensurePositionGuardianLoop } from "@/lib/position-manager";
-import { classifyMarketRegime } from "@/lib/regime";
-import { relevantMemoryHints, resolveAdaptiveWeights } from "@/lib/learning-store";
-import { loadLatestProfitability } from "@/lib/profitability-store";
-import { getPaperPortfolioContext } from "@/lib/paper-wallet";
-import type { Chain, MarketSnapshot, TradingMode } from "@/lib/types";
+import { NextResponse } from "next/server";
+import { resetPaperWalletPreserveLearning } from "@/lib/paper-wallet";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest) {
-  ensurePositionGuardianLoop();
-  let previous: MarketSnapshot | undefined;
-  let chain: Chain | undefined;
-  let mode: TradingMode = "paper";
+export async function POST() {
   try {
-    const body = await request.json();
-    previous = body?.snapshot;
-    chain = body?.chain;
-    mode = body?.mode === "live" ? "live" : "paper";
-  } catch {
-    previous = undefined;
-  }
-
-  const requestedChain = chain ?? previous?.chain ?? "Solana";
-  const snapshot = await fetchLiveCandidate(requestedChain);
-  if (!snapshot) {
+    const result = await resetPaperWalletPreserveLearning("Manual dashboard reset");
     return NextResponse.json({
-      ok: false,
-      chain: requestedChain,
-      dataMode: liveMarketDataMode(),
-      message: "No qualifying real market candidate is available right now. Demo/fake candidates are disabled.",
-    }, {
-      status: 503,
-      headers: { "Cache-Control": "no-store", "X-Market-Data-Mode": liveMarketDataMode() },
-    });
+      ok: true,
+      ...result,
+      message: `Fresh PAPER run started at $${result.wallet.startingCashUsd.toFixed(2)}. Trade log and portfolio history cleared; learned research preserved.`,
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
-
-  const regime = classifyMarketRegime(snapshot);
-  const [learning, memoryHints, profitability, portfolio] = await Promise.all([
-    resolveAdaptiveWeights(regime, snapshot),
-    relevantMemoryHints(snapshot, regime.id),
-    loadLatestProfitability(),
-    getPaperPortfolioContext(snapshot.chain),
-  ]);
-
-  const result = runWarRoom(snapshot, {
-    mode,
-    regime,
-    agentWeights: learning.weights,
-    learningSource: learning.source,
-    memoryHints,
-    profitability,
-    portfolio,
-  });
-  return NextResponse.json(result, {
-    headers: {
-      "Cache-Control": "no-store",
-      "X-Market-Data-Mode": liveMarketDataMode(),
-      "X-Learning-Mode": learning.source,
-    },
-  });
 }
