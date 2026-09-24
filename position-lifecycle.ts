@@ -22,8 +22,8 @@ export function markOverduePositionExitPending(position: ManagedPosition, nowMs 
   };
 }
 
-/** Preserve unsold quantity for later verified recovery while freeing the active slot.
- * Zero proceeds and zero positive mark are credited for an unverified exit.
+/** Preserve unsold quantity and cost basis while freeing the active slot.
+ * No proceeds or loss is booked merely because sell verification is unavailable.
  */
 export function parkUnverifiedExit(position: ManagedPosition, nowMs = Date.now()): ManagedPosition {
   if (position.status !== "exit_pending") return position;
@@ -41,11 +41,10 @@ export function parkUnverifiedExit(position: ManagedPosition, nowMs = Date.now()
   return {
     ...position,
     status: "exit_unverified",
-    markPrice: 0,
     unverifiedExitAt: now,
     unverifiedExitReason: position.sellAuditReason || "No independently verified sell route was available at the exit deadline.",
     updatedAt: now,
     lastAction: "EXIT",
-    lastReason: `Unverified exit: paper position removed from liquid equity with no sale or proceeds credited. ${position.sellAuditReason ?? "Reverse sell route could not be verified."} Sell verification will continue.`,
+    lastReason: `Unverified exit: remaining cost is held as at-risk capital, with no sale proceeds or confirmed loss. ${position.sellAuditReason ?? "Reverse sell route could not be verified."} Sell verification will continue.`,
   };
 }

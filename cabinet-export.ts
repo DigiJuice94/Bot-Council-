@@ -13,7 +13,7 @@ export type CabinetKind = "main" | "rug" | "proof";
 type VerificationState = "CONFIRMED" | "PARTIALLY_CONFIRMED" | "UNCONFIRMED" | "DISCREPANCY";
 
 const SCHEMA_VERSION = "bot-war-room-cabinet/v1";
-const BUILD = "V3.6.3.12 Liquidity Paper Exits / Verified or Modeled";
+const BUILD = "V3.6.3.13 Unverified Cost / Verified or Modeled";
 const round = (value: number, digits = 6) => Number((Number.isFinite(value) ? value : 0).toFixed(digits));
 const amount = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -35,7 +35,7 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
   const reconstructedRealizedPnlUsd = position.status === "unsellable"
     ? reconstructedProceedsUsd - totalCostUsd
     : reconstructedProceedsUsd - reconstructedCostSoldUsd;
-  const reconstructedUnrealizedPnlUsd = position.status === "open" || position.status === "exit_pending" || position.status === "exit_unverified"
+  const reconstructedUnrealizedPnlUsd = position.status === "open" || position.status === "exit_pending"
     ? reconstructedRemainingQuantity * amount(position.markPrice) - reconstructedRemainingCostUsd
     : 0;
   const quantityDelta = round(amount(position.remainingQuantity) - reconstructedRemainingQuantity);
@@ -93,7 +93,7 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
       claimedRealizedPnlUsd: amount(position.realizedPnlUsd),
       independentlyReconstructedRealizedPnlUsd: round(reconstructedRealizedPnlUsd),
       realizedPnlDeltaUsd,
-      claimedUnrealizedPnlUsd: round(amount(position.remainingQuantity) * amount(position.markPrice) - amount(position.remainingNotionalUsd)),
+      claimedUnrealizedPnlUsd: position.status === "exit_unverified" ? 0 : round(amount(position.remainingQuantity) * amount(position.markPrice) - amount(position.remainingNotionalUsd)),
       independentlyReconstructedUnrealizedPnlUsd: round(reconstructedUnrealizedPnlUsd),
     },
     sellability: {

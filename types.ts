@@ -612,6 +612,7 @@ export type PaperWalletSnapshot = PaperWalletState & {
   openPositions: number;
   unsellablePositions: number;
   lockedCapitalLossUsd: number;
+  unverifiedReservedCostUsd: number;
   storage: "redis" | "memory";
   accountingVerified: boolean;
   accountingVerifiedAt: string;

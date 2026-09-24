@@ -235,6 +235,7 @@ async function calculateSnapshot(
     openPositions: open.length,
     unsellablePositions: unsellable.length,
     lockedCapitalLossUsd: accounting.lockedCapitalLossUsd,
+    unverifiedReservedCostUsd: accounting.unverifiedReservedCostUsd,
     storage,
     accountingVerified: true,
     accountingVerifiedAt: new Date().toISOString(),

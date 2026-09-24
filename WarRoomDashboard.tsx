@@ -685,7 +685,7 @@ export default function WarRoomDashboard() {
       </nav>
       <section id="live" className="council-stage">
         <div className="stage-brand-row" aria-label="Bot War Room autonomous status">
-          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3.6.3.12</strong><small>ENTRY RESTORED · VERIFIED EXITS</small></div>
+          <div className="stage-brand"><span className="brand-orbit" /><strong>Bot War Room V3.6.3.13</strong><small>ENTRY RESTORED · VERIFIED EXITS</small></div>
           <span className="autonomous-pill"><i /> AUTONOMOUS</span>
         </div>
         <div className="decision-card-slot"><DecisionCard result={result} replaying={talking} dataMode={status?.dataMode} currentChain={status?.currentChain} /></div>
@@ -731,7 +731,8 @@ export default function WarRoomDashboard() {
           <span><small>Realized P/L</small><b className={realizedPnl >= 0 ? "positive" : "negative"}>{realizedPnl >= 0 ? "+" : ""}${realizedPnl.toFixed(2)}</b></span>
           <span title="Paper proceeds estimated from observed liquidity; executable sell routes were not verified."><small>PAPER MODEL · UNVERIFIED SELLS</small><b>${(status?.paperWallet?.recentModeledSellProceedsUsd ?? 0).toFixed(2)} · {status?.paperWallet?.recentModeledSellCount ?? 0} exits</b></span>
           <span><small>Equity</small><b>${(status?.paperWallet?.equityUsd ?? 0).toFixed(2)}</b></span>
-          <span><small>Locked / Unverified Cost</small><b className="negative">-${(status?.paperWallet?.lockedCapitalLossUsd ?? 0).toFixed(2)}</b></span>
+          <span><small>Unverified capital at cost</small><b>${(status?.paperWallet?.unverifiedReservedCostUsd ?? 0).toFixed(2)}</b></span>
+          <span><small>Confirmed locked loss</small><b className="negative">-${(status?.paperWallet?.lockedCapitalLossUsd ?? 0).toFixed(2)}</b></span>
           <span><small>Unresolved / Lost Trades</small><b>{status?.paperWallet?.unsellablePositions ?? 0}</b></span>
         </div>
 
@@ -833,14 +834,14 @@ export default function WarRoomDashboard() {
       </section>
 
       <section id="unsellable-capital" className="unsellable-panel page-panel">
-        <div className="wide-panel-head"><div><h2>⚠ Unsellable / Unverified Exits</h2><p>No sale proceeds are credited without a verified route. Unverified exits are removed from liquid equity and retried for possible recovery; confirmed unsellable tokens are recorded as losses.</p></div><span className="unsellable-chip">{unsellablePositions.length} unresolved/lost trade{unsellablePositions.length === 1 ? "" : "s"}</span></div>
+        <div className="wide-panel-head"><div><h2>⚠ Unsellable / Unverified Exits</h2><p>Unverified exits keep their remaining cost as at-risk capital, without booking a sale or loss. Fresh positive liquidity can settle a modeled PAPER exit; confirmed unsellable tokens count as losses.</p></div><span className="unsellable-chip">{unsellablePositions.length} unresolved/lost trade{unsellablePositions.length === 1 ? "" : "s"}</span></div>
         <div className="unsellable-grid">
           {unsellablePositions.length ? unsellablePositions.slice(0, 24).map((position) => {
             const lockedLoss = Math.max(0, position.lockedCapitalLossUsd ?? (position.entryNotionalUsd - position.realizedCostUsd));
             return <article className="unsellable-card" key={position.id}>
-              <div className="unsellable-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em>{position.status === "exit_unverified" ? "UNVERIFIED EXIT" : "UNSELLABLE"}</em></div>
+              <div className="unsellable-top"><TokenAvatar imageUrl={position.imageUrl} symbol={position.symbol} compact /><b>${position.symbol}</b><em>{position.status === "exit_unverified" ? "AT RISK · NO SALE" : "UNSELLABLE"}</em></div>
               <div className="unsellable-values">
-                <span><small>{position.status === "exit_unverified" ? "UNVERIFIED COST" : "LOCKED / LOST"}</small><b className="negative">-${lockedLoss.toFixed(2)}</b></span>
+                <span><small>{position.status === "exit_unverified" ? "AT-RISK COST" : "LOCKED / LOST"}</small><b className={position.status === "unsellable" ? "negative" : undefined}>{position.status === "unsellable" ? "-" : ""}${lockedLoss.toFixed(2)}</b></span>
                 <span><small>UNSOLD TOKENS</small><b>{tokenAmount(position.remainingQuantity ?? 0)}</b></span>
                 <span><small>ORIGINAL ENTRY</small><b>{price(position.entryPrice)}</b></span>
                 <span><small>PRIOR VERIFIED PROCEEDS</small><b>${Math.max(0, position.realizedProceedsUsd ?? 0).toFixed(2)}</b></span>

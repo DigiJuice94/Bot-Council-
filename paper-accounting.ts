@@ -74,14 +74,16 @@ export function uniqueManagedPositions(positions: ManagedPosition[]): ManagedPos
 export function reconstructPortfolio(state: PaperWalletState, positionsInput: ManagedPosition[]) {
   const positions = uniqueManagedPositions(positionsInput);
   const active = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
-  // Unverified exits have unsold tokens but no verifiable liquid mark. Include
-  // their full remaining cost in provisional locked capital, never in equity.
+  // Unverified exits have unsold tokens but no verifiable liquid mark. Keep
+  // remaining cost as an at-risk reserve, without inventing proceeds or a loss.
   const unsellable = positions.filter((position) => position.status === "unsellable" || position.status === "exit_unverified");
+  const pendingReserveRaw = unsellable.filter((position) => position.status === "exit_unverified")
+    .reduce((sum, position) => sum + Math.max(0, finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)), 0);
   const cashUsd = reconstructCashUsd(state);
-  const openValueRaw = active.reduce((sum, position) => sum + Math.max(0, finite(position.remainingQuantity) * finite(position.markPrice)), 0);
+  const openValueRaw = active.reduce((sum, position) => sum + Math.max(0, finite(position.remainingQuantity) * finite(position.markPrice)), 0) + pendingReserveRaw;
   const openCostRaw = [...active, ...unsellable.filter((position) => position.status === "exit_unverified")]
     .reduce((sum, position) => sum + Math.max(0, finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)), 0);
-  const lockedCapitalLossRaw = unsellable.reduce(
+  const lockedCapitalLossRaw = unsellable.filter((position) => position.status === "unsellable").reduce(
     (sum, position) => sum + Math.max(0, finite(position.lockedCapitalLossUsd) || finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)),
     0,
   );
@@ -101,5 +103,6 @@ export function reconstructPortfolio(state: PaperWalletState, positionsInput: Ma
     totalPnlUsd: money(totalPnlRaw),
     equityUsd: money(equityRaw),
     lockedCapitalLossUsd: money(lockedCapitalLossRaw),
+    unverifiedReservedCostUsd: money(pendingReserveRaw),
   };
 }

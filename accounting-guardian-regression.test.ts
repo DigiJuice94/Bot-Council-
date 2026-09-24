@@ -88,7 +88,7 @@ test("20-minute deadline becomes pending without fabricating a fill", () => {
   assert.equal(fresh.status, "open");
 });
 
-test("unverified exit frees the active slot without a fake sale or realized profit", () => {
+test("unverified exit frees the slot but preserves cost without booking a sale or loss", () => {
   const now = Date.parse("2026-01-01T00:22:01.000Z");
   const pending = markOverduePositionExitPending(position({ openedAt: "2026-01-01T00:00:00.000Z" }), Date.parse("2026-01-01T00:20:00.000Z"));
   assert.equal(parkUnverifiedExit(pending, Date.parse("2026-01-01T00:20:00.000Z")).status, "exit_unverified");
@@ -102,11 +102,12 @@ test("unverified exit frees the active slot without a fake sale or realized prof
   assert.equal(parked.realizedPnlUsd, 0);
   const totals = reconstructPortfolio(state([fill("B1", "BUY", 10)], 990), [parked]);
   assert.equal(totals.cashUsd, 990);
-  assert.equal(totals.equityUsd, 990);
-  assert.equal(totals.openExposureUsd, 0);
+  assert.equal(totals.equityUsd, 1000);
+  assert.equal(totals.openExposureUsd, 10);
   assert.equal(totals.realizedPnlUsd, 0);
-  assert.equal(totals.unrealizedPnlUsd, -10);
-  assert.equal(totals.lockedCapitalLossUsd, 10);
+  assert.equal(totals.unrealizedPnlUsd, 0);
+  assert.equal(totals.lockedCapitalLossUsd, 0);
+  assert.equal(totals.unverifiedReservedCostUsd, 10);
   assert.equal(totals.active.length, 0);
   assert.deepEqual(reconstructPortfolio(JSON.parse(JSON.stringify(state([fill("B1", "BUY", 10)]))), JSON.parse(JSON.stringify([parked]))), totals);
   const recovered = { ...parked, status: "closed" as const, remainingQuantity: 0, realizedProceedsUsd: 12,
@@ -115,6 +116,7 @@ test("unverified exit frees the active slot without a fake sale or realized prof
   assert.equal(afterRecovery.equityUsd, 1002);
   assert.equal(afterRecovery.realizedPnlUsd, 2);
   assert.equal(afterRecovery.lockedCapitalLossUsd, 0);
+  assert.equal(afterRecovery.unverifiedReservedCostUsd, 0);
 });
 
 test("only one fresh PASS audit can authorize paper proceeds", () => {
