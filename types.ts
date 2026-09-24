@@ -406,6 +406,9 @@ export type PaperFill = {
   slippageBps: number;
   feeUsd: number;
   routeVerified?: boolean;
+  sellExecutionKind?: "verified_route" | "liquidity_model";
+  observedLiquidityUsd?: number;
+  liquidityObservedAt?: string;
   routeProvider?: "jupiter" | "zeroex" | "security" | "unsupported" | "liquidity-model";
   routeNote?: string;
   createdAt: string;
@@ -458,7 +461,7 @@ export type PositionScaleFill = {
 };
 
 export type PositionAction = "HOLD" | "SCALE_IN" | "TRIM" | "EXIT";
-export type PositionStatus = "open" | "exit_pending" | "unsellable" | "closed";
+export type PositionStatus = "open" | "exit_pending" | "exit_unverified" | "unsellable" | "closed";
 
 export type ManagedPosition = {
   id: string;
@@ -491,6 +494,11 @@ export type ManagedPosition = {
   openedAt: string;
   updatedAt: string;
   closedAt?: string;
+  exitPendingAt?: string;
+  unverifiedExitAt?: string;
+  unverifiedExitReason?: string;
+  exitAccountingKind?: "verified_route" | "liquidity_model";
+  recoveryAttemptAt?: string;
   unsellableAt?: string;
   unsellableReason?: string;
   lockedCapitalLossUsd?: number;
@@ -546,6 +554,9 @@ export type PaperWalletFillRecord = {
   feeUsd: number;
   slippageBps: number;
   routeVerified?: boolean;
+  sellExecutionKind?: "verified_route" | "liquidity_model";
+  observedLiquidityUsd?: number;
+  liquidityObservedAt?: string;
   routeProvider?: "jupiter" | "zeroex" | "security" | "unsupported" | "liquidity-model";
   routeNote?: string;
   createdAt: string;
@@ -593,6 +604,8 @@ export type PaperWalletSnapshot = PaperWalletState & {
   openCostUsd: number;
   unrealizedPnlUsd: number;
   realizedPnlUsd: number;
+  recentModeledSellCount: number;
+  recentModeledSellProceedsUsd: number;
   totalPnlUsd: number;
   totalReturnPct: number;
   dailyPnlPct: number;

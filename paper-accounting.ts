@@ -7,7 +7,16 @@ export const money = (value: number) => Number(finite(value).toFixed(2));
 export function isCreditedPaperFill(fill: PaperWalletFillRecord): boolean {
   if (!fill.id || !Number.isFinite(fill.requestedUsd) || !Number.isFinite(fill.filledUsd)) return false;
   if (fill.side === "BUY") return fill.requestedUsd > 0;
-  return fill.routeVerified === true && fill.filledUsd >= 0;
+  if (fill.routeVerified === true) return fill.filledUsd >= 0;
+  // A PAPER simulation can be counted, but it must never masquerade as a
+  // reverse-route-verified execution.
+  return fill.sellExecutionKind === "liquidity_model" && fill.routeVerified === false
+    && fill.routeProvider === "liquidity-model"
+    && Number.isFinite(fill.observedLiquidityUsd) && Number(fill.observedLiquidityUsd) > 0
+    && Number.isFinite(fill.filledUsd) && fill.filledUsd >= 0
+    && fill.filledUsd <= Number(fill.observedLiquidityUsd) * 0.5 + 0.0001
+    && Number.isFinite(Date.parse(fill.liquidityObservedAt ?? ""))
+    && Math.abs(Date.parse(fill.createdAt) - Date.parse(fill.liquidityObservedAt!)) <= 120_000;
 }
 
 export function uniquePaperFills(fills: PaperWalletFillRecord[]): PaperWalletFillRecord[] {
@@ -65,10 +74,13 @@ export function uniqueManagedPositions(positions: ManagedPosition[]): ManagedPos
 export function reconstructPortfolio(state: PaperWalletState, positionsInput: ManagedPosition[]) {
   const positions = uniqueManagedPositions(positionsInput);
   const active = positions.filter((position) => position.status === "open" || position.status === "exit_pending");
-  const unsellable = positions.filter((position) => position.status === "unsellable");
+  // Unverified exits have unsold tokens but no verifiable liquid mark. Include
+  // their full remaining cost in provisional locked capital, never in equity.
+  const unsellable = positions.filter((position) => position.status === "unsellable" || position.status === "exit_unverified");
   const cashUsd = reconstructCashUsd(state);
   const openValueRaw = active.reduce((sum, position) => sum + Math.max(0, finite(position.remainingQuantity) * finite(position.markPrice)), 0);
-  const openCostRaw = active.reduce((sum, position) => sum + Math.max(0, finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)), 0);
+  const openCostRaw = [...active, ...unsellable.filter((position) => position.status === "exit_unverified")]
+    .reduce((sum, position) => sum + Math.max(0, finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)), 0);
   const lockedCapitalLossRaw = unsellable.reduce(
     (sum, position) => sum + Math.max(0, finite(position.lockedCapitalLossUsd) || finite(position.entryNotionalUsd) - finite(position.realizedCostUsd)),
     0,

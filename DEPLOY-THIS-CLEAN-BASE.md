@@ -1,24 +1,5 @@
-# Deploy this clean base
+# Deploy this complete folder
 
-This folder is the complete Railway project root. The repository root must show
-`app`, `components`, `lib`, `public`, `package.json`, and `Dockerfile` directly.
+Put the **contents** of this folder at the GitHub repository root (so `app/`, `components/`, `lib/`, `package.json`, `Dockerfile`, and `deployment-source.tar.gz` are at root), then deploy the resulting commit. Do not upload this as a nested folder alongside old sources. Docker restores the included archive before building.
 
-Do not upload this folder beside an older project folder and do not leave old
-source files in the repository. GitHub's file uploader merges files; it does not
-remove retired files automatically. Replace the old repository contents with
-the contents of this folder, then deploy the resulting commit.
-
-This package includes a generated `deployment-source.tar.gz` containing the exact same canonical `app/`, `components/`, `lib/`, and `public/` tree. Railway restores it before building, so the deployment still works if GitHub's browser uploader drops nested folders.
-
-Do not delete `deployment-source.tar.gz`. It is the upload-safe copy of this same build, not an older version.
-
-Successful deployment is visually identifiable by the dashboard label:
-
-`Bot War Room V3.6.3.9 · ENTRY RESTORED · VERIFIED EXITS`
-
-The Proof of Work cabinet also reports:
-
-`V3.6.3.9 Entry Rollback / Verified Exit Handoff`
-
-If either older label is still visible, Railway is building an older commit or
-the project root is pointed at a nested/previous folder.
+Check that the live dashboard header reads `Bot War Room V3.6.3.12` and the Proof cabinet build reads `V3.6.3.12 Liquidity Paper Exits / Verified or Modeled`. An earlier label means an earlier package is still deployed. This package only changes PAPER simulation; it does not execute on-chain trades or connect private keys.

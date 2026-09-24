@@ -1,7 +1,7 @@
 import { runWarRoom } from "./engine";
 import { executePaper } from "./execution";
 import { fetchLivePositionSnapshot } from "./market-data";
-import { markOverduePositionExitPending } from "./position-lifecycle";
+import { markOverduePositionExitPending, parkUnverifiedExit } from "./position-lifecycle";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
@@ -369,6 +369,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
   return {
     ...position,
     status,
+    exitPendingAt: status === "exit_pending" ? position.exitPendingAt ?? new Date().toISOString() : position.exitPendingAt,
     imageUrl: snapshot.imageUrl ?? position.imageUrl,
     markPrice: mark,
     highWaterPrice: highWater,
@@ -549,6 +550,7 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
   return {
     ...position,
     status: "closed",
+    exitAccountingKind: fill.sellExecutionKind,
     remainingQuantity: 0,
     remainingNotionalUsd: 0,
     realizedProceedsUsd,
@@ -560,7 +562,7 @@ async function executeFullExit(position: ManagedPosition, snapshot: MarketSnapsh
     updatedAt: new Date().toISOString(),
     lastAction: "EXIT",
     pendingScaleLabel: undefined,
-    lastReason: `${position.lastReason} Paper exit filled ${fill.filledUsd.toFixed(2)} USD @ ${fill.fillPrice}. Final return ${realizedReturnPct.toFixed(2)}%.`,
+    lastReason: `${position.lastReason} ${fill.sellExecutionKind === "liquidity_model" ? "Liquidity-modeled PAPER exit (sell route unverified)" : "Verified PAPER exit"} ${fill.filledUsd.toFixed(2)} USD @ ${fill.fillPrice}. Modeled/realized return ${realizedReturnPct.toFixed(2)}%.`,
   };
 }
 
@@ -684,7 +686,12 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
     return { storage, openCount: 0, urgentCount: 0, positions: [], generatedAt: new Date().toISOString() };
   }
   guardianGlobal.__botWarRoomGuardianBusy = true;
-  const positions = (await listManagedPositions()).filter((position) => position.status === "open" || position.status === "exit_pending").map(normalizedPosition);
+  const allPositions = await listManagedPositions();
+  const active = allPositions.filter((position) => position.status === "open" || position.status === "exit_pending");
+  const recovery = allPositions.filter((position) => position.status === "exit_unverified" &&
+      (!position.recoveryAttemptAt || Date.now() - Date.parse(position.recoveryAttemptAt) >= 20_000))
+    .sort((a, b) => (a.recoveryAttemptAt ?? "").localeCompare(b.recoveryAttemptAt ?? "")).slice(0, 3);
+  const positions = [...active, ...recovery].map(normalizedPosition);
   const refreshed: ManagedPosition[] = [];
   let staleCount = 0;
   try {
@@ -696,6 +703,10 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
         const latest = (await listManagedPositions()).find((row) => row.id === position.id);
         if (!latest || latest.status === "closed" || latest.status === "unsellable") continue;
         next = normalizedPosition(latest);
+        if (next.status === "exit_unverified") {
+          next = { ...next, recoveryAttemptAt: new Date().toISOString() };
+          await saveManagedPosition(next);
+        }
         const deadlineState = markOverduePositionExitPending(next);
         if (deadlineState !== next) {
           next = deadlineState;
@@ -705,6 +716,29 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
         }
         const snapshot = await fetchLivePositionSnapshot(next);
         if (snapshot) {
+          // A market adapter can omit token decimals even when the entry snapshot
+          // recorded them. Reuse only the same mint's verified entry metadata.
+          if (snapshot.tokenDecimals === undefined &&
+              next.entryContext?.snapshot?.tokenAddress === snapshot.tokenAddress &&
+              next.entryContext.snapshot.chain === snapshot.chain &&
+              Number.isInteger(next.entryContext.snapshot.tokenDecimals)) {
+            snapshot.tokenDecimals = next.entryContext.snapshot.tokenDecimals;
+          }
+          if (next.status === "exit_unverified" && next.mode === "paper") {
+            const audited = await auditForLockedCapital(next, snapshot, false);
+            next = audited.position;
+            if (!audited.locked && (audited.audit?.status === "unknown" || (audited.audit?.status === "pass" && audited.audit.routeVerified))) {
+              next = await executeFullExit(next, snapshot, audited.audit);
+            }
+            if ((next.status === "closed" || next.status === "unsellable") && !next.learningRecorded) {
+              if (next.status === "unsellable") await recordRugAutopsy(next, snapshot);
+              await reflectOnClosedPosition(next, snapshot);
+              next = { ...next, learningRecorded: true };
+            }
+            await saveManagedPosition(next);
+            refreshed.push(next);
+            continue;
+          }
           const portfolio = await getPaperPortfolioContext(next.chain);
           const exitGenome = await getRunnerExitGuidance(next, snapshot);
 
@@ -742,9 +776,10 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
             // above can convert the position to locked capital.
             const audited = await auditForLockedCapital(next, snapshot, false);
             next = audited.position;
-            if (!audited.locked && audited.audit?.status === "pass" && audited.audit.routeVerified) {
+            if (!audited.locked && (audited.audit?.status === "unknown" || (audited.audit?.status === "pass" && audited.audit.routeVerified))) {
               next = await executeFullExit(next, snapshot, audited.audit);
             }
+            next = parkUnverifiedExit(next);
           } else {
             next = evaluatePosition(next, snapshot, portfolio, exitGenome);
 
@@ -761,7 +796,7 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
               } else if (next.lastAction === "EXIT" && next.remainingQuantity > 0) {
                 const audited = await auditForLockedCapital(next, snapshot, false);
                 next = audited.position;
-                if (!audited.locked && audited.audit?.status === "pass" && audited.audit.routeVerified) {
+                if (!audited.locked && (audited.audit?.status === "unknown" || (audited.audit?.status === "pass" && audited.audit.routeVerified))) {
                   next = await executeFullExit(next, snapshot, audited.audit);
                 }
               }
@@ -776,6 +811,9 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
           await saveManagedPosition(next);
         } else {
           staleCount += 1;
+          const wasPending = next.status === "exit_pending";
+          next = parkUnverifiedExit(next);
+          if (wasPending && next.status === "exit_unverified") await saveManagedPosition(next);
         }
       } catch (error) {
         staleCount += 1;

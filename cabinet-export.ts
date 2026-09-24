@@ -13,7 +13,7 @@ export type CabinetKind = "main" | "rug" | "proof";
 type VerificationState = "CONFIRMED" | "PARTIALLY_CONFIRMED" | "UNCONFIRMED" | "DISCREPANCY";
 
 const SCHEMA_VERSION = "bot-war-room-cabinet/v1";
-const BUILD = "V3.6.3.9 Entry Rollback / Verified Exit Handoff";
+const BUILD = "V3.6.3.12 Liquidity Paper Exits / Verified or Modeled";
 const round = (value: number, digits = 6) => Number((Number.isFinite(value) ? value : 0).toFixed(digits));
 const amount = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
@@ -35,7 +35,7 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
   const reconstructedRealizedPnlUsd = position.status === "unsellable"
     ? reconstructedProceedsUsd - totalCostUsd
     : reconstructedProceedsUsd - reconstructedCostSoldUsd;
-  const reconstructedUnrealizedPnlUsd = position.status === "open" || position.status === "exit_pending"
+  const reconstructedUnrealizedPnlUsd = position.status === "open" || position.status === "exit_pending" || position.status === "exit_unverified"
     ? reconstructedRemainingQuantity * amount(position.markPrice) - reconstructedRemainingCostUsd
     : 0;
   const quantityDelta = round(amount(position.remainingQuantity) - reconstructedRemainingQuantity);
@@ -44,8 +44,8 @@ function reconstructedTrade(position: ManagedPosition, fills: PaperWalletFillRec
   const sufficientEvidence = buys.length > 0 && Boolean(decision);
   const hasMaterialDiscrepancy = Math.abs(quantityDelta) > Math.max(0.000001, buyQuantity * 0.000001)
     || Math.abs(proceedsDeltaUsd) > 0.02
-    || (position.status !== "open" && position.status !== "exit_pending" && Math.abs(realizedPnlDeltaUsd) > 0.02);
-  const sellEvidenceResolved = position.status === "unsellable"
+    || (position.status !== "open" && position.status !== "exit_pending" && position.status !== "exit_unverified" && Math.abs(realizedPnlDeltaUsd) > 0.02);
+  const sellEvidenceResolved = position.status === "exit_unverified" ? false : position.status === "unsellable"
     ? Boolean(position.unsellableReason || position.sellAuditStatus === "fail")
     : uncreditedSells.length === 0 && sells.every((fill) => fill.routeVerified === true);
   const verificationState: VerificationState = hasMaterialDiscrepancy
@@ -218,7 +218,7 @@ export async function buildCabinetExport(kind: CabinetKind) {
   };
 
   if (kind === "rug") {
-    const incidents = positions.filter((position) => position.status === "unsellable" || position.unsellableReason || amount(position.lockedCapitalLossUsd) > 0);
+    const incidents = positions.filter((position) => position.status === "unsellable" || position.status === "exit_unverified" || position.unsellableReason || amount(position.lockedCapitalLossUsd) > 0);
     return {
       ...common,
       kind,

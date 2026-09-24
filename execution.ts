@@ -2,6 +2,7 @@ import { getChainConfig } from "./chains";
 import { verifyPaperRoute } from "./route-feasibility";
 import { auditSellQuantity, type SellabilityAudit } from "./sellability-auditor";
 import { isFreshVerifiedSellProof } from "./sell-execution-proof";
+import { confirmedSellabilityFailure } from "./security-evidence";
 import type { ExecutionPlan, ExecutionRequest, MarketSnapshot, PaperFill, PortfolioRiskContext, RiskCheck, StrategyExperiment, TradingMode } from "./types";
 
 export function buildExecutionPlan(args: {
@@ -52,6 +53,11 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   if (request.side === "BUY" && (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0)) {
     throw new Error("Paper BUY rejected: token reports zero executable liquidity.");
   }
+  if (request.side === "SELL" && (!Number.isFinite(snapshot.liquidity) || snapshot.liquidity <= 0
+    || snapshot.honeypot || confirmedSellabilityFailure(snapshot)
+    || (snapshot.chainFamily === "solana" && snapshot.freezeAuthority))) {
+    throw new Error("Paper SELL rejected: live security evidence or zero liquidity prevents a credible exit.");
+  }
 
   // Linear impact could exceed 100% on thin pools and permanently trap paper exits.
   // Use a bounded constant-product-style impact curve instead: small trades behave
@@ -62,9 +68,21 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   const sellAudit = request.side === "SELL"
     ? (isFreshVerifiedSellProof(verifiedSellProof)
       ? verifiedSellProof
+      : (verifiedSellProof?.status === "unknown" || verifiedSellProof?.status === "fail")
+        && Date.now() - Date.parse(verifiedSellProof.checkedAt) < 30_000
+        ? verifiedSellProof
       : await auditSellQuantity(snapshot, request.notionalUsd / Math.max(snapshot.price, 1e-12)))
     : null;
-  if (request.side === "SELL" && (!sellAudit || sellAudit.status !== "pass" || !sellAudit.routeVerified)) {
+  const forcedPaperExit = request.side === "SELL" && request.decisionId.endsWith("-EXIT");
+  const observedAt = Date.parse(snapshot.dataProvenance?.fetchedAt ?? "");
+  const liquidityModeledSell = forcedPaperExit && sellAudit?.status === "unknown"
+    && snapshot.dataProvenance?.live === true
+    && Number.isFinite(observedAt) && Math.abs(Date.now() - observedAt) <= 120_000
+    && Number.isFinite(snapshot.liquidity) && snapshot.liquidity > 0
+    && Number.isFinite(snapshot.price) && snapshot.price > 0
+    && !snapshot.honeypot && !confirmedSellabilityFailure(snapshot)
+    && !(snapshot.chainFamily === "solana" && snapshot.freezeAuthority);
+  if (request.side === "SELL" && !liquidityModeledSell && (!sellAudit || sellAudit.status !== "pass" || !sellAudit.routeVerified)) {
     throw new Error(`Paper SELL unresolved: no verified executable reverse route. ${sellAudit?.reason ?? "Sell-route audit unavailable."}`);
   }
   if (request.chain === "Solana" && request.side === "BUY" && buyRoute?.verified && !buyRoute.available) {
@@ -74,7 +92,6 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
     ? Math.max(0, Math.round((sellAudit?.priceImpactPct ?? 0) * 100))
     : (buyRoute?.estimatedSlippageBps ?? 0);
   const observedSlippageBps = Math.max(liquidityModelBps, routeBps);
-  const forcedPaperExit = request.mode === "paper" && request.side === "SELL" && request.decisionId.endsWith("-EXIT");
 
   // Entries and ordinary trims still respect their slippage ceiling.
   // A Guardian emergency/full exit must never become permanently stuck because the
@@ -87,11 +104,13 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
   const simulatedSlippageBps = forcedPaperExit
     ? Math.min(9_000, observedSlippageBps)
     : Math.min(request.maxSlippageBps, observedSlippageBps);
-  const priceImpact = request.side === "BUY" ? 1 + simulatedSlippageBps / 10_000 : 1 - simulatedSlippageBps / 10_000;
   const feeRate = snapshot.chainFamily === "solana" ? 0.0015 : 0.0025;
   const grossFilledUsd = request.side === "SELL"
-    ? request.notionalUsd * Math.max(0.01, 1 - simulatedSlippageBps / 10_000)
+    ? Math.min(request.notionalUsd * Math.max(0.01, 1 - simulatedSlippageBps / 10_000),
+        liquidityModeledSell ? snapshot.liquidity * 0.5 : Infinity)
     : request.notionalUsd;
+  const priceImpact = request.side === "BUY" ? 1 + simulatedSlippageBps / 10_000
+    : grossFilledUsd / Math.max(request.notionalUsd, 1e-12);
   const feeUsd = grossFilledUsd * feeRate;
   const distressed = forcedPaperExit && observedSlippageBps > request.maxSlippageBps;
 
@@ -103,11 +122,16 @@ export async function executePaper(request: ExecutionRequest, snapshot: MarketSn
     requestedUsd: request.notionalUsd,
     filledUsd: Number((grossFilledUsd - feeUsd).toFixed(4)),
     fillPrice: snapshot.price * priceImpact,
-    slippageBps: simulatedSlippageBps,
+    slippageBps: request.side === "SELL" ? Math.round((1 - priceImpact) * 10_000) : simulatedSlippageBps,
     feeUsd: Number(feeUsd.toFixed(4)),
-    routeVerified: request.side === "SELL" ? true : Boolean(buyRoute?.verified && buyRoute.available),
-    routeProvider: request.side === "SELL" ? sellAudit!.provider : (buyRoute?.provider ?? "liquidity-model"),
-    routeNote: distressed
+    routeVerified: request.side === "SELL" ? !liquidityModeledSell : Boolean(buyRoute?.verified && buyRoute.available),
+    sellExecutionKind: request.side === "SELL" ? liquidityModeledSell ? "liquidity_model" : "verified_route" : undefined,
+    observedLiquidityUsd: liquidityModeledSell ? snapshot.liquidity : undefined,
+    liquidityObservedAt: liquidityModeledSell ? snapshot.dataProvenance!.fetchedAt : undefined,
+    routeProvider: request.side === "SELL" ? liquidityModeledSell ? "liquidity-model" : sellAudit!.provider : (buyRoute?.provider ?? "liquidity-model"),
+    routeNote: liquidityModeledSell
+      ? `PAPER LIQUIDITY MODEL: simulated full exit using live pool liquidity $${snapshot.liquidity.toFixed(2)}; no executable reverse route was verified. ${sellAudit?.reason ?? "Unknown route."}`
+      : distressed
       ? `DISTRESSED PAPER EXIT: normal limit ${request.maxSlippageBps} bps was exceeded; the verified reverse route was modeled at ${simulatedSlippageBps} bps impact. Source estimate: ${observedSlippageBps} bps. ${sellAudit!.reason}`
       : (request.side === "SELL" ? sellAudit!.reason : buyRoute!.reason),
     createdAt: new Date().toISOString(),

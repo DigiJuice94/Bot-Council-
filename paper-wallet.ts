@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 import { acquireRuntimeLease, listManagedPositions, removeManagedPosition } from "./position-store";
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
-import { ledgerAmount, reconcilePaperWalletState, reconstructPortfolio, uniqueManagedPositions } from "./paper-accounting";
+import { isCreditedPaperFill, ledgerAmount, reconcilePaperWalletState, reconstructPortfolio, uniqueManagedPositions } from "./paper-accounting";
 import type { Chain, PaperFill, PaperWalletFillRecord, PaperWalletSnapshot, PaperWalletState, PortfolioRiskContext } from "./types";
 
 const REDIS_KEY = "bot-war-room:paper-wallet:v2-real-market";
@@ -204,6 +204,7 @@ async function calculateSnapshot(
   // Per-position realized values remain useful trade analytics, but can never
   // again be used as the top-level wallet total.
   const realizedPnlUsd = accounting.realizedPnlUsd;
+  const modeledSells = state.recentFills.filter((fill) => fill.side === "SELL" && fill.sellExecutionKind === "liquidity_model" && isCreditedPaperFill(fill));
   const historyUpdate = updatePersistentEquityHistory(state, equityUsd, openExposureUsd);
   state = historyUpdate.state;
 
@@ -224,6 +225,8 @@ async function calculateSnapshot(
     openCostUsd,
     unrealizedPnlUsd,
     realizedPnlUsd,
+    recentModeledSellCount: modeledSells.length,
+    recentModeledSellProceedsUsd: cents(modeledSells.reduce((sum, fill) => sum + fill.filledUsd, 0)),
     totalPnlUsd,
     totalReturnPct: state.startingCashUsd + capitalContributionsUsd > 0
       ? Number((totalPnlUsd / (state.startingCashUsd + capitalContributionsUsd) * 100).toFixed(3))
@@ -472,8 +475,8 @@ export async function applyPaperFillToWallet(args: {
       out = await calculateSnapshot(current, storage);
       return;
     }
-    if (fill.side === "SELL" && fill.routeVerified !== true) {
-      throw new Error("Paper wallet refused unverified SELL proceeds.");
+    if (fill.side === "SELL" && !isCreditedPaperFill({ ...fill, decisionId: args.decisionId, tokenAddress: args.tokenAddress })) {
+      throw new Error("Paper wallet refused SELL proceeds without verified route or explicit PAPER liquidity-model evidence.");
     }
     const spendOrProceeds = fill.side === "BUY" ? fill.requestedUsd : fill.filledUsd;
     if (fill.side === "BUY" && spendOrProceeds > current.cashUsd + 0.005) {
@@ -506,6 +509,9 @@ export async function applyPaperFillToWallet(args: {
       feeUsd: fill.feeUsd,
       slippageBps: fill.slippageBps,
       routeVerified: fill.routeVerified,
+      sellExecutionKind: fill.sellExecutionKind,
+      observedLiquidityUsd: fill.observedLiquidityUsd,
+      liquidityObservedAt: fill.liquidityObservedAt,
       routeProvider: fill.routeProvider,
       routeNote: fill.routeNote,
       createdAt: fill.createdAt,

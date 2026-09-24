@@ -1,9 +1,5 @@
-# Clean Baseline
+# Clean baseline — V3.6.3.12
 
-V3.6.3.9 is the flattened canonical base. It restores the V3.6.3.7 BUY path while retaining ledger reconciliation, Guardian data-path recovery, and a single verified sell-audit handoff into execution.
+This is one complete project folder. Docker restores the included `deployment-source.tar.gz` containing this same `app/`, `components/`, `lib/` and `public/` tree before compiling. Update both root files and archive together.
 
-The repository contains the real Next.js directory tree directly. It also carries one generated `deployment-source.tar.gz` containing that exact canonical tree. Docker removes any stale nested source and restores this archive before compilation, protecting browser-based GitHub uploads that drop folders. This is not a historical update or patch chain.
-
-BUY thresholds, position sizing, liquidity/sellability gates, and autonomous scan cadence were not changed. Wallet accounting now preserves ledger precision, credits only verified execution rows, and rounds at the presentation boundary. Staged take profits total 100%; no residual runner allocation is created.
-
-The retired tournament is not an active product mode. Existing File Cabinet learning is copied once into the canonical namespace, and all new learning uses only that canonical namespace.
+BUY decisions, scoring, entry sizing, zero-liquidity protection and exit triggers are unchanged. Full PAPER exits may now credit an explicitly labeled liquidity-modeled fill if a fresh live pool has positive liquidity and the executable route audit is UNKNOWN. A modeled fill has `routeVerified=false`, is capped to half observed liquidity and is not evidence that the token could actually be sold. Verified fills remain separately labeled. Confirmed route failures and hard security failures are never modeled as sold. See `CHANGELOG-V3.6.3.12.md`.

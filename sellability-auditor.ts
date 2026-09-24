@@ -14,6 +14,17 @@ export type SellabilityAudit = {
 };
 
 const SOLANA_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOLANA_PUBLIC_RPC = "https://api.mainnet-beta.solana.com";
+const EVM_PUBLIC_RPC: Partial<Record<MarketSnapshot["chain"], string>> = {
+  Ethereum: "https://ethereum-rpc.publicnode.com",
+  Base: "https://mainnet.base.org",
+  "BNB Chain": "https://bsc-dataseed.binance.org",
+};
+const mintDecimals = new Map<string, number>();
+function cacheDecimals(key: string, decimals: number) {
+  if (mintDecimals.size >= 512) mintDecimals.delete(mintDecimals.keys().next().value!);
+  mintDecimals.set(key, decimals);
+}
 const EVM_CONFIG: Partial<Record<MarketSnapshot["chain"], { chainId: number; stable: string; stableDecimals: number }>> = {
   Ethereum: { chainId: 1, stable: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", stableDecimals: 6 },
   Base: { chainId: 8453, stable: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", stableDecimals: 6 },
@@ -23,6 +34,56 @@ const EVM_CONFIG: Partial<Record<MarketSnapshot["chain"], { chainId: number; sta
 function finite(value: unknown): number | undefined {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function verifiedDecimals(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 30 ? value : undefined;
+}
+
+async function resolveDecimals(snapshot: MarketSnapshot): Promise<number | undefined> {
+  const direct = verifiedDecimals(snapshot.tokenDecimals);
+  if (direct !== undefined) return direct;
+  const mintKey = `${snapshot.chain}:${snapshot.tokenAddress.toLowerCase()}`;
+  const cached = mintDecimals.get(mintKey);
+  if (cached !== undefined) return cached;
+  if (snapshot.chain !== "Solana") {
+    const url = EVM_PUBLIC_RPC[snapshot.chain];
+    if (!url || !/^0x[0-9a-fA-F]{40}$/.test(snapshot.tokenAddress)) return undefined;
+    try {
+      const response = await fetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: snapshot.tokenAddress, data: "0x313ce567" }, "latest"] }),
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok) return undefined;
+      const payload = await response.json();
+      const raw = payload?.result;
+      if (typeof raw !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(raw)) return undefined;
+      const decimals = verifiedDecimals(Number(BigInt(raw)));
+      if (decimals !== undefined) cacheDecimals(mintKey, decimals);
+      return decimals;
+    } catch { return undefined; }
+  }
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(snapshot.tokenAddress)) return undefined;
+  const urls = [...new Set([process.env.SOLANA_RPC_URL, process.env.HELIUS_API_KEY
+    ? `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(process.env.HELIUS_API_KEY)}` : undefined,
+    SOLANA_PUBLIC_RPC].filter((url): url is string => Boolean(url)))];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenSupply", params: [snapshot.tokenAddress] }),
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      const decimals = verifiedDecimals(payload?.result?.value?.decimals);
+      if (decimals === undefined) continue;
+      cacheDecimals(mintKey, decimals);
+      return decimals;
+    } catch { /* another configured RPC may still be available */ }
+  }
+  return undefined;
 }
 
 function rawAmount(quantity: number, decimals: number): string | null {
@@ -51,8 +112,8 @@ function hardSecurityFailure(snapshot: MarketSnapshot): SellabilityAudit | null 
 
 async function auditJupiter(snapshot: MarketSnapshot, quantity: number): Promise<SellabilityAudit> {
   const checkedAt = new Date().toISOString();
-  const decimals = snapshot.tokenDecimals;
-  if (!Number.isInteger(decimals)) {
+  const decimals = await resolveDecimals(snapshot);
+  if (decimals === undefined) {
     return { status: "unknown", provider: "jupiter", checkedAt, routeVerified: false, reason: "Sellability verifier could not determine token decimals for a reverse Jupiter quote." };
   }
   const amount = rawAmount(quantity, Number(decimals));
@@ -115,8 +176,8 @@ async function auditZeroEx(snapshot: MarketSnapshot, quantity: number): Promise<
   if (!config) return { status: "unknown", provider: "unsupported", checkedAt, routeVerified: false, reason: `No executable reverse-route provider is configured for ${snapshot.chain}.` };
   const apiKey = process.env.ZEROEX_API_KEY;
   if (!apiKey) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "ZEROEX_API_KEY is not configured, so the bot cannot prove an executable EVM sell route." };
-  const decimals = snapshot.tokenDecimals;
-  if (!Number.isInteger(decimals)) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Sellability verifier could not determine token decimals for the 0x reverse quote." };
+  const decimals = await resolveDecimals(snapshot);
+  if (decimals === undefined) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Sellability verifier could not determine token decimals for the 0x reverse quote." };
   const amount = rawAmount(quantity, Number(decimals));
   if (!amount) return { status: "unknown", provider: "zeroex", checkedAt, routeVerified: false, reason: "Sellability verifier could not construct the token amount for the 0x reverse quote." };
 
