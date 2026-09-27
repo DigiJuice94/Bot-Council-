@@ -455,7 +455,7 @@ function buildPortfolio(
 // Defensive fetching (client-side). NEVER throws; returns best-effort data.
 // ---------------------------------------------------------------------------
 
-const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_TIMEOUT_MS = 45_000;
 
 async function getJson<T>(path: string): Promise<T | null> {
   const controller = new AbortController();

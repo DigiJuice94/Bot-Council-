@@ -220,6 +220,12 @@
   border-radius: 10px;
   background: var(--surface-2);
 }
+.council-room .council-idle-note {
+  text-align: center;
+  color: var(--faint);
+  font-size: 13px;
+  margin: 0 0 14px;
+}
 
 .council-room .empty-panel {
   padding: 20px 0 4px;

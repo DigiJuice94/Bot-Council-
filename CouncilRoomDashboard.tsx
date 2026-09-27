@@ -439,7 +439,10 @@ function LiveCouncilGrid({
 
     const completeTurn = () => {
       turnDone = true;
-      cursorRefs.current.get(turnIndex)?.remove();
+      // Do NOT manually .remove() the cursor node: React still owns it and
+      // will remove it on the re-render below. Manually removing it first
+      // makes React's own removeChild throw NotFoundError and unmount the
+      // whole page (the "crash when chat bubbles start coming up").
       cursorRefs.current.delete(turnIndex);
       const done = turnIndex;
       setDoneSet((prev) => new Set(prev).add(done));
@@ -589,11 +592,13 @@ function LiveCouncilGrid({
         >
           <div className="progress-fill" ref={progressFillRef} />
         </div>
-        {turns.length === 0 ? (
-          <div className="empty-state">
-            No session recorded — the council is between decisions.
-          </div>
-        ) : (
+        {turns.length === 0 && (
+          <p className="council-idle-note">
+            Council idle — the bots are watching the market. New sessions
+            appear here live.
+          </p>
+        )}
+        {
           <div className="council-grid" aria-live="polite">
             {bots.map((b) => {
               const speaking = b.id === activeBotId;
@@ -739,7 +744,7 @@ function LiveCouncilGrid({
               );
             })}
           </div>
-        )}
+        }
       </div>
     </section>
   );
