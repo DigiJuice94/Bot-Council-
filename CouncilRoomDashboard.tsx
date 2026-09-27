@@ -32,6 +32,7 @@ import type {
   CouncilRoomData,
   MeetingTurn,
   PortfolioData,
+  PositionRow,
   TradeRow,
 } from "@/lib/council-room-types";
 
@@ -298,12 +299,80 @@ const REACTION_CLEAR_MS = 1700;
 const TYPE_CHARS_PER_SECOND = 36;
 const TURN_HOLD_SECONDS = 1.05;
 
+/* ------------------------------------------------------------------ */
+/* WalletStrip — live paper-wallet figures pinned to the top of the    */
+/* council panel. Updates whenever fresh data arrives.                 */
+/* ------------------------------------------------------------------ */
+
+function WalletStrip({
+  wallet,
+  openPositions,
+}: {
+  wallet: CouncilRoomData["wallet"];
+  openPositions: number;
+}) {
+  if (!wallet) return null;
+  const items: {
+    label: string;
+    text: string;
+    tone?: "pos" | "neg";
+  }[] = [
+    { label: "Cash", text: formatUsd(wallet.cashUsd) },
+    { label: "Equity", text: formatUsd(wallet.equityUsd) },
+    {
+      label: "Unrealized",
+      text:
+        wallet.unrealizedPnlUsd == null
+          ? "—"
+          : formatMoney(wallet.unrealizedPnlUsd),
+      tone:
+        wallet.unrealizedPnlUsd == null
+          ? undefined
+          : wallet.unrealizedPnlUsd >= 0
+            ? "pos"
+            : "neg",
+    },
+    {
+      label: "Realized",
+      text:
+        wallet.realizedPnlUsd == null ? "—" : formatMoney(wallet.realizedPnlUsd),
+      tone:
+        wallet.realizedPnlUsd == null
+          ? undefined
+          : wallet.realizedPnlUsd >= 0
+            ? "pos"
+            : "neg",
+    },
+    { label: "Open", text: String(openPositions) },
+  ];
+  return (
+    <div className="council-wallet-strip" aria-label="Live paper wallet">
+      {items.map((it) => (
+        <span className="cws-item" key={it.label}>
+          <em>{it.label}</em>
+          <strong className={it.tone ? `cws-${it.tone}` : undefined}>
+            {it.text}
+          </strong>
+        </span>
+      ))}
+      <span className="cws-live" aria-hidden="true">
+        <i />
+        updates live
+      </span>
+    </div>
+  );
+}
+
 function LiveCouncilGrid({
   meeting,
   bots,
+  wallet,
+  openPositions,
 }: {
   meeting: CouncilRoomData["meeting"];
   bots: CouncilBotVM[];
+  wallet: CouncilRoomData["wallet"];
+  openPositions: number;
 }) {
   // Defensive: a turn without a real message string crashes the typewriter
   // (t.message.length on undefined). Drop those turns before animating.
@@ -581,6 +650,7 @@ function LiveCouncilGrid({
             LIVE
           </div>
         </div>
+        <WalletStrip wallet={wallet} openPositions={openPositions} />
         <div
           className="progress-track"
           ref={progressWrapRef}
@@ -940,6 +1010,94 @@ function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
   );
 }
 
+/** Adaptive price formatting for tiny meme-coin prices. */
+function formatPrice(v: number | null): string {
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  const d = a >= 100 ? 2 : a >= 1 ? 4 : 6;
+  return `$${v.toLocaleString("en-US", { maximumFractionDigits: d })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* HoldingsSection — live coin cards for every open position, directly */
+/* below the portfolio table. Updates whenever fresh data arrives.     */
+/* ------------------------------------------------------------------ */
+
+function HoldingsSection({ positions }: { positions: PositionRow[] }) {
+  const list = positions ?? [];
+  return (
+    <section className="section" aria-labelledby="holdingsTitle">
+      <div className="panel holdings-panel">
+        <div className="panel-head">
+          <div>
+            <h2 className="section-title" id="holdingsTitle">
+              Live holdings
+            </h2>
+            <p className="section-note">
+              {list.length === 0
+                ? "No coins held right now."
+                : `${list.length} coin${list.length === 1 ? "" : "s"} held · prices update live`}
+            </p>
+          </div>
+          <div
+            className="live-badge"
+            role="status"
+            aria-label="Holdings update live"
+          >
+            <span className="live-dot" aria-hidden="true" />
+            LIVE
+          </div>
+        </div>
+        {list.length === 0 ? (
+          <div className="empty-state">
+            The council isn&apos;t holding any coins right now.
+          </div>
+        ) : (
+          <div className="holdings-grid">
+            {list.map((p) => {
+              const pnl = p.pnlUsd;
+              const pnlPct = p.pnlPct;
+              const tone = pnl == null ? "" : pnl >= 0 ? " pos" : " neg";
+              return (
+                <article key={p.id} className="holding-card">
+                  <div className="holding-top">
+                    <div className="holding-id">
+                      <strong className="holding-symbol">{p.symbol}</strong>
+                      <span className="holding-chain">{p.chain ?? "—"}</span>
+                    </div>
+                    <span className={`holding-pnl${tone}`}>
+                      {pnl == null ? "—" : formatMoney(pnl)}
+                    </span>
+                  </div>
+                  <div className="holding-mark">
+                    {formatPrice(p.markPrice)}
+                    {pnlPct != null && (
+                      <span
+                        className={`holding-pct${pnlPct >= 0 ? " pos" : " neg"}`}
+                      >
+                        {pnlPct >= 0 ? "+" : ""}
+                        {pnlPct.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="holding-meta">
+                    <span>
+                      Size <b>{formatUsd(p.sizeUsd)}</b>
+                    </span>
+                    <span>
+                      Entry <b>{formatPrice(p.entryPrice)}</b>
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Trade log — recent paper fills, newest first.                       */
 /* ------------------------------------------------------------------ */
@@ -1158,9 +1316,14 @@ function CouncilRoomDashboardView({
 
       <main className="main">
         <NowReviewingCard now={data.nowReviewing} />
-        <LiveCouncilGrid meeting={data.meeting} bots={data.bots} />
+        <LiveCouncilGrid
+          meeting={data.meeting}
+          bots={data.bots}
+          wallet={data.wallet}
+          openPositions={data.portfolio.positions.length}
+        />
         <PortfolioSection portfolio={data.portfolio} />
-        <TradeLogSection trades={data.trades} tradesTotal={data.tradesTotal} />
+        <HoldingsSection positions={data.portfolio.positions} />
         <PnlSection wallet={data.wallet} />
         {data.equitySeries.length > 0 && (
           <EquityChart
@@ -1169,6 +1332,7 @@ function CouncilRoomDashboardView({
             cashUsd={data.wallet.cashUsd}
           />
         )}
+        <TradeLogSection trades={data.trades} tradesTotal={data.tradesTotal} />
         <StatsSection stats={data.stats} />
         <footer>
           <p className="section-note">
