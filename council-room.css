@@ -85,16 +85,18 @@
 .council-room .session-label .pulse { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px rgba(70, 207, 190, .55); }
 .council-room .session-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .council-room .token-mark { color: var(--faint); font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
-.council-room .canvas-wrap { height: 500px; position: relative; overflow: hidden; isolation: isolate; }
+.council-room .canvas-wrap { height: 500px; position: relative; overflow: hidden; isolation: isolate; background: #ffffff; }
 .council-room .council-stage {
   position: relative; width: 100%; height: 100%; overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 46%, rgba(230, 180, 103, .055), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, .012), transparent 46%);
+  /* Explicit white scene — the user wants the white table look. Both this
+     rule and the legacy .council-stage rule agree on white, so the scene
+     renders white no matter which stylesheet wins the cascade. */
+  background-color: #ffffff;
+  background-image: radial-gradient(ellipse at 50% 42%, #ffffff 0%, #f6f7f8 72%, #e9ebed 100%);
 }
 .council-room .council-stage::before {
   content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .018) 50%, transparent);
+  background: linear-gradient(90deg, transparent, rgba(20, 30, 28, .035) 50%, transparent);
 }
 .council-room .ambient-particles { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
 .council-room .nib-layer { position: absolute; inset: 0; z-index: 5; }
@@ -106,7 +108,10 @@
   opacity: 0; transform: translate(-50%, 7px) scale(.2); transform-origin: 50% 100%; pointer-events: none; will-change: transform, opacity;
 }
 .council-room .nib {
-  --active: 0; position: absolute; left: var(--x); top: var(--y); width: clamp(86px, 10.2vw, 120px);
+  --active: 0; position: absolute; left: var(--x); top: var(--y);
+  /* Container-relative diameter: --seat-d is set in px on .council-stage by
+     the ResizeObserver layout pass and inherited here. */
+  width: var(--seat-d, 104px);
   aspect-ratio: 1; transform-origin: 50% 72%; will-change: transform; isolation: isolate;
 }
 .council-room .portrait-shell { position: absolute; inset: 0; display: grid; place-items: center; transform-origin: 50% 70%; will-change: transform; }
@@ -142,8 +147,9 @@
   position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); color: rgba(238, 244, 243, .32);
   font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .18em; white-space: nowrap;
 }
+.council-room .plate-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
 .council-room .nameplate {
-  --active: 0; position: absolute; left: var(--px); top: var(--py); transform: translate(-50%, -50%);
+  --active: 0; position: absolute; left: var(--px); top: var(--py); transform: translate(-50%, 0);
   min-width: 76px; padding: 5px 8px 6px; border-radius: 5px; text-align: center; white-space: nowrap;
   color: color-mix(in srgb, var(--bot-color) calc(45% + var(--active) * 55%), #d9e1df);
   background: color-mix(in srgb, var(--bot-color) calc(4% + var(--active) * 14%), #13110f);
@@ -231,6 +237,74 @@
 .council-room .unrealized .figure-number { color: var(--faint); }
 .council-room .figure-sub { display: block; margin-top: 13px; color: var(--muted); font-size: 13px; }
 .council-room .pnl-rule { margin: 0; padding: 16px 30px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface-2); font-size: 13px; }
+
+/* ---- NOW REVIEWING spotlight ---- */
+.council-room .now-reviewing { border-radius: 16px; padding: 18px 22px 20px; margin-bottom: 22px; overflow: hidden; }
+.council-room .now-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.council-room .now-kicker {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--accent-bright); font-size: 11px; font-weight: 800; letter-spacing: .12em;
+}
+.council-room .now-chain {
+  color: var(--muted); border: 1px solid var(--line-strong); border-radius: 999px;
+  padding: 3px 10px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+}
+.council-room .now-time { margin-left: auto; color: var(--faint); font-size: 11px; }
+.council-room .now-empty-note { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.council-room .now-main { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+.council-room .now-symbol-block { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.council-room .now-symbol { font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; line-height: 1; }
+.council-room .now-decision { margin-top: 0; }
+.council-room .now-fields { display: flex; gap: 26px; flex-wrap: wrap; margin: 0; margin-left: auto; }
+.council-room .now-fields > div { min-width: 0; }
+.council-room .now-fields dt { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+.council-room .now-fields dd { margin: 0; font: 680 17px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.02em; }
+.council-room .now-fields dd.pos { color: #4ade80; }
+.council-room .now-fields dd.neg { color: #ff7d87; }
+
+/* ---- LIVE badge (replaces playback controls) ---- */
+.council-room .live-badge {
+  display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  border: 1px solid rgba(255, 95, 109, .35); border-radius: 999px; padding: 7px 14px;
+  background: rgba(255, 95, 109, .08); color: #ff8a94;
+  font-size: 11px; font-weight: 800; letter-spacing: .12em;
+}
+.council-room .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff5f6d; animation: councilLivePulse 1.6s ease-in-out infinite; }
+@keyframes councilLivePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 95, 109, .55); }
+  50% { box-shadow: 0 0 0 7px rgba(255, 95, 109, 0); }
+}
+
+/* ---- Portfolio + trade log ---- */
+.council-room .folio-panel { border-radius: 14px; overflow: hidden; }
+.council-room .folio-head { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.council-room .folio-stat { padding: 20px 22px; }
+.council-room .folio-stat + .folio-stat { border-left: 1px solid var(--line); }
+.council-room .folio-stat span { display: block; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; }
+.council-room .folio-stat strong { font: 680 22px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.03em; }
+.council-room .folio-table-wrap { overflow-x: auto; }
+.council-room .folio-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+.council-room .folio-table th {
+  text-align: left; padding: 12px 16px; color: var(--faint); font-size: 10px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--line);
+  background: var(--surface-2); white-space: nowrap;
+}
+.council-room .folio-table td { padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.council-room .folio-table tbody tr:last-child td { border-bottom: 0; }
+.council-room .folio-table tbody tr:hover td { background: rgba(255, 255, 255, .015); }
+.council-room .folio-table td strong { font-weight: 700; }
+.council-room .folio-table td small { display: block; color: var(--faint); font-size: 10px; margin-top: 2px; }
+.council-room .folio-table td.dim { color: var(--muted); font-size: 12px; }
+.council-room .folio-table td.pos { color: #4ade80; }
+.council-room .folio-table td.neg { color: #ff7d87; }
+.council-room .folio-table dd.pos, .council-room .pos { color: #4ade80; }
+.council-room .folio-table dd.neg, .council-room .neg { color: #ff7d87; }
+.council-room .folio-empty-note { margin: 0; padding: 22px; color: var(--faint); font-size: 13px; }
+.council-room .empty-panel { border-radius: 14px; padding: 36px 24px; text-align: center; color: var(--faint); font-size: 13px; }
+.council-room .empty-panel p { margin: 0; }
+.council-room .alloc-bar { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
+.council-room .alloc-bar i { display: block; height: 6px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 8px rgba(70, 207, 190, .4); }
+.council-room .alloc-bar em { font-style: normal; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .council-room .chart-panel { border-radius: 14px; overflow: hidden; }
 .council-room .chart-head { padding: 18px 20px 6px; display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
 .council-room .chart-head strong { font-size: 13px; }
@@ -303,6 +377,14 @@
   .council-room .roster { grid-template-columns: 1fr 1fr; }
   .council-room .bot-card { min-height: 128px; padding: 15px; }
   .council-room .stats { grid-template-columns: 1fr 1fr; }
+  .council-room .now-reviewing { padding: 16px; }
+  .council-room .now-main { flex-direction: column; align-items: flex-start; gap: 16px; }
+  .council-room .now-fields { margin-left: 0; gap: 18px; }
+  .council-room .folio-head { grid-template-columns: 1fr 1fr; }
+  .council-room .folio-stat { padding: 16px; }
+  .council-room .folio-stat + .folio-stat { border-left: 0; }
+  .council-room .folio-stat:nth-child(even) { border-left: 1px solid var(--line); }
+  .council-room .folio-stat:nth-child(n+3) { border-top: 1px solid var(--line); }
 }
 @media (max-width: 390px) {
   .council-room .mobile-council { grid-template-columns: 1fr; gap: 12px; }

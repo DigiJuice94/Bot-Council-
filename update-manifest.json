@@ -228,8 +228,6 @@
     "live-gate.ts",
     "paper-wallet.ts",
     "autopilot.ts",
-    "RunnerResearchPanel.tsx",
-    "DiagnosticsPanel.tsx",
     "provider-waterfall.ts",
     "route-feasibility.ts",
     "risk.ts",

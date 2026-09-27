@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "./diagnostics.css";
 import "./dashboard.css";
 import "../components/council-room.css";
 
 export const metadata: Metadata = {
-  title: "Bot War Room V3",
-  description: "Autonomous multi-chain Runner Genome research council with fresh-coin paper trading, Filing Cabinet learning and Code Deciphered graduation.",
+  title: "Bot Council — Live Council Room",
+  description: "Live council session: the eight-bot trading council reviewing coins in real time, with paper portfolio and trade log.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -22,7 +22,7 @@
  *  - speaker scale 1.12 + spotlight, others dimmed to 0.85
  */
 
-import { useEffect, useImperativeHandle, useRef } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { CSSProperties, Ref } from "react";
 import type { CouncilBotVM, ReplaySync, StageReactionKind } from "@/lib/council-room-types";
 
@@ -46,30 +46,49 @@ type Props = {
   ref?: Ref<CouncilStageHandle>;
 };
 
-/* Canonical 8 seats, ported from the concept artifact. NOTE: the artifact
-   placed the two front-row portraits (Trader/Referee) at y:36, overlapping
-   the back row — their nameplates sat at py:73/77 below the table, so the
-   y values were almost certainly a typo for the front row. They are seated
-   in front of the table here (y 66/70), matching their nameplates. */
-const TABLE_SLOTS = [
-  { x: 18, y: 37, px: 17, py: 29 },
-  { x: 35, y: 30, px: 36, py: 17 },
-  { x: 56, y: 30, px: 60, py: 17 },
-  { x: 76, y: 37, px: 81, py: 29 },
-  { x: 84, y: 49, px: 88, py: 52 },
-  { x: 67, y: 66, px: 70, py: 73 },
-  { x: 34, y: 70, px: 43, py: 77 },
-  { x: 14, y: 49, px: 13, py: 53 },
-];
+/* Seat layout — computed in PIXELS from the measured stage size (ResizeObserver).
+   8 seats evenly spaced on an ellipse that always fits inside the stage with
+   padding on all sides; medallion diameter scales with stage width. Because
+   positions derive from getBoundingClientRect(), seats can never be clipped
+   by the container no matter what height the stage ends up with. */
+type SeatGeom = {
+  /** medallion center, px */
+  x: number;
+  y: number;
+  /** nameplate anchor (top-center of the plate), px */
+  px: number;
+  py: number;
+  /** medallion diameter, px */
+  d: number;
+};
 
-function slotFor(i: number, n: number) {
-  if (n <= TABLE_SLOTS.length) return TABLE_SLOTS[i % TABLE_SLOTS.length];
-  // More bots than canonical seats: spread along an ellipse arc.
-  const t = n <= 1 ? 0.5 : i / (n - 1);
-  const ang = Math.PI * (0.06 + 0.88 * t);
-  const x = 50 - 40 * Math.cos(ang);
-  const y = 46 - 17 * Math.sin(ang);
-  return { x, y, px: 50 - 46 * Math.cos(ang), py: y - 9 };
+const PLATE_CLEARANCE = 56; // plate height + gap below a medallion
+const SEAT_PAD_X = 26;
+const SEAT_PAD_TOP = 26;
+
+function computeSeats(w: number, h: number, n: number): SeatGeom[] {
+  const d = Math.round(Math.min(120, Math.max(72, w / 11.5)));
+  const r = d / 2;
+  const cx = w / 2;
+  const cy = h * 0.44;
+  const rx = Math.max(40, w / 2 - r - SEAT_PAD_X);
+  // Fit the ellipse vertically: top medallions clear the top edge, bottom
+  // medallions leave room for their nameplate above the bottom edge.
+  const ry = Math.max(40, Math.min(h * 0.44 - r - SEAT_PAD_TOP, h - cy - r - PLATE_CLEARANCE - 12));
+  const seats: SeatGeom[] = [];
+  for (let i = 0; i < n; i++) {
+    const ang = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    const x = cx + rx * Math.cos(ang);
+    const y = cy + ry * Math.sin(ang);
+    seats.push({ x, y, px: x, py: y + r + 12, d });
+  }
+  return seats;
+}
+
+/** Pixel fallback for the very first paint (nominal 1140x500 stage), replaced
+    by real measurements on mount. */
+function fallbackSeats(n: number): SeatGeom[] {
+  return computeSeats(1140, 500, n);
 }
 
 type ElKey =
@@ -134,6 +153,9 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
   const tailPathRef = useRef<SVGPathElement | null>(null);
   const tailDotRef = useRef<SVGCircleElement | null>(null);
   const statusElRef = useRef<HTMLSpanElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const seatsRef = useRef<SeatGeom[]>([]);
+  const [, setLayoutVersion] = useState(0);
   const botsRef = useRef(bots);
   botsRef.current = bots;
 
@@ -151,19 +173,51 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
     if (!el && (Object.keys(b) as ElKey[]).every((k) => b![k] === null)) map.delete(id);
   };
 
-  /* Build per-bot animation state once the DOM is committed. */
+  /* Build per-bot animation state once the DOM is committed. Seats are
+     measured from the real stage box first, so the ellipse always fits. */
   useEffect(() => {
+    const stage = stageRef.current;
+
+    const measureSeats = (): SeatGeom[] | null => {
+      if (!stage) return null;
+      const r = stage.getBoundingClientRect();
+      if (r.width < 10 || r.height < 10) return null;
+      return computeSeats(r.width, r.height, Math.max(1, botsRef.current.length));
+    };
+
+    const applyLayout = () => {
+      const seats = measureSeats();
+      if (!seats || !stage) return;
+      seatsRef.current = seats;
+      // Medallion diameter as an inherited CSS var — container-relative sizing.
+      stage.style.setProperty("--seat-d", `${seats[0].d}px`);
+      // Keep glance-direction state in sync for the animation loop.
+      const A = animRef.current;
+      if (A) {
+        for (const st of A.states) {
+          const idx = botsRef.current.findIndex((b) => b.id === st.botId);
+          if (idx >= 0 && seats[idx]) st.slotX = seats[idx].x;
+        }
+      }
+      setLayoutVersion((v) => v + 1);
+    };
+
+    // Synchronous first measurement so the initial state build uses real seats.
+    const first = measureSeats();
+    seatsRef.current = first ?? fallbackSeats(Math.max(1, botsRef.current.length));
+    if (stage && first) stage.style.setProperty("--seat-d", `${first[0].d}px`);
+
     const states: CharState[] = [];
     const byId = new Map<string, CharState>();
     botsRef.current.forEach((bot, i) => {
       const bundle = elsRef.current.get(bot.id);
       if (!bundle || !bundle.el) return;
-      const slot = slotFor(i, botsRef.current.length);
+      const seat = seatsRef.current[i % seatsRef.current.length];
       states.push({
         ...bundle,
         botId: bot.id,
         color: bot.color || "#94a3b8",
-        slotX: slot.x,
+        slotX: seat.x,
         active: 0, focus: 1, scaleX: 1, scaleY: 1,
         lookStart: 0, lookDuration: 0, lookAngle: 0,
         nextLook: performance.now() * 0.001 + 4 + Math.random() * 5,
@@ -198,8 +252,13 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
     };
     resizeAmbient();
     window.addEventListener("resize", resizeAmbient, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" && stage
+      ? new ResizeObserver(() => applyLayout())
+      : null;
+    if (ro && stage) ro.observe(stage);
     return () => {
       window.removeEventListener("resize", resizeAmbient);
+      ro?.disconnect();
       animRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,6 +526,13 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
 
   useImperativeHandle(ref, () => ({ tick }));
 
+  // Seats for this render: measured geometry when available, nominal fallback
+  // on the very first paint. Always pixels — never clipped by the container.
+  const seats = seatsRef.current.length
+    ? seatsRef.current
+    : fallbackSeats(Math.max(1, bots.length));
+  const seatAt = (i: number) => seats[i % seats.length];
+
   return (
     <section className="panel hero" aria-labelledby="councilSessionStatus">
       <div className="hero-head">
@@ -479,13 +545,14 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
       <div className="canvas-wrap">
         <div
           className="council-stage"
+          ref={stageRef}
           role="img"
           aria-label="Animated council member portraits seated around a round table"
         >
           <canvas className="ambient-particles" aria-hidden="true" ref={ambientRef} />
           <div className="nib-layer">
             {bots.map((bot, i) => {
-              const slot = slotFor(i, bots.length);
+              const seat = seatAt(i);
               return (
                 <div
                   key={bot.id}
@@ -493,8 +560,8 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
                   data-bot={bot.id}
                   ref={setRef(bot.id, "el")}
                   style={cssVars({
-                    "--x": `${slot.x}%`,
-                    "--y": `${slot.y}%`,
+                    "--x": `${Math.round(seat.x)}px`,
+                    "--y": `${Math.round(seat.y)}px`,
                     "--bot-color": bot.color || "#94a3b8",
                   })}
                 >
@@ -512,8 +579,10 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
           </div>
           <div className="round-table">
             <span className="table-center">{tableLabel}</span>
+          </div>
+          <div className="plate-layer">
             {bots.map((bot, i) => {
-              const slot = slotFor(i, bots.length);
+              const seat = seatAt(i);
               return (
                 <span
                   key={bot.id}
@@ -521,8 +590,8 @@ export default function CouncilStage({ bots, sync, sessionMark, tableLabel, ref 
                   data-bot={bot.id}
                   ref={setRef(bot.id, "plate")}
                   style={cssVars({
-                    "--px": `${slot.px}%`,
-                    "--py": `${slot.py}%`,
+                    "--px": `${Math.round(seat.px)}px`,
+                    "--py": `${Math.round(seat.py)}px`,
                     "--bot-color": bot.color || "#94a3b8",
                   })}
                 >

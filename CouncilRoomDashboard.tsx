@@ -31,8 +31,10 @@ import type {
   CouncilBotVM,
   CouncilRoomData,
   MeetingTurn,
+  PortfolioData,
   ReplaySync,
   StageReactionKind,
+  TradeRow,
 } from "@/lib/council-room-types";
 
 export type CouncilRoomDashboardProps = {
@@ -276,16 +278,13 @@ function EquityChart({
 }
 
 /* ------------------------------------------------------------------ */
-/* CouncilTranscript — meeting replay driven ENTIRELY by               */
+/* CouncilTranscript — LIVE council session feed, driven ENTIRELY by    */
 /* data.meeting.turns. Owns the single rAF loop: it advances the       */
-/* typewriter replay and calls the stage tick() every frame.           */
+/* typewriter feed AND calls the stage tick() every frame. There are   */
+/* no playback controls — the session is a live broadcast: it starts  */
+/* on its own when a session arrives, and a fresh decision starts a    */
+/* fresh live discussion.                                              */
 /* ------------------------------------------------------------------ */
-
-type EngineControls = {
-  play: () => void;
-  pause: () => void;
-  replay: () => void;
-};
 
 function CouncilTranscript({
   meeting,
@@ -304,13 +303,9 @@ function CouncilTranscript({
   const [visible, setVisible] = useState<number[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [doneSet, setDoneSet] = useState<ReadonlySet<number>>(new Set());
-  const [ui, setUi] = useState({ playing: false, finished: false, started: false });
-  const [live, setLive] = useState(false);
-  const [speed, setSpeed] = useState(1);
 
-  const engineRef = useRef<EngineControls | null>(null);
-  const speedRef = useRef(1);
   const reduceRef = useRef(false);
+  const lastKeyRef = useRef("");
   const textRefs = useRef(new Map<number, HTMLSpanElement>());
   const bubbleRefs = useRef(new Map<number, HTMLDivElement>());
   const cursorRefs = useRef(new Map<number, HTMLSpanElement>());
@@ -320,6 +315,11 @@ function CouncilTranscript({
 
   const colorFor = (t: MeetingTurn) => t.color || botById.get(t.botId)?.color || "#94a3b8";
   const portraitFor = (t: MeetingTurn) => t.portrait || botById.get(t.botId)?.portrait || "";
+
+  // Identity of the current session: a new key means a new live discussion.
+  const meetingKey = meeting
+    ? `${meeting.at}|${meeting.symbol}|${meeting.decision}|${turns.length}`
+    : "";
 
   useEffect(() => {
     const s = sync.current;
@@ -343,8 +343,6 @@ function CouncilTranscript({
       setVisible([]);
       setActiveIndex(-1);
       setDoneSet(new Set());
-      setUi({ playing: false, finished: false, started: false });
-      setLive(false);
       if (progressFillRef.current) progressFillRef.current.style.width = "0%";
       if (progressTrackRef.current) {
         progressTrackRef.current.setAttribute("aria-valuenow", "0");
@@ -371,8 +369,6 @@ function CouncilTranscript({
       s.status =
         `Session record — ${turns.length} turn${turns.length === 1 ? "" : "s"}` +
         (meeting?.decision ? ` · ${meeting.decision}` : "");
-      setUi({ playing: false, finished: true, started: true });
-      setLive(false);
       if (progressFillRef.current) progressFillRef.current.style.width = "100%";
       if (progressTrackRef.current) {
         progressTrackRef.current.setAttribute("aria-valuenow", "100");
@@ -472,7 +468,6 @@ function CouncilTranscript({
         `Council in session — ${speakerLabel(t)} speaking` + (symbol ? ` on ${symbol}` : "");
       renderTyped();
       updateProgress();
-      setUi({ playing, finished, started: true });
     };
 
     const closeSession = () => {
@@ -483,7 +478,6 @@ function CouncilTranscript({
       s.activeBotId = null;
       s.currentBubble = null;
       setActiveIndex(-1);
-      setUi({ playing: false, finished: true, started: true });
       s.status =
         "Session closed" +
         (meeting?.decision ? ` — ${symbol ?? "session"}: ${meeting.decision}` : "");
@@ -509,27 +503,13 @@ function CouncilTranscript({
       activateTurn(0);
     };
 
-    engineRef.current = {
-      play() {
-        if (finished) {
-          resetAndStart();
-          return;
-        }
-        if (turnIndex < 0) activateTurn(0);
-        playing = true;
-        s.playing = true;
-        setUi({ playing: true, finished, started: true });
-      },
-      pause() {
-        playing = false;
-        s.playing = false;
-        setUi({ playing: false, finished, started: true });
-      },
-      replay() {
-        resetAndStart();
-      },
-    };
-    setLive(true);
+    // Live broadcast: a fresh session key starts its own live discussion
+    // automatically; the same session keeps flowing across data refreshes.
+    const isNewSession = meetingKey !== lastKeyRef.current;
+    lastKeyRef.current = meetingKey;
+    if (isNewSession) {
+      resetAndStart();
+    }
 
     const loop = (now: number) => {
       if (cancelled) return;
@@ -537,9 +517,8 @@ function CouncilTranscript({
       lastFrame = now;
       if (playing && turnIndex >= 0 && !finished) {
         const t = turns[turnIndex];
-        const sp = speedRef.current;
         if (typed < t.message.length) {
-          charCarry += dt * 36 * sp;
+          charCarry += dt * 36;
           if (charCarry >= 1) {
             typed = Math.min(t.message.length, typed + Math.floor(charCarry));
             charCarry %= 1;
@@ -547,7 +526,7 @@ function CouncilTranscript({
           renderTyped();
         } else {
           if (!turnDone) completeTurn();
-          hold += dt * sp;
+          hold += dt;
           if (hold >= 1.05) {
             if (turnIndex < turns.length - 1) activateTurn(turnIndex + 1);
             else closeSession();
@@ -563,25 +542,18 @@ function CouncilTranscript({
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
-      engineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting, bots]);
 
-  const onSpeedChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const v = parseFloat(e.target.value) || 1;
-    setSpeed(v);
-    speedRef.current = v;
-  };
-
   return (
-    <section className="panel replay" aria-labelledby="replayTitle">
+    <section className="panel replay" aria-labelledby="liveSessionTitle">
       <div className="panel-head">
         <div>
-          <h2 className="section-title" id="replayTitle">Meeting replay</h2>
+          <h2 className="section-title" id="liveSessionTitle">Live council session</h2>
           <p className="section-note">
             {turns.length > 0
-              ? `Recorded council session · ${turns.length} turn${turns.length === 1 ? "" : "s"}` +
+              ? `Live council feed · ${turns.length} turn${turns.length === 1 ? "" : "s"}` +
                 (meeting?.chain ? ` · ${meeting.chain}` : "")
               : "No session recorded"}
           </p>
@@ -591,54 +563,16 @@ function CouncilTranscript({
             </span>
           )}
         </div>
-        <div className="controls" aria-label="Replay controls">
-          <button
-            type="button"
-            className="control"
-            aria-pressed={ui.playing}
-            disabled={!live}
-            onClick={() => engineRef.current?.play()}
-          >
-            Play
-          </button>
-          <button
-            type="button"
-            className="control"
-            aria-pressed={!ui.playing && ui.started && !ui.finished}
-            disabled={!live}
-            onClick={() => engineRef.current?.pause()}
-          >
-            Pause
-          </button>
-          <button
-            type="button"
-            className="control"
-            disabled={!live}
-            onClick={() => engineRef.current?.replay()}
-          >
-            Replay
-          </button>
-          <label>
-            <span className="sr-only">Playback speed</span>
-            <select
-              className="control"
-              aria-label="Playback speed"
-              value={speed}
-              disabled={!live}
-              onChange={onSpeedChange}
-            >
-              <option value={0.5}>0.5×</option>
-              <option value={1}>1×</option>
-              <option value={2}>2×</option>
-            </select>
-          </label>
+        <div className="live-badge" role="status" aria-label="Live council feed">
+          <span className="live-dot" aria-hidden="true" />
+          LIVE
         </div>
       </div>
       <div
         className="progress-track"
         ref={progressTrackRef}
         role="progressbar"
-        aria-label="Meeting replay progress"
+        aria-label="Live session progress"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={0}
@@ -729,6 +663,301 @@ function CouncilTranscript({
             );
           })
         )}
+      </div>
+    </section>
+  );
+}
+
+function formatUsd(v: number, decimals = 2): string {
+  return `$${Math.abs(v).toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}`;
+}
+
+function formatCompactUsd(v: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(v / 1_000).toFixed(1)}K`;
+  return `$${v.toFixed(2)}`;
+}
+
+function formatAge(ageMinutes: number | null): string {
+  if (ageMinutes == null || !Number.isFinite(ageMinutes)) return "—";
+  if (ageMinutes < 60) return `${Math.max(1, Math.round(ageMinutes))}m`;
+  if (ageMinutes < 60 * 24) return `${(ageMinutes / 60).toFixed(1)}h`;
+  return `${(ageMinutes / (60 * 24)).toFixed(1)}d`;
+}
+
+function formatTime(at: string): string {
+  if (!at) return "—";
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* NowReviewingCard — "NOW REVIEWING" spotlight, top of the dashboard. */
+/* The coin the latest council decision is about. Honest empty state.  */
+/* ------------------------------------------------------------------ */
+
+function NowReviewingCard({ now }: { now: CouncilRoomData["nowReviewing"] }) {
+  if (!now) {
+    return (
+      <section className="panel now-reviewing" aria-label="Now reviewing">
+        <span className="now-kicker">
+          <span className="live-dot" aria-hidden="true" />
+          NOW REVIEWING
+        </span>
+        <p className="now-empty-note">No coin under review — the council is scanning the market.</p>
+      </section>
+    );
+  }
+  const change = now.priceChange24h;
+  const changeClass = change == null ? "" : change >= 0 ? "pos" : "neg";
+  return (
+    <section className="panel now-reviewing" aria-label={`Now reviewing ${now.symbol}`}>
+      <div className="now-top">
+        <span className="now-kicker">
+          <span className="live-dot" aria-hidden="true" />
+          NOW REVIEWING
+        </span>
+        {now.chain ? <span className="now-chain">{now.chain}</span> : null}
+        <span className="now-time">{formatTime(now.at)}</span>
+      </div>
+      <div className="now-main">
+        <div className="now-symbol-block">
+          <strong className="now-symbol">{now.symbol}</strong>
+          <span
+            className="vote-badge now-decision"
+            style={{
+              color: VOTE_COLORS[now.decision] ?? "#94a3b8",
+              borderColor: `color-mix(in srgb, ${VOTE_COLORS[now.decision] ?? "#94a3b8"} 45%, transparent)`,
+              background: `color-mix(in srgb, ${VOTE_COLORS[now.decision] ?? "#94a3b8"} 10%, transparent)`,
+            }}
+          >
+            {now.decision}
+            {now.conviction != null ? ` · ${Math.round(now.conviction)}%` : ""}
+          </span>
+        </div>
+        <dl className="now-fields">
+          <div>
+            <dt>Price</dt>
+            <dd>{now.price != null ? formatUsd(now.price, now.price < 1 ? 6 : 2) : "—"}</dd>
+          </div>
+          <div>
+            <dt>24h</dt>
+            <dd className={changeClass}>
+              {change == null ? "—" : `${change >= 0 ? "+" : "−"}${Math.abs(change).toFixed(1)}%`}
+            </dd>
+          </div>
+          <div>
+            <dt>Market cap</dt>
+            <dd>{formatCompactUsd(now.marketCap)}</dd>
+          </div>
+          <div>
+            <dt>Liquidity</dt>
+            <dd>{formatCompactUsd(now.liquidity)}</dd>
+          </div>
+          <div>
+            <dt>Age</dt>
+            <dd>{formatAge(now.ageMinutes)}</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PortfolioSection — cash, equity, open positions + allocation.       */
+/* Restores the old dashboard's portfolio panel in the new language.   */
+/* ------------------------------------------------------------------ */
+
+function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
+  const { cashUsd, equityUsd, openExposureUsd, positions } = portfolio;
+  const hasAny = cashUsd != null || equityUsd != null || positions.length > 0;
+  if (!hasAny) {
+    return (
+      <section className="section" aria-labelledby="portfolioTitle">
+        <div className="section-heading">
+          <div>
+            <h2 id="portfolioTitle">Portfolio</h2>
+          </div>
+          <p>Paper wallet state.</p>
+        </div>
+        <div className="panel empty-panel">
+          <p>No portfolio data yet — the paper wallet hasn't reported.</p>
+        </div>
+      </section>
+    );
+  }
+  const totalPositioned = positions.reduce((n, p) => n + (p.sizeUsd ?? 0), 0);
+  const allocBase = equityUsd && equityUsd > 0 ? equityUsd : totalPositioned;
+  return (
+    <section className="section" aria-labelledby="portfolioTitle">
+      <div className="section-heading">
+        <div>
+          <h2 id="portfolioTitle">Portfolio</h2>
+        </div>
+        <p>Paper wallet · live positions.</p>
+      </div>
+      <div className="panel folio-panel">
+        <div className="folio-head">
+          <div className="folio-stat">
+            <span>Cash</span>
+            <strong>{cashUsd == null ? "—" : formatUsd(cashUsd)}</strong>
+          </div>
+          <div className="folio-stat">
+            <span>Equity</span>
+            <strong>{equityUsd == null ? "—" : formatUsd(equityUsd)}</strong>
+          </div>
+          <div className="folio-stat">
+            <span>Open exposure</span>
+            <strong>{openExposureUsd == null ? "—" : formatUsd(openExposureUsd)}</strong>
+          </div>
+          <div className="folio-stat">
+            <span>Positions</span>
+            <strong>{positions.length}</strong>
+          </div>
+        </div>
+        {positions.length > 0 ? (
+          <div className="folio-table-wrap">
+            <table className="folio-table">
+              <thead>
+                <tr>
+                  <th scope="col">Token</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Entry</th>
+                  <th scope="col">Mark</th>
+                  <th scope="col">uPnL</th>
+                  <th scope="col">Alloc</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((p) => {
+                  const pct = allocBase > 0 && p.sizeUsd != null
+                    ? Math.min(100, (p.sizeUsd / allocBase) * 100)
+                    : null;
+                  const pnlClass = p.pnlUsd == null ? "" : p.pnlUsd >= 0 ? "pos" : "neg";
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <strong>{p.symbol}</strong>
+                        {p.chain ? <small>{p.chain}</small> : null}
+                      </td>
+                      <td>{p.sizeUsd == null ? "—" : formatUsd(p.sizeUsd)}</td>
+                      <td>{p.entryPrice == null ? "—" : formatUsd(p.entryPrice, p.entryPrice < 1 ? 6 : 2)}</td>
+                      <td>{p.markPrice == null ? "—" : formatUsd(p.markPrice, p.markPrice < 1 ? 6 : 2)}</td>
+                      <td className={pnlClass}>
+                        {p.pnlUsd == null ? "—" : formatMoney(p.pnlUsd)}
+                        {p.pnlPct != null ? (
+                          <small> ({p.pnlPct >= 0 ? "+" : "−"}{Math.abs(p.pnlPct).toFixed(1)}%)</small>
+                        ) : null}
+                      </td>
+                      <td>
+                        {pct == null ? (
+                          "—"
+                        ) : (
+                          <span className="alloc-bar" aria-label={`${pct.toFixed(1)} percent of equity`}>
+                            <i style={{ width: `${Math.max(2, pct).toFixed(1)}%` }} />
+                            <em>{pct.toFixed(1)}%</em>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="folio-empty-note">No open positions — 100% cash.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* TradeLogSection — recent paper fills from GET /api/trade-log.       */
+/* ------------------------------------------------------------------ */
+
+const TRADE_LOG_LIMIT = 20;
+
+function TradeLogSection({ trades, total }: { trades: TradeRow[]; total: number | null }) {
+  if (!trades.length) {
+    return (
+      <section className="section" aria-labelledby="tradeLogTitle">
+        <div className="section-heading">
+          <div>
+            <h2 id="tradeLogTitle">Trade log</h2>
+          </div>
+          <p>Recent paper fills.</p>
+        </div>
+        <div className="panel empty-panel">
+          <p>No trades recorded yet.</p>
+        </div>
+      </section>
+    );
+  }
+  const shown = trades.slice(0, TRADE_LOG_LIMIT);
+  return (
+    <section className="section" aria-labelledby="tradeLogTitle">
+      <div className="section-heading">
+        <div>
+          <h2 id="tradeLogTitle">Trade log</h2>
+        </div>
+        <p>
+          Recent paper fills
+          {total != null && total > shown.length ? ` · showing ${shown.length} of ${total}` : ""}.
+        </p>
+      </div>
+      <div className="panel folio-panel">
+        <div className="folio-table-wrap">
+          <table className="folio-table log-table">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Token</th>
+                <th scope="col">Side</th>
+                <th scope="col">Action</th>
+                <th scope="col">Size</th>
+                <th scope="col">Price</th>
+                <th scope="col">P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((t) => {
+                const sideClass = t.side === "BUY" ? "pos" : "neg";
+                const pnlClass = t.pnlUsd == null ? "" : t.pnlUsd >= 0 ? "pos" : "neg";
+                return (
+                  <tr key={t.id}>
+                    <td className="dim">{formatTime(t.at)}</td>
+                    <td>
+                      <strong>{t.symbol}</strong>
+                      {t.chain ? <small>{t.chain}</small> : null}
+                    </td>
+                    <td className={sideClass}>
+                      <strong>{t.side}</strong>
+                    </td>
+                    <td>{t.action}</td>
+                    <td>{t.sizeUsd == null ? "—" : formatUsd(t.sizeUsd)}</td>
+                    <td>{t.price == null ? "—" : formatUsd(t.price, t.price < 1 ? 6 : 2)}</td>
+                    <td className={pnlClass}>{t.pnlUsd == null ? "—" : formatMoney(t.pnlUsd)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
@@ -930,6 +1159,7 @@ export function CouncilRoomDashboardView({
       </header>
 
       <main className="shell">
+        <NowReviewingCard now={d.nowReviewing} />
         <CouncilStage
           bots={d.bots}
           sync={sync}
@@ -943,6 +1173,8 @@ export function CouncilRoomDashboardView({
           sync={sync}
           stageHandle={stageHandle}
         />
+        <PortfolioSection portfolio={d.portfolio} />
+        <TradeLogSection trades={d.trades} total={d.tradesTotal} />
         <PnlSection wallet={d.wallet} />
         {d.equitySeries.length > 0 && (
           <EquityChart

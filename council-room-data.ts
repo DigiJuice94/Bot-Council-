@@ -23,6 +23,10 @@ import type {
   CouncilBotVM,
   CouncilRoomData,
   MeetingTurn,
+  NowReviewing,
+  PortfolioData,
+  PositionRow,
+  TradeRow,
 } from "@/lib/council-room-types";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +49,11 @@ export type CabinetDecision = {
   symbol: string;
   decision: string;
   conviction: number;
+  price?: number;
+  priceChange24h?: number;
+  marketCap?: number;
+  liquidity?: number;
+  ageMinutes?: number;
   council?: CabinetCouncilSummary | null;
 };
 
@@ -313,6 +322,133 @@ export function buildMeetingFromCabinetDecision(d: CabinetDecision): CouncilRoom
 }
 
 // ---------------------------------------------------------------------------
+// NOW REVIEWING spotlight — the coin the latest decision is about.
+// ---------------------------------------------------------------------------
+
+export function buildNowReviewingFromWarRoomResult(result: WarRoomResult): NowReviewing | null {
+  const snapshot: MarketSnapshot | undefined = result?.snapshot;
+  if (!snapshot?.symbol) return null;
+  return {
+    symbol: snapshot.symbol,
+    chain: snapshot.chain,
+    price: num(snapshot.price),
+    priceChange24h: num(snapshot.priceChange24h),
+    marketCap: num(snapshot.marketCap),
+    liquidity: num(snapshot.liquidity),
+    ageMinutes: num(snapshot.ageMinutes),
+    decision: result.decision,
+    conviction: num(result.conviction),
+    at: result.generatedAt,
+  };
+}
+
+export function buildNowReviewingFromCabinetDecision(d: CabinetDecision): NowReviewing | null {
+  if (!d?.symbol) return null;
+  return {
+    symbol: d.symbol,
+    chain: d.chain,
+    price: num(d.price),
+    priceChange24h: num(d.priceChange24h),
+    marketCap: num(d.marketCap),
+    liquidity: num(d.liquidity),
+    ageMinutes: num(d.ageMinutes),
+    decision: d.decision,
+    conviction: num(d.conviction),
+    at: d.at,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Trade log rows (GET /api/trade-log) — paper fills, newest first.
+// ---------------------------------------------------------------------------
+
+type TradeLogRow = {
+  id?: string;
+  createdAt?: string;
+  symbol?: string;
+  chain?: string;
+  side?: "BUY" | "SELL";
+  action?: string;
+  requestedUsd?: number;
+  filledUsd?: number;
+  fillPrice?: number;
+  realizedPnlAfterUsd?: number | null;
+};
+
+function mapTradeRow(row: TradeLogRow, index: number): TradeRow {
+  const side = row.side === "SELL" ? "SELL" : "BUY";
+  return {
+    id: String(row.id ?? `trade-${index}`),
+    at: String(row.createdAt ?? ""),
+    symbol: String(row.symbol ?? "—"),
+    chain: row.chain ? String(row.chain) : undefined,
+    side,
+    action: String(row.action ?? (side === "BUY" ? "ENTRY" : "EXIT")),
+    sizeUsd: num(row.filledUsd ?? row.requestedUsd),
+    price: num(row.fillPrice),
+    pnlUsd: row.realizedPnlAfterUsd == null ? null : num(row.realizedPnlAfterUsd),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio — cash/equity from the paper wallet, positions from the
+// positions endpoint (fallback) or autopilot payload.
+// ---------------------------------------------------------------------------
+
+function mapPositionRow(position: Record<string, unknown>, index: number): PositionRow {
+  const remainingQty = num(position.remainingQuantity);
+  const mark = num(position.markPrice);
+  const cost = num(position.remainingNotionalUsd);
+  const marked =
+    remainingQty != null && mark != null
+      ? Number((Math.max(0, remainingQty) * Math.max(0, mark)).toFixed(2))
+      : null;
+  const sizeUsd = marked ?? cost;
+  // Unrealized P&L = marked value − remaining cost, when the server didn't send one.
+  let pnlUsd = num(position.pnlUsd);
+  if (pnlUsd == null && marked != null && cost != null) {
+    pnlUsd = Number((marked - cost).toFixed(2));
+  }
+  return {
+    id: String(position.id ?? `pos-${index}`),
+    symbol: String(position.symbol ?? "—"),
+    chain: position.chain ? String(position.chain) : undefined,
+    sizeUsd,
+    entryPrice: num(position.entryPrice),
+    markPrice: mark,
+    pnlUsd: num(position.pnlUsd),
+    pnlPct: num(position.pnlPct),
+    openedAt: String(position.openedAt ?? ""),
+  };
+}
+
+function buildPortfolio(
+  walletRaw: Record<string, unknown> | undefined,
+  positions: Array<Record<string, unknown>>,
+): PortfolioData {
+  let openExposureUsd: number | null = num(walletRaw?.openExposureUsd);
+  if (openExposureUsd == null && positions.length) {
+    let sum = 0;
+    let found = false;
+    for (const position of positions) {
+      const remainingQty = num(position.remainingQuantity);
+      const mark = num(position.markPrice);
+      if (remainingQty != null && mark != null) {
+        sum += Math.max(0, remainingQty) * Math.max(0, mark);
+        found = true;
+      }
+    }
+    if (found) openExposureUsd = Number(sum.toFixed(2));
+  }
+  return {
+    cashUsd: num(walletRaw?.cashUsd ?? walletRaw?.cash),
+    equityUsd: num(walletRaw?.equityUsd ?? walletRaw?.equity),
+    openExposureUsd,
+    positions: positions.map(mapPositionRow),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Defensive fetching (client-side). NEVER throws; returns best-effort data.
 // ---------------------------------------------------------------------------
 
@@ -363,6 +499,10 @@ function fmtUsd(value: number | null): string {
 export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
   const empty: CouncilRoomData = {
     meeting: null,
+    nowReviewing: null,
+    trades: [],
+    tradesTotal: null,
+    portfolio: { cashUsd: null, equityUsd: null, openExposureUsd: null, positions: [] },
     bots: [],
     wallet: { equityUsd: null, cashUsd: null, realizedPnlUsd: null, unrealizedPnlUsd: null },
     stats: [],
@@ -383,6 +523,8 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
     const journal = await getJson<JournalPayload>("/api/journal?limit=500");
     // (d) Positions light — fallback position list.
     const positionsRoute = await getJson<Array<Record<string, unknown>> | { positions?: Array<Record<string, unknown>> }>("/api/positions?light=1");
+    // (e) Trade log — recent paper fills for the ledger section.
+    const tradeLog = await getJson<{ rows?: TradeLogRow[]; totalStored?: number }>("/api/trade-log?limit=100");
 
     const walletRaw: Record<string, unknown> | undefined =
       (autopilot?.paperWallet as Record<string, unknown> | undefined) ?? undefined;
@@ -398,16 +540,20 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
     }
 
     // ---- Meeting: (a) recentDecisions[0] preferred, else (b) cabinet decisions[0].
+    // ---- Now reviewing: the coin the latest decision is about.
     let meeting = empty.meeting;
+    let nowReviewing: NowReviewing | null = null;
     let meetingSource = "";
     const latestDecision: WarRoomResult | undefined = autopilot?.recentDecisions?.[0];
     if (latestDecision) {
       meeting = buildMeetingFromWarRoomResult(latestDecision);
+      nowReviewing = buildNowReviewingFromWarRoomResult(latestDecision);
       meetingSource = "live council";
     } else {
       const cabinetDecision = cabinet?.decisions?.[0];
       if (cabinetDecision) {
         meeting = buildMeetingFromCabinetDecision(cabinetDecision);
+        nowReviewing = buildNowReviewingFromCabinetDecision(cabinetDecision);
         meetingSource = "cabinet history";
       }
     }
@@ -493,18 +639,31 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
       if (value != null) equitySeries.push(value);
     }
 
+    // ---- Trade log: newest paper fills first.
+    const tradeRows = Array.isArray(tradeLog?.rows) ? tradeLog.rows : [];
+    const trades: TradeRow[] = tradeRows.map(mapTradeRow);
+    const tradesTotal = num(tradeLog?.totalStored) ?? (trades.length ? trades.length : null);
+
+    // ---- Portfolio: cash/equity + open positions.
+    const portfolio = buildPortfolio(walletRaw, positions);
+
     // ---- Status note.
     const sources: string[] = [];
     if (autopilot) sources.push("autopilot");
     if (cabinet) sources.push("cabinet");
     if (journal) sources.push("journal");
     if (positionsRoute) sources.push("positions");
+    if (tradeLog) sources.push("trade-log");
     const statusNote = sources.length
       ? `Data from ${sources.join(", ")}${meetingSource ? ` · meeting from ${meetingSource}` : ""}.`
       : "All endpoints unavailable — showing empty state.";
 
     return {
       meeting,
+      nowReviewing,
+      trades,
+      tradesTotal,
+      portfolio,
       bots,
       wallet: { equityUsd, cashUsd, realizedPnlUsd, unrealizedPnlUsd },
       stats,
