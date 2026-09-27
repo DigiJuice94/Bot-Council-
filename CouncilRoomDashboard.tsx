@@ -305,7 +305,15 @@ function LiveCouncilGrid({
   meeting: CouncilRoomData["meeting"];
   bots: CouncilBotVM[];
 }) {
-  const turns = meeting?.turns ?? [];
+  // Defensive: a turn without a real message string crashes the typewriter
+  // (t.message.length on undefined). Drop those turns before animating.
+  const turns = useMemo(
+    () =>
+      (meeting?.turns ?? []).filter(
+        (t) => t && typeof t.message === "string" && t.message.length > 0,
+      ),
+    [meeting],
+  );
   const botById = useMemo(() => new Map(bots.map((b) => [b.id, b])), [bots]);
 
   const [visible, setVisible] = useState<number[]>([]);

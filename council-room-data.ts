@@ -157,7 +157,7 @@ function scoreTurn(agent: AgentOpinion): MeetingTurn {
     shortName: agent.shortName,
     color: agent.color,
     portrait,
-    message: `Score ${Math.round(agent.score)} — ${agent.summary}`,
+    message: `Score ${Math.round(agent.score)} — ${agent.summary ?? "no summary filed"}`,
     vote: stanceToVote(agent.stance),
     confidence: asFiniteNumber(agent.score) ?? undefined,
     kind: "score",
@@ -166,6 +166,8 @@ function scoreTurn(agent: AgentOpinion): MeetingTurn {
 
 function challengeTurn(opinion: IndependentEntityOpinion): MeetingTurn | null {
   if (!opinion.changedVote && !opinion.rebuttal) return null;
+  const message = opinion.rebuttal ?? opinion.thesis;
+  if (!message) return null; // never emit a turn with no message — it crashes the typewriter
   const entity = ENTITY_BY_ID.get(opinion.agentId);
   const name = entity?.name ?? opinion.agentName ?? opinion.agentId;
   return {
@@ -174,7 +176,7 @@ function challengeTurn(opinion: IndependentEntityOpinion): MeetingTurn | null {
     shortName: entity?.shortName ?? opinion.agentId.slice(0, 3).toUpperCase(),
     color: entity?.color ?? "#e8e8e8",
     portrait: entity?.portrait ?? DEFAULT_PORTRAIT,
-    message: opinion.rebuttal ?? opinion.thesis,
+    message,
     vote: opinion.vote === "BUY" || opinion.vote === "WATCH" || opinion.vote === "SKIP" ? opinion.vote : undefined,
     confidence: asFiniteNumber(opinion.confidence) ?? undefined,
     kind: "challenge",
@@ -183,7 +185,7 @@ function challengeTurn(opinion: IndependentEntityOpinion): MeetingTurn | null {
 }
 
 function verdictTurn(opinion: IndependentEntityOpinion | undefined): MeetingTurn | null {
-  if (!opinion) return null;
+  if (!opinion || !opinion.thesis) return null; // never emit a turn with no message
   const cio = ENTITY_BY_ID.get("cio")!;
   return {
     botId: "cio",
