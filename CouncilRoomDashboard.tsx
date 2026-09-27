@@ -1188,6 +1188,33 @@ function TradeLogSection({
 /* ------------------------------------------------------------------ */
 
 function PnlSection({ wallet }: { wallet: CouncilRoomData["wallet"] }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const doReset = async () => {
+    setBusy(true);
+    setResetError(null);
+    try {
+      const res = await fetch("/api/paper-wallet/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "RESET" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(data?.error ?? `Reset failed (HTTP ${res.status})`);
+      }
+      window.location.reload();
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "Reset failed.");
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
   return (
     <section className="section" aria-labelledby="pnlTitle">
       <div className="panel">
@@ -1198,7 +1225,48 @@ function PnlSection({ wallet }: { wallet: CouncilRoomData["wallet"] }) {
             </h2>
             <p className="section-note">Realized = closed trades · Unrealized = open marks</p>
           </div>
+          <div className="pnl-actions">
+            {!confirming ? (
+              <button
+                type="button"
+                className="reset-btn"
+                onClick={() => {
+                  setResetError(null);
+                  setConfirming(true);
+                }}
+              >
+                Reset paper wallet
+              </button>
+            ) : (
+              <div className="reset-confirm">
+                <span className="reset-q">
+                  Clear all paper positions &amp; history?
+                </span>
+                <button
+                  type="button"
+                  className="reset-btn danger"
+                  disabled={busy}
+                  onClick={doReset}
+                >
+                  {busy ? "Resetting…" : "Yes, reset"}
+                </button>
+                <button
+                  type="button"
+                  className="reset-btn ghost"
+                  disabled={busy}
+                  onClick={() => setConfirming(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+        {resetError && (
+          <p className="reset-error" role="alert">
+            {resetError}
+          </p>
+        )}
         <div className="pnl-grid">
           <div className="pnl-figure">
             <span className="figure-label">Realized</span>

@@ -1196,6 +1196,76 @@
   color: var(--faint);
 }
 
+/* ------------------------- wallet reset --------------------------- */
+
+.council-room .pnl-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.council-room .reset-btn {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.council-room .reset-btn:hover:not(:disabled) {
+  border-color: #cf3542;
+  color: #cf3542;
+}
+
+.council-room .reset-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.council-room .reset-btn.danger {
+  background: #cf3542;
+  border-color: #cf3542;
+  color: #fff;
+}
+
+.council-room .reset-btn.danger:hover:not(:disabled) {
+  background: #b92c38;
+  border-color: #b92c38;
+  color: #fff;
+}
+
+.council-room .reset-btn.ghost {
+  background: transparent;
+}
+
+.council-room .reset-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.council-room .reset-q {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.council-room .reset-error {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: #cf3542;
+  font-weight: 600;
+}
+
 /* -------------------------------- stats ------------------------------- */
 
 .council-room .stats {

@@ -109,6 +109,7 @@ const mappings = [
   ['route (7).ts', 'app/api/journal/route.ts'],
   ['route (8).ts', 'app/api/paper-reset/route.ts'],
   ['trade-log-route.ts', 'app/api/trade-log/route.ts'],
+  ['paper-wallet-reset-route.ts', 'app/api/paper-wallet/reset/route.ts'],
   ['route (12).ts', 'app/api/cabinets/[kind]/route.ts'],
 ];
 
