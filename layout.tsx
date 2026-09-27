@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./diagnostics.css";
 import "./dashboard.css";
+import "../components/council-room.css";
 
 export const metadata: Metadata = {
   title: "Bot War Room V3",
