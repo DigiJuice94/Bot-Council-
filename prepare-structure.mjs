@@ -40,7 +40,6 @@ const mappings = [
   ['v214.css', 'app/v214.css'],
   ['WarRoomDashboard.tsx', 'components/WarRoomDashboard.tsx'],
   ['CouncilRoomDashboard.tsx', 'components/CouncilRoomDashboard.tsx'],
-  ['council-room-table.tsx', 'components/council-room-table.tsx'],
   ['council-room.css', 'components/council-room.css'],
   ['bot-scout.jpg', 'public/bots/scout.jpg'],
   ['bot-bouncer.jpg', 'public/bots/bouncer.jpg'],
@@ -109,6 +108,8 @@ const mappings = [
   ['route (6).ts', 'app/api/autopilot/route.ts'],
   ['route (7).ts', 'app/api/journal/route.ts'],
   ['route (8).ts', 'app/api/paper-reset/route.ts'],
+  ['trade-log-route.ts', 'app/api/trade-log/route.ts'],
+  ['route (12).ts', 'app/api/cabinets/[kind]/route.ts'],
 ];
 
 let restored = 0;

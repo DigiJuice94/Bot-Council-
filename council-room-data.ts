@@ -404,7 +404,8 @@ function mapPositionRow(position: Record<string, unknown>, index: number): Posit
       ? Number((Math.max(0, remainingQty) * Math.max(0, mark)).toFixed(2))
       : null;
   const sizeUsd = marked ?? cost;
-  // Unrealized P&L = marked value − remaining cost, when the server didn't send one.
+  // Unrealized P&L = marked value − remaining cost. ManagedPosition carries
+  // realizedPnlUsd (for closed legs) but no live uPnL field, so derive it.
   let pnlUsd = num(position.pnlUsd);
   if (pnlUsd == null && marked != null && cost != null) {
     pnlUsd = Number((marked - cost).toFixed(2));
@@ -416,7 +417,7 @@ function mapPositionRow(position: Record<string, unknown>, index: number): Posit
     sizeUsd,
     entryPrice: num(position.entryPrice),
     markPrice: mark,
-    pnlUsd: num(position.pnlUsd),
+    pnlUsd,
     pnlPct: num(position.pnlPct),
     openedAt: String(position.openedAt ?? ""),
   };
@@ -469,6 +470,7 @@ async function getJson<T>(path: string): Promise<T | null> {
 }
 
 type AutopilotPayload = {
+  latestResult?: WarRoomResult | null;
   recentDecisions?: WarRoomResult[];
   paperWallet?: Record<string, unknown>;
   positions?: Array<Record<string, unknown>>;
@@ -539,12 +541,14 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
       else if (pr && Array.isArray(pr.positions)) positions.push(...pr.positions);
     }
 
-    // ---- Meeting: (a) recentDecisions[0] preferred, else (b) cabinet decisions[0].
+    // ---- Meeting: (a) recentDecisions[0] preferred, then latestResult, else
+    // ---- (b) cabinet decisions[0].
     // ---- Now reviewing: the coin the latest decision is about.
     let meeting = empty.meeting;
     let nowReviewing: NowReviewing | null = null;
     let meetingSource = "";
-    const latestDecision: WarRoomResult | undefined = autopilot?.recentDecisions?.[0];
+    const latestDecision: WarRoomResult | undefined =
+      autopilot?.recentDecisions?.[0] ?? autopilot?.latestResult ?? undefined;
     if (latestDecision) {
       meeting = buildMeetingFromWarRoomResult(latestDecision);
       nowReviewing = buildNowReviewingFromWarRoomResult(latestDecision);

@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
+import { ensurePositionGuardianLoop, refreshPositionGuardian } from "@/lib/position-manager";
+import { listManagedPositions } from "@/lib/position-store";
 
 export const dynamic = "force-dynamic";
+
+// GET — position reads. ?light=1 is the dashboard's lightweight path: it
+// returns { positions } without waiting on the heavier guardian refresh, so
+// research/status generation can never hold back visible position updates.
+export async function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("light") === "1") {
+    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
+  }
+  ensurePositionGuardianLoop();
+  const report = await refreshPositionGuardian();
+  return NextResponse.json(report, { headers: { "Cache-Control": "no-store" } });
+}
 
 // V2.12 deliberately disables client/manual paper order injection.
 // The only code path allowed to create a new paper position is the server-side autonomous Council in lib/autopilot.ts.

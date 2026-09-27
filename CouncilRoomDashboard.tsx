@@ -3,37 +3,35 @@
 /**
  * CouncilRoomDashboard.tsx
  *
- * Main Bot War Room council dashboard. This component fetches NOTHING —
- * the data layer supplies everything through props:
+ * Main Bot War Room council dashboard — LIGHT theme edition. The council is
+ * rendered as eight individual live bot cards (portrait, name, role, per-bot
+ * text chat) in a responsive grid; the round-table stage is gone.
+ *
+ * This component fetches NOTHING — the data layer supplies everything through
+ * props:
  *
  *   { data: CouncilRoomData | null; loading: boolean; error?: string | null }
  *
  * Sections:
- *  - hero: animated council stage (council-room-table.tsx)
- *  - meeting replay: transcript driven ENTIRELY by data.meeting.turns
+ *  - now reviewing: the coin the latest decision is about
+ *  - live council session: 8 bot cards, each streaming that bot's own chat
+ *    bubbles in real time (single rAF loop, typewriter feed, LIVE badge —
+ *    no playback controls anywhere)
+ *  - portfolio: cash, equity, open positions + allocation
+ *  - trade log: recent paper fills
  *  - P&L: Realized vs Unrealized (honest labels; null renders as "—")
  *  - equity chart: drawn from data.equitySeries, hidden when empty
- *  - roster: cards from data.bots
  *  - stats strip: data.stats only
- *
- * The single continuous rAF loop lives in CouncilTranscript: it advances the
- * typing replay AND calls the stage's imperative tick() every frame, so all
- * ambient animation (idle bob, talk wiggle, veto shakes, emoji pops, dust
- * particles, speech tail) runs on one loop with delta-time lerped easing.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import CouncilStage, { cssVars } from "./council-room-table";
-import type { CouncilStageHandle } from "./council-room-table";
-import { createReplaySync, EMPTY_DATA } from "@/lib/council-room-types";
+import type { CSSProperties } from "react";
 import { fetchCouncilRoomData } from "@/lib/council-room-data";
 import type {
   CouncilBotVM,
   CouncilRoomData,
   MeetingTurn,
   PortfolioData,
-  ReplaySync,
-  StageReactionKind,
   TradeRow,
 } from "@/lib/council-room-types";
 
@@ -43,22 +41,28 @@ export type CouncilRoomDashboardProps = {
   error?: string | null;
 };
 
+/** Build a style object carrying CSS custom properties. */
+function cssVars(vars: Record<string, string>): CSSProperties {
+  return vars as CSSProperties;
+}
+
+/* Light-theme vote/kind colors: dark enough for body text on white. */
 const VOTE_COLORS: Record<string, string> = {
-  BUY: "#4ade80",
-  WATCH: "#f5c451",
-  SKIP: "#94a3b8",
-  EXIT: "#fb923c",
-  BLOCK: "#ff626e",
-  READY: "#5eead4",
-  REDUCE: "#fb923c",
+  BUY: "#147a4d",
+  WATCH: "#96690f",
+  SKIP: "#5d6d78",
+  EXIT: "#b54a12",
+  BLOCK: "#cf3542",
+  READY: "#0a7d6d",
+  REDUCE: "#b54a12",
 };
 
 const KIND_COLORS: Record<string, string> = {
-  challenge: "#f5c451",
-  vote: "#62dccd",
-  verdict: "#62dccd",
-  veto: "#ff7d87",
-  system: "#778582",
+  challenge: "#96690f",
+  vote: "#0a7d6d",
+  verdict: "#0a7d6d",
+  veto: "#cf3542",
+  system: "#8d9997",
 };
 
 function formatMoney(v: number, decimals = 2): string {
@@ -153,11 +157,10 @@ function EquityChart({
       }
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       const pad = { l: 20, r: 20, t: 18, b: 28 };
       const w = W - pad.l - pad.r;
       const h = H - pad.t - pad.b;
-      ctx.strokeStyle = dark ? "rgba(221,242,238,.08)" : "rgba(18,44,40,.1)";
+      ctx.strokeStyle = "rgba(18,44,40,.1)";
       ctx.lineWidth = 1;
       for (const v of [0, 0.5, 1]) {
         const y = pad.t + h * v;
@@ -179,8 +182,8 @@ function EquityChart({
       const upto = Math.max(1, Math.min(n, Math.floor(n * p)));
 
       const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + h);
-      grad.addColorStop(0, "rgba(70,207,190,.28)");
-      grad.addColorStop(1, "rgba(70,207,190,0)");
+      grad.addColorStop(0, "rgba(13,157,136,.25)");
+      grad.addColorStop(1, "rgba(13,157,136,0)");
       ctx.beginPath();
       ctx.moveTo(xAt(0), yAt(data[0]));
       for (let i = 1; i < upto; i++) ctx.lineTo(xAt(i), yAt(data[i]));
@@ -193,7 +196,7 @@ function EquityChart({
       ctx.beginPath();
       ctx.moveTo(xAt(0), yAt(data[0]));
       for (let i = 1; i < upto; i++) ctx.lineTo(xAt(i), yAt(data[i]));
-      ctx.strokeStyle = "#46cfbe";
+      ctx.strokeStyle = "#0d9d88";
       ctx.lineWidth = 2;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -202,8 +205,8 @@ function EquityChart({
       if (p > 0.98) {
         const ex = xAt(n - 1);
         const ey = yAt(data[n - 1]);
-        ctx.fillStyle = "#46cfbe";
-        ctx.shadowColor = "#46cfbe";
+        ctx.fillStyle = "#0d9d88";
+        ctx.shadowColor = "#0d9d88";
         ctx.shadowBlur = 12;
         ctx.beginPath();
         ctx.arc(ex, ey, 3.5, 0, Math.PI * 2);
@@ -211,7 +214,7 @@ function EquityChart({
         ctx.shadowBlur = 0;
       }
 
-      ctx.fillStyle = dark ? "rgba(163,176,174,.68)" : "rgba(82,98,96,.78)";
+      ctx.fillStyle = "rgba(82,98,96,.85)";
       ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx.textBaseline = "bottom";
       ctx.textAlign = "left";
@@ -278,24 +281,29 @@ function EquityChart({
 }
 
 /* ------------------------------------------------------------------ */
-/* CouncilTranscript — LIVE council session feed, driven ENTIRELY by    */
-/* data.meeting.turns. Owns the single rAF loop: it advances the       */
-/* typewriter feed AND calls the stage tick() every frame. There are   */
-/* no playback controls — the session is a live broadcast: it starts  */
-/* on its own when a session arrives, and a fresh decision starts a    */
-/* fresh live discussion.                                              */
+/* LiveCouncilGrid — eight individual bot cards, each streaming that   */
+/* bot's own live chat at the bottom. Active speaker gets a glowing    */
+/* ring + talking animation; reactions pop over portraits; veto/      */
+/* approval shakes and hops read live from the same turn stream.      */
+/* No playback controls — the feed starts on load and runs live.       */
 /* ------------------------------------------------------------------ */
 
-function CouncilTranscript({
+type BotReaction = {
+  emoji: string | null;
+  kind: "hop" | "nod" | "shake" | null;
+  stamp: number;
+};
+
+const REACTION_CLEAR_MS = 1700;
+const TYPE_CHARS_PER_SECOND = 36;
+const TURN_HOLD_SECONDS = 1.05;
+
+function LiveCouncilGrid({
   meeting,
   bots,
-  sync,
-  stageHandle,
 }: {
   meeting: CouncilRoomData["meeting"];
   bots: CouncilBotVM[];
-  sync: { current: ReplaySync };
-  stageHandle: { current: CouncilStageHandle | null };
 }) {
   const turns = meeting?.turns ?? [];
   const botById = useMemo(() => new Map(bots.map((b) => [b.id, b])), [bots]);
@@ -303,77 +311,81 @@ function CouncilTranscript({
   const [visible, setVisible] = useState<number[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [doneSet, setDoneSet] = useState<ReadonlySet<number>>(new Set());
+  const [reactions, setReactions] = useState<ReadonlyMap<string, BotReaction>>(new Map());
+  const [status, setStatus] = useState("Council idle — awaiting session");
 
   const reduceRef = useRef(false);
   const lastKeyRef = useRef("");
   const textRefs = useRef(new Map<number, HTMLSpanElement>());
-  const bubbleRefs = useRef(new Map<number, HTMLDivElement>());
+  const chatRefs = useRef(new Map<string, HTMLDivElement>());
   const cursorRefs = useRef(new Map<number, HTMLSpanElement>());
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
-  const progressTrackRef = useRef<HTMLDivElement>(null);
+  const progressWrapRef = useRef<HTMLDivElement>(null);
+  const reactionTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
-  const colorFor = (t: MeetingTurn) => t.color || botById.get(t.botId)?.color || "#94a3b8";
-  const portraitFor = (t: MeetingTurn) => t.portrait || botById.get(t.botId)?.portrait || "";
-
-  // Identity of the current session: a new key means a new live discussion.
   const meetingKey = meeting
     ? `${meeting.at}|${meeting.symbol}|${meeting.decision}|${turns.length}`
     : "";
+  const symbol = meeting?.symbol;
+
+  const visibleByBot = useMemo(() => {
+    const byBot = new Map<string, number[]>();
+    for (const i of visible) {
+      const t = turns[i];
+      if (!t) continue;
+      const arr = byBot.get(t.botId) ?? [];
+      arr.push(i);
+      byBot.set(t.botId, arr);
+    }
+    return byBot;
+  }, [visible, turns]);
+
+  const clearReaction = (botId: string, stamp: number) => {
+    setReactions((prev) => {
+      const cur = prev.get(botId);
+      if (!cur || cur.stamp !== stamp) return prev;
+      const next = new Map(prev);
+      next.delete(botId);
+      return next;
+    });
+  };
+
+  const react = (botId: string, emoji: string | null, kind: BotReaction["kind"]) => {
+    const stamp = Date.now() + Math.random();
+    setReactions((prev) => new Map(prev).set(botId, { emoji, kind, stamp }));
+    const timer = setTimeout(() => clearReaction(botId, stamp), REACTION_CLEAR_MS);
+    reactionTimers.current.push(timer);
+  };
 
   useEffect(() => {
-    const s = sync.current;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     reduceRef.current = reduce;
-    s.reduceMotion = reduce;
+    reactionTimers.current.forEach(clearTimeout);
+    reactionTimers.current = [];
 
-    const totalChars = turns.reduce((n, t) => n + t.message.length, 0);
-    const symbol = meeting?.symbol;
     const speakerLabel = (t: MeetingTurn) =>
       t.shortName || botById.get(t.botId)?.shortName || t.botName;
 
-    const idle = () => {
-      s.status = "Council idle — awaiting session";
-      s.turnIndex = -1;
-      s.playing = false;
-      s.finished = false;
-      s.activeBotId = null;
-      s.currentBubble = null;
-      s.reactions.length = 0;
+    if (!turns.length) {
+      setStatus("Council idle — awaiting session");
       setVisible([]);
       setActiveIndex(-1);
       setDoneSet(new Set());
       if (progressFillRef.current) progressFillRef.current.style.width = "0%";
-      if (progressTrackRef.current) {
-        progressTrackRef.current.setAttribute("aria-valuenow", "0");
-      }
-      stageHandle.current?.tick(performance.now(), 0);
-    };
-
-    if (!turns.length) {
-      idle();
+      if (progressWrapRef.current) progressWrapRef.current.setAttribute("aria-valuenow", "0");
       return;
     }
 
-    s.status = `Council ready — reviewing ${symbol ?? meeting?.title ?? "session"}`;
-
     if (reduce) {
-      // Reduced motion: render the full record at once, no animation.
       setVisible(turns.map((_, i) => i));
       setDoneSet(new Set(turns.map((_, i) => i)));
       setActiveIndex(-1);
-      s.turnIndex = turns.length - 1;
-      s.finished = true;
-      s.playing = false;
-      s.activeBotId = null;
-      s.status =
-        `Session record — ${turns.length} turn${turns.length === 1 ? "" : "s"}` +
-        (meeting?.decision ? ` · ${meeting.decision}` : "");
+      setStatus(
+        `Session record — ${turns.length} turns` +
+          (meeting?.decision ? ` · ${meeting.decision}` : ""),
+      );
       if (progressFillRef.current) progressFillRef.current.style.width = "100%";
-      if (progressTrackRef.current) {
-        progressTrackRef.current.setAttribute("aria-valuenow", "100");
-      }
-      requestAnimationFrame(() => stageHandle.current?.tick(performance.now(), 0));
+      if (progressWrapRef.current) progressWrapRef.current.setAttribute("aria-valuenow", "100");
       return;
     }
 
@@ -389,42 +401,20 @@ function CouncilTranscript({
     let raf = 0;
 
     const updateProgress = () => {
-      let chars = 0;
-      for (let i = 0; i < turnIndex; i++) chars += turns[i].message.length;
-      if (turnIndex >= 0 && turnIndex < turns.length) {
-        chars += Math.min(typed, turns[turnIndex].message.length);
-      }
-      const pct = finished ? 100 : totalChars > 0 ? (chars / totalChars) * 100 : 0;
-      if (progressFillRef.current) progressFillRef.current.style.width = `${pct}%`;
-      if (progressTrackRef.current) {
-        progressTrackRef.current.setAttribute("aria-valuenow", String(Math.round(pct)));
-      }
+      const fill = progressFillRef.current;
+      const wrap = progressWrapRef.current;
+      if (!fill || turnIndex < 0 || turnIndex >= turns.length) return;
+      const perTurn = 1 / turns.length;
+      const t = turns[turnIndex];
+      const frac = t.message.length ? typed / t.message.length : 1;
+      const pct = Math.min(100, (turnIndex + frac) * perTurn * 100);
+      fill.style.width = `${pct.toFixed(2)}%`;
+      wrap?.setAttribute("aria-valuenow", String(Math.round(pct)));
     };
 
-    // Reaction vocabulary is derived from the turn's kind/vote/emoji —
-    // never from hardcoded demo text.
-    const queueReactions = (t: MeetingTurn) => {
-      const emo = t.emoji ?? null;
-      const push = (botId: string, emoji: string | null, type?: StageReactionKind) => {
-        s.reactions.push({ botId, emoji, type });
-      };
-      if (t.kind === "veto") {
-        push(t.botId, emo ?? "⛔", "hop");
-        for (const b of bots) if (b.id !== t.botId) push(b.id, null, "shake");
-      } else if (t.kind === "verdict") {
-        if (t.vote === "BUY") {
-          push(t.botId, emo ?? "✅", "hop");
-          bots.forEach((b, i) => {
-            if (b.id !== t.botId) push(b.id, null, i % 2 ? "nod" : "hop");
-          });
-        } else {
-          push(t.botId, emo, "hop");
-        }
-      } else if (t.kind === "challenge") {
-        push(t.botId, emo ?? "⚠️");
-      } else if (emo) {
-        push(t.botId, emo);
-      }
+    const scrollChat = (botId: string) => {
+      const el = chatRefs.current.get(botId);
+      if (el) el.scrollTop = el.scrollHeight;
     };
 
     const renderTyped = () => {
@@ -435,10 +425,7 @@ function CouncilTranscript({
         el.dataset.len = String(len);
         el.textContent = turns[turnIndex].message.slice(0, len);
       }
-      const bub = bubbleRefs.current.get(turnIndex) ?? null;
-      if (bub && s.currentBubble !== bub) s.currentBubble = bub;
-      const scroller = scrollerRef.current;
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      scrollChat(turns[turnIndex].botId);
       updateProgress();
     };
 
@@ -450,22 +437,42 @@ function CouncilTranscript({
       setDoneSet((prev) => new Set(prev).add(done));
     };
 
+    const queueReactions = (t: MeetingTurn) => {
+      const emo = t.emoji ?? null;
+      if (t.kind === "veto") {
+        // Executor veto: speaker pops ⛔ and hops; every bot shakes in protest.
+        react(t.botId, emo ?? "⛔", "hop");
+        for (const b of bots) if (b.id !== t.botId) react(b.id, null, "shake");
+      } else if (t.kind === "verdict") {
+        if (t.vote === "BUY") {
+          // Approval: speaker hops with ✅; the room nods/hops along.
+          react(t.botId, emo ?? "✅", "hop");
+          bots.forEach((b, i) => {
+            if (b.id !== t.botId) react(b.id, null, i % 2 ? "nod" : "hop");
+          });
+        } else {
+          react(t.botId, emo, "hop");
+        }
+      } else if (t.kind === "challenge") {
+        react(t.botId, emo ?? "💬", null);
+      } else if (emo) {
+        react(t.botId, emo, null);
+      }
+    };
+
     const activateTurn = (index: number) => {
       turnIndex = index;
-      s.turnIndex = index;
       typed = 0;
       charCarry = 0;
       hold = 0;
       turnDone = false;
       const t = turns[index];
-      s.activeBotId = t.botId;
-      s.currentBubble = null;
-      s.playing = playing;
       setVisible((prev) => (prev.includes(index) ? prev : [...prev, index]));
       setActiveIndex(index);
       queueReactions(t);
-      s.status =
-        `Council in session — ${speakerLabel(t)} speaking` + (symbol ? ` on ${symbol}` : "");
+      setStatus(
+        `Council in session — ${speakerLabel(t)} speaking${symbol ? ` on ${symbol}` : ""}`,
+      );
       renderTyped();
       updateProgress();
     };
@@ -473,23 +480,20 @@ function CouncilTranscript({
     const closeSession = () => {
       playing = false;
       finished = true;
-      s.playing = false;
-      s.finished = true;
-      s.activeBotId = null;
-      s.currentBubble = null;
       setActiveIndex(-1);
-      s.status =
+      setStatus(
         "Session closed" +
-        (meeting?.decision ? ` — ${symbol ?? "session"}: ${meeting.decision}` : "");
+          (meeting?.decision ? ` — ${symbol ?? "session"}: ${meeting.decision}` : ""),
+      );
       updateProgress();
     };
 
     const resetAndStart = () => {
       textRefs.current.clear();
-      bubbleRefs.current.clear();
       cursorRefs.current.clear();
       setVisible([]);
       setDoneSet(new Set());
+      setReactions(new Map());
       turnIndex = -1;
       typed = 0;
       charCarry = 0;
@@ -497,17 +501,11 @@ function CouncilTranscript({
       turnDone = false;
       finished = false;
       playing = true;
-      s.finished = false;
-      s.playing = true;
-      s.reactions.length = 0;
       activateTurn(0);
     };
 
-    // Live broadcast: a fresh session key starts its own live discussion
-    // automatically; the same session keeps flowing across data refreshes.
-    const isNewSession = meetingKey !== lastKeyRef.current;
-    lastKeyRef.current = meetingKey;
-    if (isNewSession) {
+    if (meetingKey !== lastKeyRef.current) {
+      lastKeyRef.current = meetingKey;
       resetAndStart();
     }
 
@@ -518,7 +516,7 @@ function CouncilTranscript({
       if (playing && turnIndex >= 0 && !finished) {
         const t = turns[turnIndex];
         if (typed < t.message.length) {
-          charCarry += dt * 36;
+          charCarry += dt * TYPE_CHARS_PER_SECOND;
           if (charCarry >= 1) {
             typed = Math.min(t.message.length, typed + Math.floor(charCarry));
             charCarry %= 1;
@@ -527,156 +525,229 @@ function CouncilTranscript({
         } else {
           if (!turnDone) completeTurn();
           hold += dt;
-          if (hold >= 1.05) {
+          if (hold >= TURN_HOLD_SECONDS) {
             if (turnIndex < turns.length - 1) activateTurn(turnIndex + 1);
             else closeSession();
           }
         }
       }
-      // The single rAF loop also drives the stage animation.
-      stageHandle.current?.tick(now, dt);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      reactionTimers.current.forEach(clearTimeout);
+      reactionTimers.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting, bots]);
 
+  const activeBotId =
+    activeIndex >= 0 && turns[activeIndex] ? turns[activeIndex].botId : null;
+
   return (
-    <section className="panel replay" aria-labelledby="liveSessionTitle">
-      <div className="panel-head">
-        <div>
-          <h2 className="section-title" id="liveSessionTitle">Live council session</h2>
-          <p className="section-note">
-            {turns.length > 0
-              ? `Live council feed · ${turns.length} turn${turns.length === 1 ? "" : "s"}` +
-                (meeting?.chain ? ` · ${meeting.chain}` : "")
-              : "No session recorded"}
-          </p>
-          {meeting && turns.length > 0 && (
-            <span className="decision-pill">
-              {meeting.decision} · conviction {Math.round(meeting.conviction)}%
-            </span>
-          )}
+    <section className="section" aria-labelledby="liveSessionTitle">
+      <div className="panel council-live">
+        <div className="panel-head">
+          <div>
+            <h2 className="section-title" id="liveSessionTitle">
+              Live council session
+            </h2>
+            <p className="section-note">{status}</p>
+            {meeting && turns.length > 0 && (
+              <span className="decision-pill">
+                {meeting.decision} · conviction {Math.round(meeting.conviction)}%
+              </span>
+            )}
+          </div>
+          <div
+            className="live-badge"
+            role="status"
+            aria-label="Live council feed — messages stream in automatically"
+          >
+            <span className="live-dot" aria-hidden="true" />
+            LIVE
+          </div>
         </div>
-        <div className="live-badge" role="status" aria-label="Live council feed">
-          <span className="live-dot" aria-hidden="true" />
-          LIVE
+        <div
+          className="progress-track"
+          ref={progressWrapRef}
+          role="progressbar"
+          aria-label="Live session progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={0}
+        >
+          <div className="progress-fill" ref={progressFillRef} />
         </div>
-      </div>
-      <div
-        className="progress-track"
-        ref={progressTrackRef}
-        role="progressbar"
-        aria-label="Live session progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={0}
-      >
-        <div className="progress-fill" ref={progressFillRef} />
-      </div>
-      <div className="transcript" ref={scrollerRef} aria-live="polite">
         {turns.length === 0 ? (
           <div className="empty-state">
-            No council decisions yet — the bots are watching the market.
+            No session recorded — the council is between decisions.
           </div>
         ) : (
-          visible.map((i) => {
-            const t = turns[i];
-            if (!t) return null;
-            const color = colorFor(t);
-            const done = doneSet.has(i) || reduceRef.current;
-            const isActive = i === activeIndex;
-            const portrait = portraitFor(t);
-            return (
-              <article
-                key={`${meeting?.at ?? "meeting"}-${i}-${t.botId}`}
-                className={
-                  `bubble-row${isActive ? " active entering" : ""}` +
-                  (t.kind !== "score" ? " system" : "")
-                }
-                style={cssVars({ "--bot-color": color })}
-              >
-                <div className="avatar" aria-hidden="true">
-                  {portrait ? <img src={portrait} alt="" draggable={false} /> : null}
-                </div>
-                <div
-                  className="bubble"
-                  ref={(el) => {
-                    if (el) bubbleRefs.current.set(i, el);
-                    else bubbleRefs.current.delete(i);
-                  }}
+          <div className="council-grid" aria-live="polite">
+            {bots.map((b) => {
+              const speaking = b.id === activeBotId;
+              const r = reactions.get(b.id);
+              const botTurns = (visibleByBot.get(b.id) ?? []).slice(-40);
+              const voteLine = b.latestVote
+                ? `${b.latestVote}${
+                    b.latestConfidence != null ? ` · ${b.latestConfidence}%` : ""
+                  }`
+                : "—";
+              const animClass =
+                r?.kind === "shake"
+                  ? " council-shake"
+                  : r?.kind === "hop"
+                    ? " council-hop"
+                    : r?.kind === "nod"
+                      ? " council-nod"
+                      : "";
+              return (
+                <article
+                  key={b.id}
+                  className={`council-card${speaking ? " speaking" : ""}`}
+                  style={cssVars({ "--bot-color": b.color || "#94a3b8" })}
+                  aria-label={`${b.name}, ${b.role}${speaking ? " — speaking now" : ""}`}
                 >
-                  <div className="bubble-meta">
-                    <span className="name-chip">{t.botName}</span>
-                    {t.vote && (
-                      <span
-                        className="vote-badge"
-                        style={{
-                          color: VOTE_COLORS[t.vote] ?? "#94a3b8",
-                          borderColor: `color-mix(in srgb, ${VOTE_COLORS[t.vote] ?? "#94a3b8"} 45%, transparent)`,
-                          background: `color-mix(in srgb, ${VOTE_COLORS[t.vote] ?? "#94a3b8"} 10%, transparent)`,
-                        }}
-                      >
-                        {t.vote}
-                      </span>
-                    )}
-                    {t.confidence != null && (
-                      <span className="score-chip">{t.confidence}%</span>
-                    )}
-                    {t.kind !== "score" && (
-                      <span
-                        className="kind-chip"
-                        style={{ color: KIND_COLORS[t.kind] ?? "#778582" }}
-                      >
-                        {t.kind}
+                  <div className="council-card-head">
+                    <div
+                      className={`council-portrait${speaking ? " talking" : ""}${animClass}`}
+                      key={r ? `${b.id}-${r.stamp}` : b.id}
+                    >
+                      {r?.emoji ? (
+                        <span className="reaction-pop" aria-hidden="true">
+                          {r.emoji}
+                        </span>
+                      ) : null}
+                      {b.portrait ? (
+                        <img
+                          src={b.portrait}
+                          alt={`${b.name}, ${b.role}`}
+                          draggable={false}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="council-card-id">
+                      <strong>{b.name}</strong>
+                      <span>{b.role}</span>
+                    </div>
+                    <span className={`mini-live${b.status === "LIVE" ? "" : " idle"}`}>
+                      <i aria-hidden="true" />
+                      {b.status}
+                    </span>
+                  </div>
+                  <div className={`council-card-stat${b.latestVote ? "" : " dim"}`}>
+                    {voteLine}
+                    {speaking && (
+                      <span className="speaking-tag" aria-hidden="true">
+                        speaking…
                       </span>
                     )}
                   </div>
-                  <p>
-                    <span
-                      className="typed-text"
-                      ref={(el) => {
-                        if (el) textRefs.current.set(i, el);
-                        else textRefs.current.delete(i);
-                      }}
-                    >
-                      {done ? t.message : ""}
-                    </span>
-                    {isActive && !done && (
-                      <span
-                        className="cursor"
-                        aria-hidden="true"
-                        ref={(el) => {
-                          if (el) cursorRefs.current.set(i, el);
-                          else cursorRefs.current.delete(i);
-                        }}
-                      />
+                  <div
+                    className="council-card-chat"
+                    ref={(el) => {
+                      if (el) chatRefs.current.set(b.id, el);
+                      else chatRefs.current.delete(b.id);
+                    }}
+                  >
+                    {botTurns.length === 0 ? (
+                      <p className="council-card-idle">
+                        Waiting for this bot&apos;s analysis.
+                      </p>
+                    ) : (
+                      botTurns.map((i) => {
+                        const t = turns[i];
+                        const done = doneSet.has(i) || reduceRef.current;
+                        const isActive = i === activeIndex;
+                        const voteColor = t.vote
+                          ? (VOTE_COLORS[t.vote] ?? "#5d6d78")
+                          : null;
+                        const kindColor =
+                          t.kind !== "score"
+                            ? (KIND_COLORS[t.kind] ?? "#8d9997")
+                            : null;
+                        return (
+                          <div
+                            key={`${meeting?.at ?? "m"}-${i}`}
+                            className={`mini-bubble${
+                              isActive ? " active" : ""
+                            }${t.kind !== "score" ? " system" : ""}`}
+                          >
+                            <div className="mini-bubble-meta">
+                              {t.vote && (
+                                <span
+                                  className="vote-badge"
+                                  style={cssVars({
+                                    "--vote-color": voteColor ?? "#5d6d78",
+                                  })}
+                                >
+                                  {t.vote}
+                                </span>
+                              )}
+                              {t.confidence != null && (
+                                <span className="score-chip">{t.confidence}%</span>
+                              )}
+                              {t.kind !== "score" && (
+                                <span
+                                  className="kind-chip"
+                                  style={cssVars({
+                                    "--kind-color": kindColor ?? "#8d9997",
+                                  })}
+                                >
+                                  {t.kind}
+                                </span>
+                              )}
+                            </div>
+                            <p>
+                              <span
+                                className="typed-text"
+                                ref={(el) => {
+                                  if (el) textRefs.current.set(i, el);
+                                  else textRefs.current.delete(i);
+                                }}
+                              >
+                                {done ? t.message : ""}
+                              </span>
+                              {isActive && !done && (
+                                <span
+                                  className="cursor"
+                                  aria-hidden="true"
+                                  ref={(el) => {
+                                    if (el) cursorRefs.current.set(i, el);
+                                    else cursorRefs.current.delete(i);
+                                  }}
+                                />
+                              )}
+                            </p>
+                          </div>
+                        );
+                      })
                     )}
-                  </p>
-                </div>
-              </article>
-            );
-          })
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         )}
       </div>
     </section>
   );
 }
 
-function formatUsd(v: number, decimals = 2): string {
-  return `$${Math.abs(v).toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  })}`;
+/* ------------------------------------------------------------------ */
+/* Now reviewing — the coin the latest decision is about.              */
+/* ------------------------------------------------------------------ */
+
+function formatUsd(v: number | null, decimals = 2): string {
+  if (v == null) return "—";
+  return `$${v.toLocaleString("en-US", { maximumFractionDigits: decimals })}`;
 }
 
 function formatCompactUsd(v: number | null): string {
-  if (v == null || !Number.isFinite(v)) return "—";
+  if (v == null) return "—";
   const abs = Math.abs(v);
   if (abs >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
@@ -685,17 +756,18 @@ function formatCompactUsd(v: number | null): string {
 }
 
 function formatAge(ageMinutes: number | null): string {
-  if (ageMinutes == null || !Number.isFinite(ageMinutes)) return "—";
-  if (ageMinutes < 60) return `${Math.max(1, Math.round(ageMinutes))}m`;
-  if (ageMinutes < 60 * 24) return `${(ageMinutes / 60).toFixed(1)}h`;
-  return `${(ageMinutes / (60 * 24)).toFixed(1)}d`;
+  if (ageMinutes == null) return "—";
+  if (ageMinutes < 60) return `${Math.round(ageMinutes)}m`;
+  const h = Math.floor(ageMinutes / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
 }
 
-function formatTime(at: string): string {
-  if (!at) return "—";
-  const d = new Date(at);
+function formatTime(iso: string): string {
+  const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
+  return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -703,174 +775,145 @@ function formatTime(at: string): string {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* NowReviewingCard — "NOW REVIEWING" spotlight, top of the dashboard. */
-/* The coin the latest council decision is about. Honest empty state.  */
-/* ------------------------------------------------------------------ */
-
 function NowReviewingCard({ now }: { now: CouncilRoomData["nowReviewing"] }) {
   if (!now) {
     return (
-      <section className="panel now-reviewing" aria-label="Now reviewing">
-        <span className="now-kicker">
-          <span className="live-dot" aria-hidden="true" />
-          NOW REVIEWING
-        </span>
-        <p className="now-empty-note">No coin under review — the council is scanning the market.</p>
+      <section className="section" aria-labelledby="nowTitle">
+        <div className="panel now-reviewing">
+          <div className="now-kicker">
+            <span className="live-dot" aria-hidden="true" />
+            Now reviewing
+          </div>
+          <p className="now-empty-note">
+            No coin under review — the council has not issued a decision yet.
+          </p>
+        </div>
       </section>
     );
   }
-  const change = now.priceChange24h;
-  const changeClass = change == null ? "" : change >= 0 ? "pos" : "neg";
+  const chg = now.priceChange24h ?? null;
   return (
-    <section className="panel now-reviewing" aria-label={`Now reviewing ${now.symbol}`}>
-      <div className="now-top">
-        <span className="now-kicker">
+    <section className="section" aria-labelledby="nowTitle">
+      <div className="panel now-reviewing">
+        <div className="now-kicker">
           <span className="live-dot" aria-hidden="true" />
-          NOW REVIEWING
-        </span>
-        {now.chain ? <span className="now-chain">{now.chain}</span> : null}
-        <span className="now-time">{formatTime(now.at)}</span>
-      </div>
-      <div className="now-main">
-        <div className="now-symbol-block">
-          <strong className="now-symbol">{now.symbol}</strong>
-          <span
-            className="vote-badge now-decision"
-            style={{
-              color: VOTE_COLORS[now.decision] ?? "#94a3b8",
-              borderColor: `color-mix(in srgb, ${VOTE_COLORS[now.decision] ?? "#94a3b8"} 45%, transparent)`,
-              background: `color-mix(in srgb, ${VOTE_COLORS[now.decision] ?? "#94a3b8"} 10%, transparent)`,
-            }}
-          >
-            {now.decision}
-            {now.conviction != null ? ` · ${Math.round(now.conviction)}%` : ""}
-          </span>
+          Now reviewing
         </div>
-        <dl className="now-fields">
-          <div>
-            <dt>Price</dt>
-            <dd>{now.price != null ? formatUsd(now.price, now.price < 1 ? 6 : 2) : "—"}</dd>
+        <div className="now-top">
+          <span className="now-chain">{now.chain ?? "—"}</span>
+          {now.at ? <span className="now-time">{formatTime(now.at)}</span> : null}
+        </div>
+        <div className="now-main">
+          <div className="now-symbol-block">
+            <span className="now-symbol">{now.symbol}</span>
+            <span className="now-decision">{now.decision}</span>
           </div>
-          <div>
-            <dt>24h</dt>
-            <dd className={changeClass}>
-              {change == null ? "—" : `${change >= 0 ? "+" : "−"}${Math.abs(change).toFixed(1)}%`}
-            </dd>
+          <div className="now-fields">
+            <div>
+              <span>Price</span>
+              <strong>{formatUsd(now.price, 6)}</strong>
+            </div>
+            <div>
+              <span>24h</span>
+              <strong className={chg == null ? "" : chg >= 0 ? "pos" : "neg"}>
+                {chg == null ? "—" : `${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%`}
+              </strong>
+            </div>
+            <div>
+              <span>Mkt cap</span>
+              <strong>{formatCompactUsd(now.marketCap)}</strong>
+            </div>
+            <div>
+              <span>Liquidity</span>
+              <strong>{formatCompactUsd(now.liquidity)}</strong>
+            </div>
+            <div>
+              <span>Age</span>
+              <strong>{formatAge(now.ageMinutes)}</strong>
+            </div>
+            <div>
+              <span>Conviction</span>
+              <strong>{now.conviction != null ? `${Math.round(now.conviction)}%` : "—"}</strong>
+            </div>
           </div>
-          <div>
-            <dt>Market cap</dt>
-            <dd>{formatCompactUsd(now.marketCap)}</dd>
-          </div>
-          <div>
-            <dt>Liquidity</dt>
-            <dd>{formatCompactUsd(now.liquidity)}</dd>
-          </div>
-          <div>
-            <dt>Age</dt>
-            <dd>{formatAge(now.ageMinutes)}</dd>
-          </div>
-        </dl>
+        </div>
       </div>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* PortfolioSection — cash, equity, open positions + allocation.       */
-/* Restores the old dashboard's portfolio panel in the new language.   */
+/* Portfolio — cash/equity, allocation bar, open positions table.      */
 /* ------------------------------------------------------------------ */
 
 function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
-  const { cashUsd, equityUsd, openExposureUsd, positions } = portfolio;
-  const hasAny = cashUsd != null || equityUsd != null || positions.length > 0;
-  if (!hasAny) {
-    return (
-      <section className="section" aria-labelledby="portfolioTitle">
-        <div className="section-heading">
-          <div>
-            <h2 id="portfolioTitle">Portfolio</h2>
-          </div>
-          <p>Paper wallet state.</p>
-        </div>
-        <div className="panel empty-panel">
-          <p>No portfolio data yet — the paper wallet hasn't reported.</p>
-        </div>
-      </section>
-    );
-  }
-  const totalPositioned = positions.reduce((n, p) => n + (p.sizeUsd ?? 0), 0);
-  const allocBase = equityUsd && equityUsd > 0 ? equityUsd : totalPositioned;
+  const positions = portfolio.positions ?? [];
+  const total = positions.reduce((sum, p) => sum + (p.sizeUsd ?? 0), 0);
+
   return (
-    <section className="section" aria-labelledby="portfolioTitle">
-      <div className="section-heading">
-        <div>
-          <h2 id="portfolioTitle">Portfolio</h2>
-        </div>
-        <p>Paper wallet · live positions.</p>
-      </div>
+    <section className="section" aria-labelledby="folioTitle">
       <div className="panel folio-panel">
         <div className="folio-head">
-          <div className="folio-stat">
-            <span>Cash</span>
-            <strong>{cashUsd == null ? "—" : formatUsd(cashUsd)}</strong>
-          </div>
-          <div className="folio-stat">
-            <span>Equity</span>
-            <strong>{equityUsd == null ? "—" : formatUsd(equityUsd)}</strong>
-          </div>
-          <div className="folio-stat">
-            <span>Open exposure</span>
-            <strong>{openExposureUsd == null ? "—" : formatUsd(openExposureUsd)}</strong>
-          </div>
-          <div className="folio-stat">
-            <span>Positions</span>
-            <strong>{positions.length}</strong>
+          <h2 className="section-title" id="folioTitle">
+            Portfolio
+          </h2>
+          <div className="folio-stats">
+            <div className="folio-stat">
+              <span>Cash</span>
+              <strong>{formatUsd(portfolio.cashUsd)}</strong>
+            </div>
+            <div className="folio-stat">
+              <span>Equity</span>
+              <strong>{formatUsd(portfolio.equityUsd)}</strong>
+            </div>
+            <div className="folio-stat">
+              <span>Open exposure</span>
+              <strong>{formatUsd(portfolio.openExposureUsd)}</strong>
+            </div>
           </div>
         </div>
-        {positions.length > 0 ? (
+        {positions.length === 0 ? (
+          <div className="empty-panel">
+            <p className="folio-empty-note">No open positions.</p>
+          </div>
+        ) : (
           <div className="folio-table-wrap">
             <table className="folio-table">
               <thead>
                 <tr>
-                  <th scope="col">Token</th>
+                  <th scope="col">Asset</th>
+                  <th scope="col">Chain</th>
                   <th scope="col">Size</th>
                   <th scope="col">Entry</th>
                   <th scope="col">Mark</th>
                   <th scope="col">uPnL</th>
-                  <th scope="col">Alloc</th>
+                  <th scope="col">uPnL %</th>
                 </tr>
               </thead>
               <tbody>
                 {positions.map((p) => {
-                  const pct = allocBase > 0 && p.sizeUsd != null
-                    ? Math.min(100, (p.sizeUsd / allocBase) * 100)
-                    : null;
-                  const pnlClass = p.pnlUsd == null ? "" : p.pnlUsd >= 0 ? "pos" : "neg";
+                  const alloc = total > 0 && p.sizeUsd != null ? (p.sizeUsd / total) * 100 : 0;
+                  const pnl = p.pnlUsd;
+                  const pnlPct = p.pnlPct;
                   return (
                     <tr key={p.id}>
                       <td>
                         <strong>{p.symbol}</strong>
-                        {p.chain ? <small>{p.chain}</small> : null}
+                        <span className="alloc-bar" aria-hidden="true">
+                          <i style={{ width: `${Math.min(100, alloc).toFixed(1)}%` }} />
+                        </span>
                       </td>
-                      <td>{p.sizeUsd == null ? "—" : formatUsd(p.sizeUsd)}</td>
-                      <td>{p.entryPrice == null ? "—" : formatUsd(p.entryPrice, p.entryPrice < 1 ? 6 : 2)}</td>
-                      <td>{p.markPrice == null ? "—" : formatUsd(p.markPrice, p.markPrice < 1 ? 6 : 2)}</td>
-                      <td className={pnlClass}>
-                        {p.pnlUsd == null ? "—" : formatMoney(p.pnlUsd)}
-                        {p.pnlPct != null ? (
-                          <small> ({p.pnlPct >= 0 ? "+" : "−"}{Math.abs(p.pnlPct).toFixed(1)}%)</small>
-                        ) : null}
+                      <td className="dim">{p.chain ?? "—"}</td>
+                      <td>{formatUsd(p.sizeUsd)}</td>
+                      <td className="dim">{formatUsd(p.entryPrice, 6)}</td>
+                      <td className="dim">{formatUsd(p.markPrice, 6)}</td>
+                      <td className={pnl == null ? "dim" : pnl >= 0 ? "pos" : "neg"}>
+                        {pnl == null ? "—" : formatMoney(pnl)}
                       </td>
-                      <td>
-                        {pct == null ? (
-                          "—"
-                        ) : (
-                          <span className="alloc-bar" aria-label={`${pct.toFixed(1)} percent of equity`}>
-                            <i style={{ width: `${Math.max(2, pct).toFixed(1)}%` }} />
-                            <em>{pct.toFixed(1)}%</em>
-                          </span>
-                        )}
+                      <td className={pnlPct == null ? "dim" : pnlPct >= 0 ? "pos" : "neg"}>
+                        {pnlPct == null
+                          ? "—"
+                          : `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`}
                       </td>
                     </tr>
                   );
@@ -878,8 +921,6 @@ function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
               </tbody>
             </table>
           </div>
-        ) : (
-          <p className="folio-empty-note">No open positions — 100% cash.</p>
         )}
       </div>
     </section>
@@ -887,187 +928,129 @@ function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* TradeLogSection — recent paper fills from GET /api/trade-log.       */
+/* Trade log — recent paper fills, newest first.                       */
 /* ------------------------------------------------------------------ */
 
-const TRADE_LOG_LIMIT = 20;
-
-function TradeLogSection({ trades, total }: { trades: TradeRow[]; total: number | null }) {
-  if (!trades.length) {
-    return (
-      <section className="section" aria-labelledby="tradeLogTitle">
-        <div className="section-heading">
-          <div>
-            <h2 id="tradeLogTitle">Trade log</h2>
-          </div>
-          <p>Recent paper fills.</p>
-        </div>
-        <div className="panel empty-panel">
-          <p>No trades recorded yet.</p>
-        </div>
-      </section>
-    );
-  }
-  const shown = trades.slice(0, TRADE_LOG_LIMIT);
+function TradeLogSection({
+  trades,
+  tradesTotal,
+}: {
+  trades: TradeRow[];
+  tradesTotal: number | null;
+}) {
   return (
-    <section className="section" aria-labelledby="tradeLogTitle">
-      <div className="section-heading">
-        <div>
-          <h2 id="tradeLogTitle">Trade log</h2>
+    <section className="section" aria-labelledby="logTitle">
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2 className="section-title" id="logTitle">
+              Trade log
+            </h2>
+            <p className="section-note">
+              {tradesTotal != null
+                ? `${tradesTotal} recorded fill${tradesTotal === 1 ? "" : "s"}`
+                : "Recent paper fills"}
+            </p>
+          </div>
         </div>
-        <p>
-          Recent paper fills
-          {total != null && total > shown.length ? ` · showing ${shown.length} of ${total}` : ""}.
-        </p>
-      </div>
-      <div className="panel folio-panel">
-        <div className="folio-table-wrap">
-          <table className="folio-table log-table">
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">Token</th>
-                <th scope="col">Side</th>
-                <th scope="col">Action</th>
-                <th scope="col">Size</th>
-                <th scope="col">Price</th>
-                <th scope="col">P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((t) => {
-                const sideClass = t.side === "BUY" ? "pos" : "neg";
-                const pnlClass = t.pnlUsd == null ? "" : t.pnlUsd >= 0 ? "pos" : "neg";
-                return (
+        {trades.length === 0 ? (
+          <div className="empty-panel">
+            <p className="folio-empty-note">No trades recorded yet.</p>
+          </div>
+        ) : (
+          <div className="folio-table-wrap">
+            <table className="log-table">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Asset</th>
+                  <th scope="col">Side</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Price</th>
+                  <th scope="col">PnL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => (
                   <tr key={t.id}>
-                    <td className="dim">{formatTime(t.at)}</td>
+                    <td className="dim">{t.at ? formatTime(t.at) : "—"}</td>
                     <td>
                       <strong>{t.symbol}</strong>
-                      {t.chain ? <small>{t.chain}</small> : null}
+                      {t.chain ? <span className="dim"> · {t.chain}</span> : null}
                     </td>
-                    <td className={sideClass}>
-                      <strong>{t.side}</strong>
+                    <td className={t.side === "BUY" ? "pos" : "neg"}>{t.side}</td>
+                    <td className="dim">{t.action}</td>
+                    <td>{formatUsd(t.sizeUsd)}</td>
+                    <td className="dim">{formatUsd(t.price, 6)}</td>
+                    <td className={t.pnlUsd == null ? "dim" : t.pnlUsd >= 0 ? "pos" : "neg"}>
+                      {t.pnlUsd == null ? "—" : formatMoney(t.pnlUsd)}
                     </td>
-                    <td>{t.action}</td>
-                    <td>{t.sizeUsd == null ? "—" : formatUsd(t.sizeUsd)}</td>
-                    <td>{t.price == null ? "—" : formatUsd(t.price, t.price < 1 ? 6 : 2)}</td>
-                    <td className={pnlClass}>{t.pnlUsd == null ? "—" : formatMoney(t.pnlUsd)}</td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* P&L — Realized vs Unrealized. Null renders as "—", never invented.  */
+/* P&L — Realized vs Unrealized, explicitly labeled.                   */
 /* ------------------------------------------------------------------ */
 
 function PnlSection({ wallet }: { wallet: CouncilRoomData["wallet"] }) {
-  const { realizedPnlUsd, unrealizedPnlUsd } = wallet;
   return (
     <section className="section" aria-labelledby="pnlTitle">
-      <div className="section-heading">
-        <div>
-          <h2 id="pnlTitle">Realized vs unrealized P&amp;L</h2>
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2 className="section-title" id="pnlTitle">
+              Paper P&amp;L
+            </h2>
+            <p className="section-note">Realized = closed trades · Unrealized = open marks</p>
+          </div>
         </div>
-        <p>Only settled fills count as profit.</p>
-      </div>
-      <div className="panel" style={{ borderRadius: 14, overflow: "hidden" }}>
         <div className="pnl-grid">
           <div className="pnl-figure">
-            <span className="figure-label">REALIZED</span>
-            <strong className="figure-number">
-              {realizedPnlUsd == null ? "—" : <CountUp value={realizedPnlUsd} />}
-            </strong>
-            <span className="figure-sub">settled paper fills · counted</span>
+            <span className="figure-label">Realized</span>
+            <span className="figure-number">
+              {wallet.realizedPnlUsd == null ? "—" : <CountUp value={wallet.realizedPnlUsd} />}
+            </span>
+            <span className="figure-sub">Paper trading</span>
           </div>
+          <hr className="pnl-rule" />
           <div className="pnl-figure unrealized">
-            <span className="figure-label">UNREALIZED</span>
-            <strong className="figure-number">
-              {unrealizedPnlUsd == null ? "—" : <CountUp value={unrealizedPnlUsd} />}
-            </strong>
-            <span className="figure-sub">open exposure · moves with the market</span>
+            <span className="figure-label">Unrealized</span>
+            <span className="figure-number">
+              {wallet.unrealizedPnlUsd == null ? "—" : <CountUp value={wallet.unrealizedPnlUsd} />}
+            </span>
+            <span className="figure-sub">Open marks</span>
           </div>
         </div>
-        <p className="pnl-rule">Unrealized P&amp;L is tracked, never banked.</p>
       </div>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Roster — one card per bot from data.bots.                           */
+/* Stats strip.                                                        */
 /* ------------------------------------------------------------------ */
 
-function RosterSection({ bots }: { bots: CouncilBotVM[] }) {
-  return (
-    <section className="section" aria-labelledby="rosterTitle">
-      <div className="section-heading">
-        <div>
-          <h2 id="rosterTitle">Council roster</h2>
-        </div>
-        <p>
-          {bots.length} specialist{bots.length === 1 ? "" : "s"}, one fail-closed decision.
-        </p>
-      </div>
-      <div className="roster">
-        {bots.map((b) => {
-          const live = b.status === "LIVE";
-          const vote = b.latestVote
-            ? `${b.latestVote}${b.latestConfidence != null ? ` · ${b.latestConfidence}%` : ""}`
-            : "—";
-          return (
-            <article
-              key={b.id}
-              className="bot-card"
-              style={cssVars({ "--bot-color": b.color || "#94a3b8" })}
-              title={b.mission || undefined}
-            >
-              <div className="bot-card-top">
-                <div className="bot-name">
-                  {b.portrait ? (
-                    <img className="bot-thumb" src={b.portrait} alt="" draggable={false} />
-                  ) : null}
-                  <span>{b.name}</span>
-                </div>
-                <span className={`mini-live${live ? "" : " idle"}`}>
-                  <i aria-hidden="true" />
-                  {b.status}
-                </span>
-              </div>
-              <div className="bot-role">{b.role}</div>
-              <div className={`bot-score${b.latestVote ? "" : " dim"}`}>{vote}</div>
-            </article>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Stats strip — data.stats only, no invented figures.                 */
-/* ------------------------------------------------------------------ */
-
-function StatsSection({ stats }: { stats: { label: string; value: string }[] }) {
+function StatsSection({ stats }: { stats: CouncilRoomData["stats"] }) {
+  if (stats.length === 0) return null;
   return (
     <section className="section" aria-labelledby="statsTitle">
-      <div className="section-heading">
-        <div>
-          <h2 id="statsTitle">Evidence base</h2>
-        </div>
-        <p>What the current record actually supports.</p>
-      </div>
-      <div className="panel stats">
-        {stats.map((s, i) => (
-          <div key={i} className="stat">
-            <strong>{s.value}</strong>
-            <span>{s.label}</span>
+      <h2 className="section-title sr-only" id="statsTitle">
+        Council statistics
+      </h2>
+      <div className="stats">
+        {stats.map((s) => (
+          <div key={s.label} className="stat">
+            <span className="stat-label">{s.label}</span>
+            <span className="stat-value">{s.value}</span>
           </div>
         ))}
       </div>
@@ -1076,165 +1059,163 @@ function StatsSection({ stats }: { stats: { label: string; value: string }[] }) 
 }
 
 /* ------------------------------------------------------------------ */
-/* Loading + error states                                              */
+/* Loading / error states.                                             */
 /* ------------------------------------------------------------------ */
 
 function LoadingSkeleton() {
   return (
-    <div className="council-room" aria-busy="true" aria-label="Loading council room">
-      <header className="shell topbar">
+    <div className="shell" aria-busy="true" aria-label="Loading council room">
+      <header className="topbar">
         <div className="identity">
-          <h1>Bot War Room</h1>
-          <p>Council session companion · paper trading</p>
-        </div>
-        <div className="statuses" aria-label="Environment status">
-          <span className="pill">PAPER ONLY</span>
-        </div>
-      </header>
-      <main className="shell">
-        <div className="skel" style={{ height: 560, borderRadius: 20 }} aria-hidden="true" />
-        <div className="skel" style={{ height: 320, borderRadius: 12, marginTop: 12 }} aria-hidden="true" />
-        <div className="skel" style={{ height: 240, borderRadius: 14, marginTop: 54 }} aria-hidden="true" />
-        <div className="skel" style={{ height: 200, borderRadius: 14, marginTop: 54 }} aria-hidden="true" />
-      </main>
-    </div>
-  );
-}
-
-function ErrorState({ message }: { message: string }) {
-  return (
-    <div className="council-room">
-      <header className="shell topbar">
-        <div className="identity">
-          <h1>Bot War Room</h1>
-          <p>Council session companion · paper trading</p>
-        </div>
-      </header>
-      <main className="shell">
-        <div className="panel error-panel" role="alert">
-          <h2>Couldn&apos;t load the council room</h2>
-          <p>{message || "Something went wrong while fetching council data."}</p>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Main component                                                      */
-/* ------------------------------------------------------------------ */
-
-export function CouncilRoomDashboardView({
-  data,
-  loading,
-  error,
-}: CouncilRoomDashboardProps) {
-  const sync = useRef<ReplaySync>(createReplaySync());
-  const stageHandle = useRef<CouncilStageHandle | null>(null);
-
-  if (loading) return <LoadingSkeleton />;
-  if (error) return <ErrorState message={error} />;
-
-  const d: CouncilRoomData = data ?? EMPTY_DATA;
-  const meeting = d.meeting;
-  const symbol = meeting?.symbol;
-  const sessionMark = `SESSION / ${symbol ?? "—"}`;
-  const tableLabel = symbol ? `${symbol} / COUNCIL` : "COUNCIL";
-
-  return (
-    <div className="council-room">
-      <header className="shell topbar">
-        <div className="identity">
-          <h1>Bot War Room</h1>
-          <p>Council session companion · paper trading</p>
-        </div>
-        <div className="statuses" aria-label="Environment status">
-          <span className="pill">PAPER ONLY</span>
           <span className="live-label">
             <span className="dot" aria-hidden="true" />
             LIVE
           </span>
-          {d.statusNote ? <span className="status-note">{d.statusNote}</span> : null}
+          <div>
+            <h1>Bot War Room</h1>
+            <p className="status-note">Warming up the council…</p>
+          </div>
         </div>
       </header>
-
-      <main className="shell">
-        <NowReviewingCard now={d.nowReviewing} />
-        <CouncilStage
-          bots={d.bots}
-          sync={sync}
-          ref={stageHandle}
-          sessionMark={sessionMark}
-          tableLabel={tableLabel}
-        />
-        <CouncilTranscript
-          meeting={meeting}
-          bots={d.bots}
-          sync={sync}
-          stageHandle={stageHandle}
-        />
-        <PortfolioSection portfolio={d.portfolio} />
-        <TradeLogSection trades={d.trades} total={d.tradesTotal} />
-        <PnlSection wallet={d.wallet} />
-        {d.equitySeries.length > 0 && (
-          <EquityChart
-            series={d.equitySeries}
-            equityUsd={d.wallet.equityUsd}
-            cashUsd={d.wallet.cashUsd}
-          />
-        )}
-        {d.bots.length > 0 && <RosterSection bots={d.bots} />}
-        {d.stats.length > 0 && <StatsSection stats={d.stats} />}
+      <main className="main">
+        <div className="skel" style={{ height: 120 }} />
+        <div className="skel" style={{ height: 420 }} />
+        <div className="skel" style={{ height: 260 }} />
       </main>
+    </div>
+  );
+}
 
-      <footer className="shell">
-        Bot War Room council companion · Paper trading only — nothing here implies
-        profitability.
-      </footer>
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="shell">
+      <header className="topbar">
+        <div className="identity">
+          <div>
+            <h1>Bot War Room</h1>
+            <p className="status-note">Council session companion · paper trading</p>
+          </div>
+        </div>
+      </header>
+      <main className="main">
+        <div className="panel error-panel" role="alert">
+          <h2 className="section-title">Couldn&apos;t reach the council</h2>
+          <p className="section-note">{message}</p>
+          <button type="button" className="retry" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Self-loading default export (used by app/page.tsx)                   */
-/* Fetches live War Room state on mount; the view above stays pure.     */
+/* Main view + self-loading default export.                            */
 /* ------------------------------------------------------------------ */
+
+function CouncilRoomDashboardView({
+  data,
+  loading,
+  error,
+  onRetry,
+}: CouncilRoomDashboardProps & { onRetry: () => void }) {
+  if (loading) return <LoadingSkeleton />;
+  if (error || !data) {
+    return <ErrorState message={error ?? "Unknown error"} onRetry={onRetry} />;
+  }
+
+  return (
+    <div className="shell">
+      <header className="topbar">
+        <div className="identity">
+          <div>
+            <h1>Bot War Room</h1>
+            <p className="status-note">Council session companion · paper trading</p>
+          </div>
+          <span className="pill">PAPER ONLY</span>
+        </div>
+        <div className="statuses">
+          <span className="live-label">
+            <span className="dot" aria-hidden="true" />
+            LIVE
+          </span>
+        </div>
+      </header>
+
+      <main className="main">
+        <NowReviewingCard now={data.nowReviewing} />
+        <LiveCouncilGrid meeting={data.meeting} bots={data.bots} />
+        <PortfolioSection portfolio={data.portfolio} />
+        <TradeLogSection trades={data.trades} tradesTotal={data.tradesTotal} />
+        <PnlSection wallet={data.wallet} />
+        {data.equitySeries.length > 0 && (
+          <EquityChart
+            series={data.equitySeries}
+            equityUsd={data.wallet.equityUsd}
+            cashUsd={data.wallet.cashUsd}
+          />
+        )}
+        <StatsSection stats={data.stats} />
+        <footer>
+          <p className="section-note">
+            Council Room · {data.statusNote}
+            <br />
+            Frontend only — it never sends orders. Paper trading only.
+          </p>
+        </footer>
+      </main>
+    </div>
+  );
+}
 
 export default function CouncilRoomDashboard() {
   const [data, setData] = useState<CouncilRoomData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let inFlight = false;
+
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const result = await fetchCouncilRoomData();
         if (!cancelled) {
           setData(result);
+          setError(null);
           setLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load council data.");
+          setError(err instanceof Error ? err.message : "Unknown error");
           setLoading(false);
         }
+      } finally {
+        inFlight = false;
       }
-    })();
-    // Refresh on a gentle interval so the room stays live without hammering APIs.
-    const timer = setInterval(async () => {
-      try {
-        const result = await fetchCouncilRoomData();
-        if (!cancelled) setData(result);
-      } catch {
-        /* keep last good data on refresh failure */
-      }
-    }, 60_000);
+      if (!cancelled) timer = setTimeout(load, 60_000);
+    };
+
+    load();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [retryKey]);
 
-  return <CouncilRoomDashboardView data={data} loading={loading} error={error} />;
+  return (
+    <div className="council-room">
+      <CouncilRoomDashboardView
+        data={data}
+        loading={loading}
+        error={error}
+        onRetry={() => setRetryKey((k) => k + 1)}
+      />
+    </div>
+  );
 }
