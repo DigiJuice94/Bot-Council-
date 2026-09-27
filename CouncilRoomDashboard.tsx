@@ -31,7 +31,6 @@ import type {
   CouncilBotVM,
   CouncilRoomData,
   MeetingTurn,
-  PortfolioData,
   PositionRow,
   TradeRow,
 } from "@/lib/council-room-types";
@@ -137,6 +136,31 @@ function EquityChart({
   const seriesRef = useRef(series);
   seriesRef.current = series;
 
+  const stats = useMemo(() => {
+    if (series.length === 0) return null;
+    const start = series[0];
+    let high = start;
+    let low = start;
+    let hiIdx = 0;
+    let loIdx = 0;
+    for (let i = 1; i < series.length; i++) {
+      if (series[i] > high) {
+        high = series[i];
+        hiIdx = i;
+      }
+      if (series[i] < low) {
+        low = series[i];
+        loIdx = i;
+      }
+    }
+    const end = series[series.length - 1];
+    const change = end - start;
+    const changePct = start !== 0 ? (change / Math.abs(start)) * 100 : null;
+    return { start, end, high, low, hiIdx, loIdx, change, changePct };
+  }, [series]);
+  const statsRef = useRef(stats);
+  statsRef.current = stats;
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -146,6 +170,7 @@ function EquityChart({
 
     const draw = (p: number) => {
       const data = seriesRef.current;
+      const st = statsRef.current;
       const r = canvas.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const W = Math.max(1, r.width);
@@ -158,32 +183,55 @@ function EquityChart({
       }
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      const pad = { l: 20, r: 20, t: 18, b: 28 };
+      const pad = { l: 12, r: 58, t: 20, b: 26 };
       const w = W - pad.l - pad.r;
       const h = H - pad.t - pad.b;
-      ctx.strokeStyle = "rgba(18,44,40,.1)";
-      ctx.lineWidth = 1;
-      for (const v of [0, 0.5, 1]) {
-        const y = pad.t + h * v;
-        ctx.beginPath();
-        ctx.moveTo(pad.l, y);
-        ctx.lineTo(W - pad.r, y);
-        ctx.stroke();
-      }
-      if (data.length === 0 || w <= 0 || h <= 0) return;
-      let min = Math.min(...data);
-      let max = Math.max(...data);
+      if (data.length === 0 || w <= 0 || h <= 0 || !st) return;
+      let min = st.low;
+      let max = st.high;
       if (min === max) {
         min -= 1;
         max += 1;
       }
+      const span = max - min;
+      min -= span * 0.08;
+      max += span * 0.08;
       const n = data.length;
       const xAt = (i: number) => pad.l + (n === 1 ? w / 2 : (i / (n - 1)) * w);
       const yAt = (v: number) => pad.t + h * (1 - (v - min) / (max - min));
       const upto = Math.max(1, Math.min(n, Math.floor(n * p)));
 
+      // Gridlines with value labels.
+      ctx.strokeStyle = "rgba(18,44,40,.08)";
+      ctx.fillStyle = "rgba(120,134,131,.95)";
+      ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.lineWidth = 1;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      const ticks = 4;
+      for (let t = 0; t <= ticks; t++) {
+        const v = min + ((max - min) * t) / ticks;
+        const y = yAt(v);
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(W - pad.r + 6, y);
+        ctx.stroke();
+        ctx.fillText(formatMoney(v), W - pad.r + 10, y);
+      }
+
+      // Dashed session-start reference line.
+      const sy = yAt(st.start);
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(18,44,40,.28)";
+      ctx.beginPath();
+      ctx.moveTo(pad.l, sy);
+      ctx.lineTo(W - pad.r + 6, sy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Area fill.
       const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + h);
-      grad.addColorStop(0, "rgba(13,157,136,.25)");
+      grad.addColorStop(0, "rgba(13,157,136,.28)");
       grad.addColorStop(1, "rgba(13,157,136,0)");
       ctx.beginPath();
       ctx.moveTo(xAt(0), yAt(data[0]));
@@ -194,35 +242,43 @@ function EquityChart({
       ctx.fillStyle = grad;
       ctx.fill();
 
+      // Line.
       ctx.beginPath();
       ctx.moveTo(xAt(0), yAt(data[0]));
       for (let i = 1; i < upto; i++) ctx.lineTo(xAt(i), yAt(data[i]));
       ctx.strokeStyle = "#0d9d88";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.25;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.stroke();
 
-      if (p > 0.98) {
+      if (p > 0.97) {
+        const mark = (idx: number, v: number, color: string) => {
+          const x = xAt(idx);
+          const y = yAt(v);
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "rgba(90,104,101,.95)";
+          const leftSide = idx <= n * 0.7;
+          ctx.textAlign = leftSide ? "left" : "right";
+          ctx.fillText(formatMoney(v), leftSide ? x + 8 : x - 8, y - 9);
+        };
+        if (st.hiIdx !== st.loIdx) {
+          mark(st.hiIdx, st.high, "#0d9d88");
+          mark(st.loIdx, st.low, "#cf3542");
+        }
+        // Live end dot.
         const ex = xAt(n - 1);
         const ey = yAt(data[n - 1]);
         ctx.fillStyle = "#0d9d88";
         ctx.shadowColor = "#0d9d88";
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 14;
         ctx.beginPath();
-        ctx.arc(ex, ey, 3.5, 0, Math.PI * 2);
+        ctx.arc(ex, ey, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
-      }
-
-      ctx.fillStyle = "rgba(82,98,96,.85)";
-      ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.textBaseline = "bottom";
-      ctx.textAlign = "left";
-      ctx.fillText(formatMoney(data[0]), pad.l, pad.t + h - 4);
-      if (p > 0.92) {
-        ctx.textAlign = "right";
-        ctx.fillText(formatMoney(data[n - 1]), W - pad.r, yAt(data[n - 1]) - 8);
       }
     };
 
@@ -259,27 +315,67 @@ function EquityChart({
     };
   }, []);
 
+  if (!stats) return null;
+  const up = stats.change >= 0;
+
   return (
     <section className="section" aria-labelledby="chartTitle">
       <div className="panel chart-panel">
         <div className="chart-head">
-          <strong id="chartTitle">Paper equity</strong>
-          <span>{equityUsd == null ? "—" : formatMoney(equityUsd)}</span>
+          <div>
+            <h2 className="section-title" id="chartTitle">
+              Paper equity
+            </h2>
+            <p className="section-note">
+              Live equity path · {series.length} point
+              {series.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="eq-head-right">
+            <span className="eq-equity">
+              {equityUsd == null ? "—" : formatMoney(equityUsd)}
+            </span>
+            <span className={`eq-change${up ? " pos" : " neg"}`}>
+              {up ? "\u25B2" : "\u25BC"} {formatMoney(stats.change)}
+              {stats.changePct != null
+                ? ` (${up ? "+" : ""}${stats.changePct.toFixed(2)}%)`
+                : ""}
+            </span>
+          </div>
         </div>
-        <div className="chart-wrap">
+        <div className="eq-stats">
+          <div className="eq-stat">
+            <span>Session start</span>
+            <b>{formatMoney(stats.start)}</b>
+          </div>
+          <div className="eq-stat">
+            <span>Session high</span>
+            <b className="pos">{formatMoney(stats.high)}</b>
+          </div>
+          <div className="eq-stat">
+            <span>Session low</span>
+            <b className="neg">{formatMoney(stats.low)}</b>
+          </div>
+          <div className="eq-stat">
+            <span>Cash</span>
+            <b>{cashUsd == null ? "—" : formatMoney(cashUsd)}</b>
+          </div>
+        </div>
+        <div className="chart-wrap chart-wrap-tall">
           <canvas
             ref={canvasRef}
             aria-label={`Paper equity path, ${series.length} points`}
           />
         </div>
         <p className="chart-caption">
-          {`Paper equity path · ${series.length} point${series.length === 1 ? "" : "s"}`}
-          {cashUsd != null ? ` · cash ${formatMoney(cashUsd)}` : ""}
+          Dashed line marks the session start · dots mark the session high and
+          low
         </p>
       </div>
     </section>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /* LiveCouncilGrid — eight individual bot cards, each streaming that   */
@@ -926,89 +1022,6 @@ function NowReviewingCard({ now }: { now: CouncilRoomData["nowReviewing"] }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Portfolio — cash/equity, allocation bar, open positions table.      */
-/* ------------------------------------------------------------------ */
-
-function PortfolioSection({ portfolio }: { portfolio: PortfolioData }) {
-  const positions = portfolio.positions ?? [];
-  const total = positions.reduce((sum, p) => sum + (p.sizeUsd ?? 0), 0);
-
-  return (
-    <section className="section" aria-labelledby="folioTitle">
-      <div className="panel folio-panel">
-        <div className="folio-head">
-          <h2 className="section-title" id="folioTitle">
-            Portfolio
-          </h2>
-          <div className="folio-stats">
-            <div className="folio-stat">
-              <span>Cash</span>
-              <strong>{formatUsd(portfolio.cashUsd)}</strong>
-            </div>
-            <div className="folio-stat">
-              <span>Equity</span>
-              <strong>{formatUsd(portfolio.equityUsd)}</strong>
-            </div>
-            <div className="folio-stat">
-              <span>Open exposure</span>
-              <strong>{formatUsd(portfolio.openExposureUsd)}</strong>
-            </div>
-          </div>
-        </div>
-        {positions.length === 0 ? (
-          <div className="empty-panel">
-            <p className="folio-empty-note">No open positions.</p>
-          </div>
-        ) : (
-          <div className="folio-table-wrap">
-            <table className="folio-table">
-              <thead>
-                <tr>
-                  <th scope="col">Asset</th>
-                  <th scope="col">Chain</th>
-                  <th scope="col">Size</th>
-                  <th scope="col">Entry</th>
-                  <th scope="col">Mark</th>
-                  <th scope="col">uPnL</th>
-                  <th scope="col">uPnL %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((p) => {
-                  const alloc = total > 0 && p.sizeUsd != null ? (p.sizeUsd / total) * 100 : 0;
-                  const pnl = p.pnlUsd;
-                  const pnlPct = p.pnlPct;
-                  return (
-                    <tr key={p.id}>
-                      <td>
-                        <strong>{p.symbol}</strong>
-                        <span className="alloc-bar" aria-hidden="true">
-                          <i style={{ width: `${Math.min(100, alloc).toFixed(1)}%` }} />
-                        </span>
-                      </td>
-                      <td className="dim">{p.chain ?? "—"}</td>
-                      <td>{formatUsd(p.sizeUsd)}</td>
-                      <td className="dim">{formatUsd(p.entryPrice, 6)}</td>
-                      <td className="dim">{formatUsd(p.markPrice, 6)}</td>
-                      <td className={pnl == null ? "dim" : pnl >= 0 ? "pos" : "neg"}>
-                        {pnl == null ? "—" : formatMoney(pnl)}
-                      </td>
-                      <td className={pnlPct == null ? "dim" : pnlPct >= 0 ? "pos" : "neg"}>
-                        {pnlPct == null
-                          ? "—"
-                          : `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
 
 /** Adaptive price formatting for tiny meme-coin prices. */
 function formatPrice(v: number | null): string {
@@ -1024,7 +1037,9 @@ function formatPrice(v: number | null): string {
 /* ------------------------------------------------------------------ */
 
 function HoldingsSection({ positions }: { positions: PositionRow[] }) {
-  const list = positions ?? [];
+  const list = (positions ?? []).filter(
+    (p) => p.sizeUsd == null || p.sizeUsd > 0
+  );
   return (
     <section className="section" aria-labelledby="holdingsTitle">
       <div className="panel holdings-panel">
@@ -1320,11 +1335,10 @@ function CouncilRoomDashboardView({
           meeting={data.meeting}
           bots={data.bots}
           wallet={data.wallet}
-          openPositions={data.portfolio.positions.length}
+          openPositions={data.portfolio.positions.filter(
+            (p) => p.sizeUsd == null || p.sizeUsd > 0
+          ).length}
         />
-        <PortfolioSection portfolio={data.portfolio} />
-        <HoldingsSection positions={data.portfolio.positions} />
-        <PnlSection wallet={data.wallet} />
         {data.equitySeries.length > 0 && (
           <EquityChart
             series={data.equitySeries}
@@ -1332,6 +1346,8 @@ function CouncilRoomDashboardView({
             cashUsd={data.wallet.cashUsd}
           />
         )}
+        <HoldingsSection positions={data.portfolio.positions} />
+        <PnlSection wallet={data.wallet} />
         <TradeLogSection trades={data.trades} tradesTotal={data.tradesTotal} />
         <StatsSection stats={data.stats} />
         <footer>

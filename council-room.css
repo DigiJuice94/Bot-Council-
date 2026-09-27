@@ -402,6 +402,14 @@
   .council-room .holdings-grid {
     grid-template-columns: 1fr;
   }
+
+  .council-room .eq-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .council-room .eq-equity {
+    font-size: 22px;
+  }
 }
 
 .council-room .empty-panel {
@@ -1073,9 +1081,9 @@
 .council-room .chart-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .council-room .chart-head strong {
@@ -1090,12 +1098,90 @@
   font-variant-numeric: tabular-nums;
 }
 
+.council-room .eq-head-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.council-room .eq-equity {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.council-room .eq-change {
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.council-room .eq-change.pos {
+  background: rgba(13, 157, 136, 0.12);
+  color: #0a7d6d;
+}
+
+.council-room .eq-change.neg {
+  background: rgba(207, 53, 66, 0.09);
+  color: #cf3542;
+}
+
+.council-room .eq-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.council-room .eq-stat {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.council-room .eq-stat span {
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.council-room .eq-stat b {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.council-room .eq-stat b.pos {
+  color: #0a7d6d;
+}
+
+.council-room .eq-stat b.neg {
+  color: #cf3542;
+}
+
 .council-room .chart-wrap {
   height: 190px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
+}
+
+.council-room .chart-wrap-tall {
+  height: 300px;
 }
 
 .council-room .chart-wrap canvas {
