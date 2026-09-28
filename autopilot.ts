@@ -9,12 +9,12 @@ import { ensurePositionGuardianLoop, registerPaperPosition } from "./position-ma
 import { acquireRuntimeLease, listManagedPositions } from "./position-store";
 import { loadLatestProfitability } from "./profitability-store";
 import { getProviderHealth } from "./provider-health";
-import { getRunnerGenomeGuidance, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
+import { getRunnerGenomeGuidance, getRunnerResearchCounts, getRunnerResearchSnapshot, ingestClosedPositions, markResearchTradeOpened, observeCouncilResult, observeResearchSnapshot, refreshOneResearchCase } from "./runner-research";
 import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
+import type { Chain, ExecutionRequest, ManagedPosition, MarketSnapshot, PortfolioRiskContext, PositionEntryContext, PositionThesis, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -184,8 +184,45 @@ function recordRejection(reason: string) {
   funnel.rejections[key] = (funnel.rejections[key] ?? 0) + 1;
 }
 
-function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): PositionEntryContext {
-  const initialAllocationPct = result.risk.maxPositionPct * (result.execution.allocationMultiplier ?? 1);
+/**
+ * Captures the Council's entry thesis plus the concrete conditions that would
+ * invalidate it ("what would change our mind"). The Guardian re-checks these
+ * against live snapshots and exits when the story breaks.
+ */
+function buildPositionThesis(result: WarRoomResult, snapshot: MarketSnapshot): PositionThesis {
+  const cio = result.independentCouncil?.cioOpinion;
+  const invalidators: PositionThesis["invalidators"] = [];
+  if (Number.isFinite(snapshot.liquidity) && snapshot.liquidity > 0) {
+    invalidators.push({
+      kind: "liquidity",
+      entryLiquidityUsd: snapshot.liquidity,
+      floorRatio: 0.4,
+      label: `liquidity drained below 40% of entry ($${Math.round(snapshot.liquidity * 0.4).toLocaleString("en-US")})`,
+    });
+  }
+  if (Number.isFinite(snapshot.top10Pct)) {
+    invalidators.push({
+      kind: "concentration",
+      entryTop10Pct: snapshot.top10Pct,
+      maxRisePts: 12,
+      label: `top-10 holder concentration rose 12+ pts from ${snapshot.top10Pct.toFixed(1)}% at entry`,
+    });
+  }
+  invalidators.push({
+    kind: "momentum",
+    minBuySellRatio: 0.9,
+    label: "buying pressure flipped (live buy/sell ratio under 0.90x)",
+  });
+  return {
+    summary: cio?.thesis ?? `${result.decision} at ${result.conviction}% conviction.`,
+    evidence: (cio?.evidence ?? []).slice(0, 3),
+    conviction: result.conviction,
+    decidedAt: new Date().toISOString(),
+    invalidators,
+  };
+}
+
+function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): PositionEntryContext {  const initialAllocationPct = result.risk.maxPositionPct * (result.execution.allocationMultiplier ?? 1);
   return {
     snapshot: result.snapshot,
     regime: result.regime,
@@ -279,6 +316,7 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
       exitStrategy: result.exitStrategy,
       entryContext: context,
       reentryCount,
+      thesis: buildPositionThesis(result, executionSnapshot),
     });
     await markResearchTradeOpened(result, fill.requestedUsd, false);
     state().buyCount += 1;
@@ -387,14 +425,14 @@ async function scanOneChain(chain: Chain) {
     getRunnerGenomeGuidance(snapshot),
   ]);
 
-  // These are the exact wallet constraints Team File Cabinet competed with.
-  // They replace the broad main-wallet training defaults for Council decisions.
+  // Paper kill switches: entries halt at -10% day, 50% total exposure,
+  // 30% per-chain exposure. These replace the old no-limit research posture.
   const fileCabinetPortfolio: PortfolioRiskContext = {
     ...portfolio,
-    maxDailyLossPct: 100,
+    maxDailyLossPct: 10,
     maxOpenPositions: FILE_CABINET_MAX_OPEN_POSITIONS,
-    maxTotalExposurePct: 100,
-    maxChainExposurePct: 100,
+    maxTotalExposurePct: 50,
+    maxChainExposurePct: 30,
     liveTradingEnabled: false,
   };
 
@@ -566,18 +604,24 @@ export function ensureAutonomousWarRoom() {
   addChat("System", `Team File Cabinet is promoted to the main paper wallet with its private learned memory intact. Three bounded scan lanes and all wallet utilities are active. Deterministic liquidity, honeypot, sellability, authority and Executor protections remain global.`, "system");
 }
 
-export async function getAutopilotStatus() {
+export async function getAutopilotStatus(light = false) {
   ensureAutonomousWarRoom();
   const bankroll = await ensurePaperWalletResearchFunds();
   const positions = await listManagedPositions();
   await ingestClosedPositions(positions);
   const resetMeta = await getPaperWalletResetMeta();
   const providers = [...getProviderHealth(), ...getWaterfallProviderHealth()];
-  const research = await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
+  // Light mode (dashboard): skip the expensive research analysis and trim the
+  // heavy arrays. The dashboard only needs the latest decision, the wallet,
+  // positions, counters, and four research scalars.
+  const research = light
+    ? await getRunnerResearchCounts()
+    : await getRunnerResearchSnapshot({ positions, providers, walletResetCount: resetMeta.resets });
   state().buyCount = bankroll.wallet.buyFills;
   state().funnel.paperBuys = bankroll.wallet.buyFills;
-  return {
-    ...state(),
+  const full = state();
+  const status = {
+    ...full,
     paperWallet: bankroll.wallet,
     paperWalletResetMeta: resetMeta,
     providers,
@@ -585,4 +629,10 @@ export async function getAutopilotStatus() {
     positions: positions.sort((a: ManagedPosition, b: ManagedPosition) => b.openedAt.localeCompare(a.openedAt)),
     generatedAt: new Date().toISOString(),
   };
+  if (light) {
+    status.recentDecisions = full.recentDecisions.slice(0, 1);
+    status.chat = [];
+    status.shadowBook = [];
+  }
+  return status;
 }

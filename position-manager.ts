@@ -12,7 +12,7 @@ import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance, recordRugAutopsy } from "./runner-research";
 import { auditPositionSellability, type SellabilityAudit } from "./sellability-auditor";
 import { confirmedSellabilityFailure } from "./security-evidence";
-import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
+import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, PositionThesis, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
@@ -101,7 +101,7 @@ function paperRequest(position: ManagedPosition, side: "BUY" | "SELL", notionalU
     symbol: position.symbol,
     side,
     notionalUsd: Math.max(0, notionalUsd),
-    maxSlippageBps: side === "BUY" ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : suffix === "EXIT" ? 9000 : Number(process.env.PAPER_PROFIT_TAKE_MAX_SLIPPAGE_BPS ?? 2000),
+    maxSlippageBps: side === "BUY" ? Number(process.env.PAPER_EARLY_RUNNER_MAX_SLIPPAGE_BPS ?? 600) : suffix === "EXIT" ? Number(process.env.PAPER_EXIT_MAX_SLIPPAGE_BPS ?? 2000) : Number(process.env.PAPER_PROFIT_TAKE_MAX_SLIPPAGE_BPS ?? 2000),
     strategyId: position.strategyId,
     decisionId: `${position.decisionId}-${suffix}`,
   };
@@ -172,8 +172,9 @@ export async function registerPaperPosition(args: {
   exitStrategy: ExitStrategy;
   entryContext?: PositionEntryContext;
   reentryCount?: number;
+  thesis?: PositionThesis;
 }): Promise<ManagedPosition | null> {
-  const { fill, request, snapshot, exitStrategy, entryContext } = args;
+  const { fill, request, snapshot, exitStrategy, entryContext, thesis } = args;
   if (fill.side !== "BUY") return null;
   const now = new Date().toISOString();
   const quantity = fill.filledUsd / Math.max(fill.fillPrice, 0.0000000001);
@@ -226,6 +227,7 @@ export async function registerPaperPosition(args: {
     exitStrategistReason: "Exit Strategist armed on entry.",
     exitStrategy: profitFirstExitStrategy(exitStrategy),
     entryContext,
+    thesis,
   };
   await saveManagedPosition(position);
   try {
@@ -269,8 +271,35 @@ function freshCouncil(position: ManagedPosition, snapshot: MarketSnapshot, portf
   });
 }
 
-export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext, exitGenome?: RunnerExitGenomeGuidance): ManagedPosition {
-  const position = normalizedPosition(positionInput);
+/**
+ * Thesis invalidation: checks the concrete "what would change our mind"
+ * conditions recorded at entry against the live snapshot. Returns the fired
+ * invalidator's label, or null when the thesis still holds. Positions opened
+ * before thesis tracking existed simply return null.
+ */
+function thesisInvalidation(position: ManagedPosition, snapshot: MarketSnapshot): string | null {
+  const invalidators = position.thesis?.invalidators;
+  if (!invalidators?.length) return null;
+  for (const invalidator of invalidators) {
+    if (invalidator.kind === "liquidity") {
+      if (Number.isFinite(snapshot.liquidity) && snapshot.liquidity < invalidator.entryLiquidityUsd * invalidator.floorRatio) {
+        return invalidator.label;
+      }
+    } else if (invalidator.kind === "concentration") {
+      if (Number.isFinite(snapshot.top10Pct) && snapshot.top10Pct > invalidator.entryTop10Pct + invalidator.maxRisePts) {
+        return invalidator.label;
+      }
+    } else if (invalidator.kind === "momentum") {
+      const live = Boolean(snapshot.dataProvenance?.live);
+      if (live && Number.isFinite(snapshot.buySellRatio) && snapshot.buySellRatio < invalidator.minBuySellRatio) {
+        return invalidator.label;
+      }
+    }
+  }
+  return null;
+}
+
+export function evaluatePosition(positionInput: ManagedPosition, snapshot: MarketSnapshot, portfolio?: PortfolioRiskContext, exitGenome?: RunnerExitGenomeGuidance): ManagedPosition {  const position = normalizedPosition(positionInput);
   const now = new Date().toISOString();
   const mark = snapshot.price;
   const highWater = Math.max(position.highWaterPrice, mark);
@@ -317,6 +346,7 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
 
   const genomeExitTriggered = exitGenome?.action === "EXIT";
   const strategistExitTriggered = exitStrategist.action === "EXIT";
+  const thesisBreak = thesisInvalidation(position, snapshot);
 
   if (securityTriggered || authorityTriggered || liquidityTriggered) {
     lastAction = "EXIT";
@@ -324,6 +354,10 @@ export function evaluatePosition(positionInput: ManagedPosition, snapshot: Marke
     lastReason = securityTriggered || authorityTriggered
       ? "Emergency exit: contract/security condition changed."
       : `Emergency exit: liquidity fell below $${Math.round(position.exitStrategy.liquidityFloorUsd).toLocaleString()} floor.`;
+  } else if (thesisBreak) {
+    lastAction = "EXIT";
+    status = "exit_pending";
+    lastReason = `Exit: entry thesis invalidated — ${thesisBreak}`;
   } else if (buyingPressureSlowed) {
     lastAction = "EXIT";
     status = "exit_pending";

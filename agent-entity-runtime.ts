@@ -579,12 +579,109 @@ function toAgentOpinion(opinion: IndependentEntityOpinion, color: string, shortN
   };
 }
 
-export async function runIndependentCouncil(snapshot: MarketSnapshot, options: CouncilOptions = {}): Promise<WarRoomResult> {
-  const mode = options.mode ?? "paper";
+/**
+ * Fast-path SKIP for tokens the deterministic gate already rejected. Builds a
+ * complete WarRoomResult without the private/meeting/CIO entity rounds — the
+ * outcome was forced, so deliberation would only burn time. Downstream
+ * consumers (journal, research observer, dashboard) see a normal SKIP with the
+ * block reason attached.
+ */
+function buildTriagedSkipResult(snapshot: MarketSnapshot, options: CouncilOptions, base: WarRoomResult): WarRoomResult {
+  const profile = options.teamProfile;
+  const sessionId = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  const at = new Date().toISOString();
+  const hardBlocks = Array.isArray(base.risk.hardBlocks) ? base.risk.hardBlocks : [];
+  const blockReason = !base.risk.passed
+    ? `Risk hard-block: ${hardBlocks.join("; ") || "deterministic veto"}`
+    : "Executor voted BLOCK on market feasibility";
+  const triageCio: IndependentEntityOpinion = {
+    agentId: "cio",
+    agentName: profile ? `${CIO_SPEC.name} · ${profile.teamName}` : CIO_SPEC.name,
+    phase: "cio",
+    vote: "SKIP",
+    confidence: 0,
+    score: 0,
+    thesis: `Fast-path verdict: ${blockReason}. Entity deliberation skipped — no agent round can overturn a deterministic block.`,
+    evidence: [],
+    risks: hardBlocks.slice(0, 3),
+    source: "local-engine",
+    formedAt: at,
+  };
+  const independentCouncil: IndependentCouncilTrace = {
+    sessionId,
+    teamId: profile?.teamId,
+    teamName: profile?.teamName,
+    memoryNamespace: profile?.memoryNamespace ?? "main",
+    mode: "independent-local",
+    agentModel: "local-specialist-engine",
+    cioModel: "local-runner-cio",
+    privateRoundStartedAt: at,
+    meetingRoundStartedAt: at,
+    completedAt: at,
+    initialOpinions: [],
+    meetingOpinions: [],
+    cioOpinion: triageCio,
+  };
+  const councilProcess = {
+    ...base.councilProcess,
+    researchSupport: 0,
+    requiredResearchSupport: 4,
+    cioVote: "SKIP" as const,
+    alignedBots: 1,
+    totalBots: 8 as const,
+    reasons: [
+      "Fast-path triage: deterministic gate already forced SKIP; the 7-entity deliberation was skipped.",
+      blockReason,
+    ],
+  };
+  const execution = buildExecutionPlan({
+    mode: options.mode ?? "paper",
+    snapshot,
+    decision: "SKIP",
+    conviction: 0,
+    risk: base.risk,
+    portfolio: options.portfolio!,
+    experiment: base.experiment,
+    decisionId: base.decisionId,
+    allocationMultiplier: 1,
+  });
+  const auditTrail = [
+    ...base.auditTrail.filter((line: string) =>
+      !line.startsWith("PRE-MEETING") && !line.startsWith("COUNCIL ") && !line.startsWith("COUNCIL QUORUM") &&
+      !line.startsWith("8-BOT PROCESS") && !line.startsWith("Debate adjustment") && !line.startsWith("CIO FINAL") &&
+      !line.startsWith("Executor:")),
+    `INDEPENDENT LOCAL COUNCIL · session ${sessionId}`,
+    `FAST-PATH TRIAGE · ${blockReason}`,
+    "Entity deliberation skipped: a deterministic block cannot be overturned by agent consensus.",
+    "CIO FINAL · SKIP · deterministic override",
+  ];
+  return {
+    ...base,
+    councilProcess,
+    preMeeting: [],
+    agents: [toAgentOpinion(triageCio, CIO_SPEC.color, CIO_SPEC.shortName)],
+    decision: "SKIP",
+    consensus: 0,
+    conviction: 0,
+    councilConviction: 0,
+    execution,
+    independentCouncil,
+    auditTrail,
+    reasoningCompletedAt: independentCouncil.completedAt,
+  };
+}
+
+export async function runIndependentCouncil(snapshot: MarketSnapshot, options: CouncilOptions = {}): Promise<WarRoomResult> {  const mode = options.mode ?? "paper";
 
   // Shared analytics calculate objective measurements only. Their old synthetic
   // role opinions are discarded; seven separate local entities form the Council.
   const base = runWarRoom(snapshot, options);
+  const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK";
+  // Fast-path triage: the deterministic risk gate and executor vote are
+  // ordinary code and always beat agent consensus (agent contract). When they
+  // already force SKIP, the entity rounds cannot change the outcome — return
+  // the verdict immediately instead of spending the deliberation.
+  if (deterministicBlocked) return buildTriagedSkipResult(snapshot, options, base);
   const portfolio = options.portfolio!;
   const packet = compactPacket(snapshot, base, portfolio);
   const sessionId = `LC-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -611,7 +708,6 @@ export async function runIndependentCouncil(snapshot: MarketSnapshot, options: C
 
   const cioOpinion = await thinkCio(packet, meetingOpinions, profile);
 
-  const deterministicBlocked = !base.risk.passed || base.councilProcess.executorVote === "BLOCK";
   const finalDecision = deterministicBlocked ? "SKIP" : cioOpinion.vote;
   const suggestedTradeUsd = boundedTradeUsd(
     meetingOpinions.find((o) => o.agentId === "portfolio")?.suggestedTradeUsd

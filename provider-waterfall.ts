@@ -287,8 +287,9 @@ async function bitquerySolanaFlow(snapshot: MarketSnapshot) {
 export async function enrichWithProviderWaterfall(snapshot: MarketSnapshot): Promise<MarketSnapshot> {
   if (!snapshot.dataProvenance) return snapshot;
   if (snapshot.chain === "Solana") {
-    await solanaRpcEnrichment(snapshot);
-    await Promise.all([moralisSolanaSignals(snapshot), bitquerySolanaFlow(snapshot)]);
+    // The three Solana enrichers hit independent APIs and write disjoint
+    // fields; run them as one wave instead of sequentially.
+    await Promise.all([solanaRpcEnrichment(snapshot), moralisSolanaSignals(snapshot), bitquerySolanaFlow(snapshot)]);
   } else {
     await moralisEvmHolders(snapshot);
   }

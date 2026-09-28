@@ -428,6 +428,8 @@ export type AgentMemoryRecord = {
   maxAdverseExcursionPct: number;
   reasoningOutcome: "supported" | "unsupported" | "unclear";
   lesson: string;
+  /** Trading-policy era this lesson belongs to; current-era lessons rank higher as hints. */
+  policyVersion: number;
   createdAt: string;
 };
 
@@ -462,6 +464,23 @@ export type PositionScaleFill = {
 
 export type PositionAction = "HOLD" | "SCALE_IN" | "TRIM" | "EXIT";
 export type PositionStatus = "open" | "exit_pending" | "exit_unverified" | "unsellable" | "closed";
+
+// Position thesis: what the Council believed at entry, plus the concrete
+// conditions that would invalidate it. The Guardian checks the invalidators
+// against live snapshots and exits when the story breaks — not just when a
+// mechanical stop trips.
+export type ThesisInvalidator =
+  | { kind: "liquidity"; entryLiquidityUsd: number; floorRatio: number; label: string }
+  | { kind: "concentration"; entryTop10Pct: number; maxRisePts: number; label: string }
+  | { kind: "momentum"; minBuySellRatio: number; label: string };
+
+export type PositionThesis = {
+  summary: string;
+  evidence: string[];
+  conviction: number;
+  decidedAt: string;
+  invalidators: ThesisInvalidator[];
+};
 
 export type ManagedPosition = {
   id: string;
@@ -529,6 +548,7 @@ export type ManagedPosition = {
   learningRecorded?: boolean;
   exitStrategy: ExitStrategy;
   entryContext?: PositionEntryContext;
+  thesis?: PositionThesis;
 };
 
 export type PositionGuardianReport = {
@@ -636,6 +656,13 @@ export type AgentPerformance = {
   directionalAccuracyPct: number;
   reasoningAccuracyPct: number;
   avgEdgePct: number;
+  /** Cumulative realized P&L in USD attributed to this agent's reads. */
+  totalPnlUsd: number;
+  /** Average realized P&L per observation in USD. */
+  avgPnlUsd: number;
+  /** Trading-policy era this row belongs to; rows from older eras are excluded from blending. */
+  policyVersion: number;
+  updatedAt: string;
   weight: number;
 };
 
