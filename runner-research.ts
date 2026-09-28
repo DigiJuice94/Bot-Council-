@@ -996,6 +996,25 @@ function dailyAutopsy(cases: CoinCaseFile[]) {
   return lines;
 }
 
+/**
+ * Cheap research counters for lightweight status reads (dashboard). Skips the
+ * expensive findings/median/trajectory analysis in getRunnerResearchSnapshot.
+ */
+export async function getRunnerResearchCounts(): Promise<{
+  casesStudied: number;
+  observations: number;
+  runnerCases: number;
+  dumperCases: number;
+}> {
+  const [cases, meta] = await Promise.all([allCases(), readMeta()]);
+  return {
+    casesStudied: cases.length,
+    observations: meta.observations,
+    runnerCases: cases.filter((row) => row.outcome === "runner").length,
+    dumperCases: cases.filter((row) => row.outcome === "dumper").length,
+  };
+}
+
 export async function getRunnerResearchSnapshot(args: {
   positions: ManagedPosition[];
   providers: Array<{ configured: boolean; ok: boolean }>;

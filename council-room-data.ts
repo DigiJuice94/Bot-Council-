@@ -515,20 +515,26 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
   };
 
   try {
-    // (a) Autopilot status — richest source: recent decisions, wallet, positions, research.
-    const autopilot = await getJson<AutopilotPayload>("/api/autopilot");
-    // (b) Cabinet main — decision history + accumulated research (fallback for the meeting).
-    // The deployed route is /api/cabinets/main (plural); /api/cabinet/main is the
-    // flat-tree alias kept for local prepare-structure checkouts.
-    const cabinet =
-      (await getJson<CabinetPayload>("/api/cabinets/main")) ??
-      (await getJson<CabinetPayload>("/api/cabinet/main"));
-    // (c) Journal fills — equity series from portfolioEquityAfterUsd.
-    const journal = await getJson<JournalPayload>("/api/journal?limit=500");
-    // (d) Positions light — fallback position list.
-    const positionsRoute = await getJson<Array<Record<string, unknown>> | { positions?: Array<Record<string, unknown>> }>("/api/positions?light=1");
-    // (e) Trade log — recent paper fills for the ledger section.
-    const tradeLog = await getJson<{ rows?: TradeLogRow[]; totalStored?: number }>("/api/trade-log?limit=100");
+    // All five endpoints are independent: fetch them in parallel (previously
+    // sequential, so load time was the SUM of all five). The dashboard only
+    // needs slices of the heavy endpoints, so request their light variants.
+    const [autopilot, cabinetPrimary, journal, positionsRoute, tradeLog] =
+      await Promise.all([
+        // (a) Autopilot status — richest source: recent decisions, wallet, positions, research.
+        getJson<AutopilotPayload>("/api/autopilot?light=1"),
+        // (b) Cabinet main — decision history + accumulated research (fallback for the meeting).
+        // The deployed route is /api/cabinets/main (plural); /api/cabinet/main is the
+        // flat-tree alias kept for local prepare-structure checkouts.
+        getJson<CabinetPayload>("/api/cabinets/main?limit=1"),
+        // (c) Journal fills — equity series from portfolioEquityAfterUsd.
+        getJson<JournalPayload>("/api/journal?limit=500"),
+        // (d) Positions light — fallback position list.
+        getJson<Array<Record<string, unknown>> | { positions?: Array<Record<string, unknown>> }>("/api/positions?light=1"),
+        // (e) Trade log — recent paper fills for the ledger section.
+        getJson<{ rows?: TradeLogRow[]; totalStored?: number }>("/api/trade-log?limit=100"),
+      ]);
+    // Cabinet singular alias fallback (kept for local checkouts).
+    const cabinet = cabinetPrimary ?? (await getJson<CabinetPayload>("/api/cabinet/main?limit=1"));
 
     const walletRaw: Record<string, unknown> | undefined =
       (autopilot?.paperWallet as Record<string, unknown> | undefined) ?? undefined;

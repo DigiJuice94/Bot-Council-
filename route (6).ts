@@ -10,8 +10,11 @@ export const dynamic = "force-dynamic";
 // council decisions, open positions, research snapshot. Never throws shaped
 // data the dashboard can't parse: this is the AutopilotStatus contract the
 // War Room dashboard has consumed since V2.
-export async function GET() {
-  const status = await getAutopilotStatus();
+export async function GET(request: NextRequest) {
+  // ?light=1 — dashboard path: skips the expensive research analysis and trims
+  // heavy arrays (recent decisions, chat, shadow book). Full status otherwise.
+  const light = request.nextUrl.searchParams.get("light") === "1";
+  const status = await getAutopilotStatus(light);
   return NextResponse.json(status, { headers: { "Cache-Control": "no-store" } });
 }
 

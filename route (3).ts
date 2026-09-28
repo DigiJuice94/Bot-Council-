@@ -7,9 +7,21 @@ export const dynamic = "force-dynamic";
 // GET — position reads. ?light=1 is the dashboard's lightweight path: it
 // returns { positions } without waiting on the heavier guardian refresh, so
 // research/status generation can never hold back visible position updates.
+// Light mode also trims each position to the fields the dashboard renders.
 export async function GET(request: Request) {
   if (new URL(request.url).searchParams.get("light") === "1") {
-    return NextResponse.json({ positions: await listManagedPositions(), generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
+    const rows = (await listManagedPositions()).map((position) => ({
+      id: position.id,
+      symbol: position.symbol,
+      chain: position.chain,
+      entryPrice: position.entryPrice,
+      markPrice: position.markPrice,
+      remainingQuantity: position.remainingQuantity,
+      remainingNotionalUsd: position.remainingNotionalUsd,
+      pnlPct: position.pnlPct,
+      openedAt: position.openedAt,
+    }));
+    return NextResponse.json({ positions: rows, generatedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
   }
   ensurePositionGuardianLoop();
   const report = await refreshPositionGuardian();
