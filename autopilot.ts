@@ -14,7 +14,7 @@ import { maybeDispatchLiveTrade } from "./live-gate";
 import { auditEntryLiquidity } from "./liquidity-auditor";
 import { classifyMarketRegime } from "./regime";
 import { appendDecisionJournal } from "./trade-journal";
-import type { Chain, ExecutionRequest, ManagedPosition, PortfolioRiskContext, PositionEntryContext, WarRoomResult } from "./types";
+import type { Chain, ExecutionRequest, ManagedPosition, MarketSnapshot, PortfolioRiskContext, PositionEntryContext, PositionThesis, WarRoomResult } from "./types";
 
 const CHAINS: Chain[] = ["Solana", "Ethereum", "Base", "BNB Chain", "Monad", "HyperEVM", "Robinhood Chain"];
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -184,8 +184,45 @@ function recordRejection(reason: string) {
   funnel.rejections[key] = (funnel.rejections[key] ?? 0) + 1;
 }
 
-function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): PositionEntryContext {
-  const initialAllocationPct = result.risk.maxPositionPct * (result.execution.allocationMultiplier ?? 1);
+/**
+ * Captures the Council's entry thesis plus the concrete conditions that would
+ * invalidate it ("what would change our mind"). The Guardian re-checks these
+ * against live snapshots and exits when the story breaks.
+ */
+function buildPositionThesis(result: WarRoomResult, snapshot: MarketSnapshot): PositionThesis {
+  const cio = result.independentCouncil?.cioOpinion;
+  const invalidators: PositionThesis["invalidators"] = [];
+  if (Number.isFinite(snapshot.liquidity) && snapshot.liquidity > 0) {
+    invalidators.push({
+      kind: "liquidity",
+      entryLiquidityUsd: snapshot.liquidity,
+      floorRatio: 0.4,
+      label: `liquidity drained below 40% of entry ($${Math.round(snapshot.liquidity * 0.4).toLocaleString("en-US")})`,
+    });
+  }
+  if (Number.isFinite(snapshot.top10Pct)) {
+    invalidators.push({
+      kind: "concentration",
+      entryTop10Pct: snapshot.top10Pct,
+      maxRisePts: 12,
+      label: `top-10 holder concentration rose 12+ pts from ${snapshot.top10Pct.toFixed(1)}% at entry`,
+    });
+  }
+  invalidators.push({
+    kind: "momentum",
+    minBuySellRatio: 0.9,
+    label: "buying pressure flipped (live buy/sell ratio under 0.90x)",
+  });
+  return {
+    summary: cio?.thesis ?? `${result.decision} at ${result.conviction}% conviction.`,
+    evidence: (cio?.evidence ?? []).slice(0, 3),
+    conviction: result.conviction,
+    decidedAt: new Date().toISOString(),
+    invalidators,
+  };
+}
+
+function entryContext(result: WarRoomResult, portfolio: PortfolioRiskContext): PositionEntryContext {  const initialAllocationPct = result.risk.maxPositionPct * (result.execution.allocationMultiplier ?? 1);
   return {
     snapshot: result.snapshot,
     regime: result.regime,
@@ -279,6 +316,7 @@ async function executeRequest(result: WarRoomResult, portfolio: PortfolioRiskCon
       exitStrategy: result.exitStrategy,
       entryContext: context,
       reentryCount,
+      thesis: buildPositionThesis(result, executionSnapshot),
     });
     await markResearchTradeOpened(result, fill.requestedUsd, false);
     state().buyCount += 1;
