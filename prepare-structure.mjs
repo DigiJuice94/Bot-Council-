@@ -83,6 +83,7 @@ const mappings = [
   ['exit-strategy.ts', 'lib/exit-strategy.ts'],
   ['learning.ts', 'lib/learning.ts'],
   ['market-data.ts', 'lib/market-data.ts'],
+  ['evm-marks.ts', 'lib/evm-marks.ts'],
   ['paper-wallet.ts', 'lib/paper-wallet.ts'],
   ['provider-health.ts', 'lib/provider-health.ts'],
   ['route-feasibility.ts', 'lib/route-feasibility.ts'],

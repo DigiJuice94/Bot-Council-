@@ -99,6 +99,13 @@ export type MarketSnapshot = {
   holderGrowthPct?: number;
   liquidityChangePct?: number;
   marketCapChange5mPct?: number;
+  // v15 entry-filter telemetry (DexScreener study). All optional: filters degrade
+  // gracefully when a field is absent (unknown => no block, except where noted).
+  priceChange5mPct?: number; // 5-minute price change % (F1 momentum veto)
+  priceChange1hPct?: number; // 1-hour price change % (F2 chase cap)
+  m5Buys?: number; // 5-minute buy transaction count (F4 size overlay, F5 newborn rule)
+  m5Sells?: number; // 5-minute sell transaction count (F4 size overlay, F5 newborn rule)
+  liquidityReported?: boolean; // false when the venue did not report a liquidity USD figure (F3 veto)
   context?: MarketContext;
   assetClass?: "meme" | "standard" | "unknown";
   launchMetrics?: LaunchMetrics;

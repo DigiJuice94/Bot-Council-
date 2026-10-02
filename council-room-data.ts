@@ -508,7 +508,7 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
     tradesTotal: null,
     portfolio: { cashUsd: null, equityUsd: null, openExposureUsd: null, positions: [] },
     bots: [],
-    wallet: { equityUsd: null, cashUsd: null, realizedPnlUsd: null, unrealizedPnlUsd: null },
+    wallet: { equityUsd: null, cashUsd: null, realizedPnlUsd: null, unrealizedPnlUsd: null, unverifiedReservedCostUsd: null },
     stats: [],
     equitySeries: [],
     statusNote: "All endpoints unavailable — showing empty state.",
@@ -571,12 +571,14 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
     }
 
     // ---- Wallet P&L. PaperWalletSnapshot fields: cashUsd, equityUsd,
-    // realizedPnlUsd, unrealizedPnlUsd (verified in lib/paper-wallet.ts).
+    // realizedPnlUsd, unrealizedPnlUsd, unverifiedReservedCostUsd
+    // (verified in lib/paper-wallet.ts).
     // Defensive alternates (cash/equity) in case an endpoint reshapes the wallet.
     const equityUsd = num(walletRaw?.equityUsd ?? walletRaw?.equity);
     const cashUsd = num(walletRaw?.cashUsd ?? walletRaw?.cash);
     let realizedPnlUsd = num(walletRaw?.realizedPnlUsd);
     let unrealizedPnlUsd = num(walletRaw?.unrealizedPnlUsd);
+    const unverifiedReservedCostUsd = num(walletRaw?.unverifiedReservedCostUsd);
     if (unrealizedPnlUsd == null && positions.length) {
       // Fallback: sum mark value minus remaining cost across open positions.
       let sum = 0;
@@ -677,7 +679,7 @@ export async function fetchCouncilRoomData(): Promise<CouncilRoomData> {
       tradesTotal,
       portfolio,
       bots,
-      wallet: { equityUsd, cashUsd, realizedPnlUsd, unrealizedPnlUsd },
+      wallet: { equityUsd, cashUsd, realizedPnlUsd, unrealizedPnlUsd, unverifiedReservedCostUsd },
       stats,
       equitySeries,
       statusNote,

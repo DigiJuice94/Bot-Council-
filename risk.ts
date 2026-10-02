@@ -1,5 +1,34 @@
 import type { MarketSnapshot, PortfolioRiskContext, RiskCheck } from "./types";
 
+// ---------------------------------------------------------------------------
+// v15 entry filters (DexScreener runner-vs-dumper study, 2026-09-29).
+// Per-token entry conditions evaluated in the deterministic risk gate. Hard
+// blocks beat agent consensus and surface through the v13 fast-path triage as
+// complete SKIP verdicts with the reason in chat. These are NOT regime gates
+// and NOT loss-streak cooldowns. All thresholds live in this one config object.
+// ---------------------------------------------------------------------------
+export const ENTRY_FILTERS = {
+  MOMENTUM_VETO_PC_M5: -5, // F1: SKIP when 5-min price change < -5% (unknown => no block)
+  CHASE_CAP_PC_H1: 50, // F2: SKIP when 1-hour price change >= +50% (unknown => no block)
+  MIN_LIQ_USD: 10_000, // F3: entry liquidity floor; unreported liquidity is always vetoed
+  BUY_PRESSURE_RATIO: 2.0, // F4/F5: m5 buy/sell ratio threshold
+  NEWBORN_AGE_MIN: 60, // F5: pair age (minutes) below which the full filter pass is required
+} as const;
+
+/** m5 buy/sell ratio when the venue reported m5 transactions; undefined when unknown. */
+export function m5BuySellRatio(m: MarketSnapshot): number | undefined {
+  const buys = m.m5Buys;
+  const sells = m.m5Sells;
+  if (buys === undefined || sells === undefined) return undefined;
+  if (!(buys + sells > 0)) return undefined; // no m5 transactions observed: unknown, not weak
+  if (sells <= 0) return buys > 0 ? Number.POSITIVE_INFINITY : undefined;
+  return buys / sells;
+}
+
+function fmtRatio(r: number): string {
+  return r === Number.POSITIVE_INFINITY ? "∞" : r.toFixed(2);
+}
+
 export const DEFAULT_RISK_CONTEXT: PortfolioRiskContext = {
   equityUsd: 1_000,
   cashUsd: 1_000,
@@ -26,6 +55,20 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   const paperResearchMode = !p.liveTradingEnabled;
   const earlyRunnerLane = !p.liveTradingEnabled && m.marketCap >= 8_000 && m.marketCap <= 80_000 && m.ageMinutes <= 1_440;
   const unknown = (message: string) => paperCanExploreUnknowns ? warnings.push(`${message}; PAPER mode reduced to exploration sizing`) : hardBlocks.push(message);
+
+  // ---- v15 entry filters F1/F2 (F3/F5 follow at the liquidity check below) ----
+  // F1: 5-minute momentum veto. Prefer the explicit 5m price-change field; fall
+  // back to the 5m mcap-change proxy the engine already tracks. Unknown => no block.
+  const pcM5 = m.priceChange5mPct ?? m.marketCapChange5mPct;
+  const f1Veto = pcM5 !== undefined && pcM5 < ENTRY_FILTERS.MOMENTUM_VETO_PC_M5;
+  if (f1Veto) hardBlocks.push(`5-min momentum veto: pcM5 ${pcM5.toFixed(1)}% < ${ENTRY_FILTERS.MOMENTUM_VETO_PC_M5}%`);
+  else if (pcM5 !== undefined) passedChecks.push("5-min momentum veto passed");
+
+  // F2: hourly chase cap. Unknown pcH1 => no block.
+  const pcH1 = m.priceChange1hPct;
+  const f2Veto = pcH1 !== undefined && pcH1 >= ENTRY_FILTERS.CHASE_CAP_PC_H1;
+  if (f2Veto) hardBlocks.push(`chasing extended move: pcH1 ${pcH1.toFixed(1)}% ≥ +${ENTRY_FILTERS.CHASE_CAP_PC_H1}%`);
+  else if (pcH1 !== undefined) passedChecks.push("Hourly chase cap passed");
 
   if (directLive && q) {
     if (!q.sellability) unknown("Sellability verification unavailable from live security provider");
@@ -75,20 +118,53 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
     if (!m.liquidityLocked) warnings.push("Liquidity lock/burn not verified");
   }
 
-  if (earlyRunnerLane) {
-    // Early runners are intentionally tiny. Do not demand mature-token liquidity;
-    // require a real pool, then let order-size/slippage feasibility decide the $50+ paper order.
-    check(m.liquidity >= Math.max(500, Number(process.env.PAPER_EARLY_RUNNER_ABSOLUTE_MIN_LIQUIDITY_USD ?? 1_000)), "Early-runner pool has executable liquidity", "Early-runner pool liquidity is too small to model a real exit");
-    if (m.liquidity < 5_000) warnings.push("Very thin early-runner liquidity; route/slippage model must prove the order executable");
+  // ---- v15 entry filters F3/F5 ----
+  // F3: liquidity floor. Unreported liquidity is always a veto. Otherwise the
+  // effective floor is max(v9 floor, $10k): early-runner $5k -> $10k, standard $25k stays.
+  const liqMissing = m.liquidityReported === false;
+  const v9LiqFloor = earlyRunnerLane
+    ? Math.max(5_000, Number(process.env.PAPER_EARLY_RUNNER_ABSOLUTE_MIN_LIQUIDITY_USD ?? 5_000))
+    : 25_000;
+  const liqFloor = Math.max(v9LiqFloor, ENTRY_FILTERS.MIN_LIQ_USD);
+  const f3Veto = liqMissing || m.liquidity < liqFloor;
+  if (liqMissing) {
+    hardBlocks.push("liquidity unreported — veto");
   } else {
-    check(m.liquidity >= 15_000, "Executable liquidity above minimum", "Executable liquidity below minimum");
+    check(
+      m.liquidity >= liqFloor,
+      `Liquidity above $${liqFloor.toLocaleString()} entry floor`,
+      `Liquidity below $${liqFloor.toLocaleString()} entry floor`,
+    );
+  }
+
+  // F5: newborn rule. Age is generally available (snapshotFromPair floors at 1
+  // minute), so a non-positive age is treated as unknown => newborn-strict.
+  // Newborns must pass F1/F2/F3 clean AND show known m5 buy pressure >= 2.0x.
+  const m5ratio = m5BuySellRatio(m);
+  const ageUnknown = !(m.ageMinutes > 0);
+  const newborn = ageUnknown || m.ageMinutes < ENTRY_FILTERS.NEWBORN_AGE_MIN;
+  if (newborn) {
+    const pressureOk = m5ratio !== undefined && m5ratio >= ENTRY_FILTERS.BUY_PRESSURE_RATIO;
+    if (!f1Veto && !f2Veto && !f3Veto && pressureOk) {
+      passedChecks.push("Newborn full filter pass (momentum/chase/liquidity clean, m5 buy pressure ≥ 2.0x)");
+    } else {
+      const failing: string[] = [];
+      if (f1Veto) failing.push("5m momentum");
+      if (f2Veto) failing.push("hourly chase");
+      if (f3Veto) failing.push("liquidity");
+      if (!pressureOk) failing.push(`m5 buy pressure ≥ ${ENTRY_FILTERS.BUY_PRESSURE_RATIO.toFixed(1)}x`);
+      hardBlocks.push(`newborn requires full filter pass — failing: ${failing.join(", ")}`);
+    }
   }
   if (paperResearchMode) {
-    passedChecks.push("Paper Runner Lab has NO daily-loss kill switch");
-    passedChecks.push("Paper Runner Lab has NO max-open-position kill switch");
-    passedChecks.push("Paper Runner Lab has NO portfolio-exposure kill switch");
-    passedChecks.push("Paper Runner Lab has NO chain-exposure kill switch");
-    passedChecks.push("Actual paper-wallet cash is the only portfolio capital boundary");
+    // Paper kill switches are enforced: new entries halt when the day's loss
+    // reaches maxDailyLossPct, when open positions reach maxOpenPositions, or
+    // when total/chain exposure reach their caps. The wallet day rollover
+    // resets the daily-loss switch. Cash alone is no longer the only boundary.
+    check(p.dailyPnlPct > -p.maxDailyLossPct, "Paper daily loss limit available", "Paper daily-loss kill-switch triggered");
+    check(p.openPositions < p.maxOpenPositions, "Paper open-position capacity available", "Paper maximum open positions reached");
+    check(p.totalExposurePct < p.maxTotalExposurePct, "Paper portfolio exposure below cap", "Paper maximum portfolio exposure reached");
+    check(p.chainExposurePct < p.maxChainExposurePct, "Paper chain exposure below cap", "Paper maximum chain exposure reached");
   } else {
     check(p.dailyPnlPct > -p.maxDailyLossPct, "Live daily loss limit available", "Live daily loss kill-switch triggered");
     check(p.openPositions < p.maxOpenPositions, "Live open-position capacity available", "Live maximum open positions reached");
@@ -103,12 +179,39 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
   if (m.ageMinutes < 5) warnings.push("Token is under five minutes old");
   if ((q?.taxes ?? true) && (m.buyTaxPct > 5 || m.sellTaxPct > 5)) warnings.push("Token taxes are elevated");
 
-  // V2.17: paper research can take materially larger positions so wins/losses
-  // teach the Runner Genome with meaningful portfolio impact. Live remains conservative.
+  // Paper research sizing is capped tighter than the old V2.17 Runner Lab
+  // posture: oversized early-runner entries into thin pools were the dominant
+  // paper loss mechanism. Live remains conservative.
   const paperMode = !p.liveTradingEnabled;
-  const configuredPaperMax = Math.max(1, Math.min(12, Number(process.env.PAPER_MAX_POSITION_PCT ?? 7.5)));
+  const configuredPaperMax = Math.max(1, Math.min(12, Number(process.env.PAPER_MAX_POSITION_PCT ?? 3)));
   const configuredLiveMax = Math.max(0.25, Math.min(5, Number(process.env.LIVE_MAX_POSITION_PCT ?? 2)));
   let maxPositionPct = paperMode ? configuredPaperMax : configuredLiveMax;
+
+  // F4: buy-pressure size overlay. m5 ratio >= 2.0x => full computed size;
+  // known-but-weak => halve BEFORE the v9 caps below apply. Absent m5 data =>
+  // neutral (no halving): the overlay must not punish tokens whose venue simply
+  // does not report m5 transactions.
+  if (m5ratio !== undefined) {
+    if (m5ratio >= ENTRY_FILTERS.BUY_PRESSURE_RATIO) {
+      passedChecks.push(`m5 buy pressure ${fmtRatio(m5ratio)}x ≥ 2.0x — full size`);
+    } else {
+      maxPositionPct = maxPositionPct / 2;
+      warnings.push(`Weak m5 buy pressure (${fmtRatio(m5ratio)}x < 2.0x) — entry size halved before caps`);
+    }
+  } else {
+    passedChecks.push("m5 buy-pressure overlay neutral — no m5 txn data at decision point");
+  }
+
+  // Fail-closed entry sizing: buy-route verification only exists for Solana
+  // (Jupiter/0x). On other chains the entry route is never independently
+  // verified, and newborn tokens (age <= 60m) are the population that produced
+  // every dead paper position. Cap both to a small per-position size instead
+  // of a hard ban so paper research can still observe them; the portfolio and
+  // chain exposure kill switches above bound the total bucket.
+  const routeUnverified = m.chainFamily !== "solana";
+  const newbornToken = m.ageMinutes <= 60;
+  if (routeUnverified) warnings.push("Buy route is not independently verifiable on this chain; entry size capped");
+  if (newbornToken) warnings.push("Newborn token (age <= 60m); entry size capped");
 
   if (paperMode) {
     if (warnings.length >= 1) maxPositionPct = Math.min(maxPositionPct, 5);
@@ -117,6 +220,7 @@ export function runHardRiskChecks(m: MarketSnapshot, p: PortfolioRiskContext = D
     if (directLive && q && (!q.top10 || !q.bundled || !q.socialVelocity || !q.smartMoney)) maxPositionPct = Math.min(maxPositionPct, 2.5);
     if (directLive && q && (!q.sellability || !q.honeypot || (m.chainFamily === "solana" && !q.authorities))) maxPositionPct = Math.min(maxPositionPct, 1);
     if (!earlyRunnerLane && m.liquidity < 50_000) maxPositionPct = Math.min(maxPositionPct, 2);
+    if (routeUnverified || newbornToken) maxPositionPct = Math.min(maxPositionPct, Number(process.env.PAPER_UNVERIFIED_NEWBORN_MAX_PCT ?? 1));
   } else {
     if (warnings.length >= 1) maxPositionPct = Math.min(maxPositionPct, 1.25);
     if (warnings.length >= 2) maxPositionPct = Math.min(maxPositionPct, 0.75);

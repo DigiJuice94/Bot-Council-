@@ -1191,6 +1191,11 @@ function PnlSection({ wallet }: { wallet: CouncilRoomData["wallet"] }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  // At-risk reserve: exit-unverified positions carried at cost inside equity.
+  // Shown only when the endpoint reports a positive reserve — never invented.
+  const reserve = wallet.unverifiedReservedCostUsd;
+  const showReserve = reserve != null && reserve > 0;
+  const equityExReserve = showReserve && wallet.equityUsd != null ? wallet.equityUsd - reserve : null;
 
   const doReset = async () => {
     setBusy(true);
@@ -1284,6 +1289,27 @@ function PnlSection({ wallet }: { wallet: CouncilRoomData["wallet"] }) {
             <span className="figure-sub">Open marks</span>
           </div>
         </div>
+        {showReserve && (
+          <div className="pnl-reserve">
+            <div className="pnl-reserve-row">
+              <span className="figure-label">At-risk reserve</span>
+              <span className="pnl-reserve-value">
+                <CountUp value={reserve as number} />
+              </span>
+            </div>
+            <p className="pnl-reserve-note">
+              Exits unverified — carried at cost, not recoverable until proven.
+            </p>
+            {equityExReserve != null && (
+              <div className="pnl-reserve-row">
+                <span className="figure-label">Equity ex-reserve</span>
+                <span className="pnl-reserve-value">
+                  <CountUp value={equityExReserve} />
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

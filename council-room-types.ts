@@ -104,6 +104,7 @@ export type CouncilRoomData = {
     cashUsd: number | null;
     realizedPnlUsd: number | null;
     unrealizedPnlUsd: number | null;
+    unverifiedReservedCostUsd: number | null;
   };
   stats: { label: string; value: string }[];
   equitySeries: number[];
@@ -123,6 +124,7 @@ export const EMPTY_DATA: CouncilRoomData = {
     cashUsd: null,
     realizedPnlUsd: null,
     unrealizedPnlUsd: null,
+    unverifiedReservedCostUsd: null,
   },
   stats: [],
   equitySeries: [],

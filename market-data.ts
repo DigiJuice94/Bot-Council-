@@ -1,4 +1,5 @@
 import { markProviderFailure, markProviderSuccess } from "./provider-health";
+import { fetchEvmMarkPair, getEvmMarkPair, isEvmMarkChain } from "./evm-marks";
 import type { Chain, DataQuality, HistoricalFrame, ManagedPosition, MarketSnapshot } from "./types";
 
 const DEX_BASE = "https://api.dexscreener.com";
@@ -702,6 +703,13 @@ function snapshotFromPair(chain: Chain, pair: DexPair, security: SecurityResult,
     mintAuthority: security.mintAuthority ?? false, freezeAuthority: security.freezeAuthority ?? false,
     ownershipRenounced: security.ownershipRenounced ?? false, proxyContract: security.proxyContract ?? false, tokenDecimals: security.tokenDecimals,
     volumeAccelerationPct, marketCapChange5mPct: priceChangeBucket(pair, "m5"),
+    // v15 entry-filter telemetry: explicit 5m/1h price changes, m5 txn counts,
+    // and whether the venue actually reported a liquidity USD figure.
+    priceChange5mPct: optionalNum(pair.priceChange?.["m5"]),
+    priceChange1hPct: optionalNum(pair.priceChange?.["h1"]),
+    m5Buys: optionalNum(m5.buys),
+    m5Sells: optionalNum(m5.sells),
+    liquidityReported: pair.liquidity?.usd !== undefined && pair.liquidity?.usd !== null && Number.isFinite(Number(pair.liquidity.usd)),
     assetClass: inferredAssetClass(pair, chain, ageMinutes, marketCap, volume24h),
     launchMetrics: {
       holdersPerMinute: q.holders && holders > 0 && ageMinutes <= 1440 ? holders / Math.max(1, ageMinutes) : undefined,
@@ -777,6 +785,32 @@ export async function fetchLivePositionSnapshot(position: ManagedPosition): Prom
     } catch {
       // Position management must remain operational when the optional adapter
       // is down. Fall through to the existing direct DEX lookup below.
+    }
+  }
+  if (isEvmMarkChain(position.chain)) {
+    // v16: batched EVM mark feed first for non-Solana chains — cheap, cached,
+    // and the only path that keeps EVM marks alive when the per-position pair
+    // lookup is rate-limited or returns nothing. The Guardian prewarms this
+    // cache once per cycle (one batched request per chain).
+    // Solana never reaches this branch: its existing providers stay primary.
+    const markPair = getEvmMarkPair(position.chain, position.tokenAddress)
+      ?? await fetchEvmMarkPair(position.chain, position.tokenAddress);
+    if (markPair) {
+      // emptySecurity(): mark-only snapshot. Security evidence is unverified
+      // on this path, so confirmedSellabilityFailure() stays false and the
+      // Guardian can never write a position off from mark data alone.
+      const markSnapshot = snapshotFromPair(position.chain, markPair, emptySecurity(), "dexscreener", position.imageUrl);
+      if (markSnapshot) {
+        const provenance = markSnapshot.dataProvenance;
+        if (provenance && Array.isArray(provenance.notes)) {
+          provenance.notes.push(
+            "v16 EVM mark feed: batched DexScreener price/liquidity refresh; security evidence unverified on this path — marks only, no execution signal invented."
+          );
+        }
+        return markSnapshot;
+      }
+      // Feed had a pair but no usable mark (e.g. zero liquidity): fall through
+      // to the full path. A null result keeps the last known mark — never $0.
     }
   }
   const pairs = await dexPairsForToken(position.chain, position.tokenAddress);

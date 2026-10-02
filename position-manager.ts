@@ -2,6 +2,7 @@ import { runWarRoom } from "./engine";
 import { executePaper } from "./execution";
 import { fetchLivePositionSnapshot } from "./market-data";
 import { markOverduePositionExitPending, parkUnverifiedExit } from "./position-lifecycle";
+import { prewarmEvmMarks } from "./evm-marks";
 import { applyPaperFillToWallet, canAffordPaperBuy, getPaperPortfolioContext } from "./paper-wallet";
 import { appendFillJournal } from "./trade-journal";
 import { effectiveGuardianControls, confirmationScore, determineWinnerState, maxGrossExposurePct, nextScaleStep, SCALE_STEPS } from "./position-policy";
@@ -12,7 +13,7 @@ import { entryLiquidityExitFloor } from "./exit-strategy";
 import { getRunnerExitGuidance, recordRugAutopsy } from "./runner-research";
 import { auditPositionSellability, type SellabilityAudit } from "./sellability-auditor";
 import { confirmedSellabilityFailure } from "./security-evidence";
-import type { ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, PositionThesis, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
+import type { Chain, ExecutionRequest, ExitLevel, ExitStrategy, ManagedPosition, MarketSnapshot, PaperFill, PortfolioRiskContext, PositionAction, PositionEntryContext, PositionGuardianReport, PositionThesis, RunnerExitGenomeGuidance, WarRoomResult } from "./types";
 
 const safe = (n: number | undefined, fallback = 0) => Number.isFinite(n) ? Number(n) : fallback;
 const FAVORABLE_REENTRY = new Set(["meme_expansion", "new_chain_mania", "risk_on_trend"]);
@@ -728,6 +729,26 @@ export async function refreshPositionGuardian(): Promise<PositionGuardianReport>
   const positions = [...active, ...recovery].map(normalizedPosition);
   const refreshed: ManagedPosition[] = [];
   let staleCount = 0;
+  // v16: prewarm the batched EVM mark feed once per Guardian cycle so every
+  // non-Solana position refresh gets a cheap cached mark (one DexScreener
+  // request per chain, up to 30 tokens each) instead of one pair lookup per
+  // position. Solana positions are unaffected.
+  try {
+    const evmByChain = new Map<string, string[]>();
+    for (const position of [...active, ...recovery]) {
+      if (position.chain === "Solana") continue;
+      const address = String(position.tokenAddress ?? "").trim();
+      if (address.length < 8) continue;
+      const list = evmByChain.get(position.chain) ?? [];
+      list.push(address);
+      evmByChain.set(position.chain, list);
+    }
+    for (const [chain, addresses] of evmByChain) {
+      await prewarmEvmMarks(chain as Chain, addresses).catch(() => {});
+    }
+  } catch {
+    // Mark prewarm is best-effort; the per-position refresh below still works.
+  }
   try {
     for (const position of positions) {
       let next = position;

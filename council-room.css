@@ -1072,6 +1072,34 @@
   color: var(--faint);
 }
 
+/* At-risk reserve (Paper P&L): exit-unverified cost carried inside equity. */
+.council-room .pnl-reserve {
+  margin-top: 14px;
+  padding: 12px 18px 6px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.council-room .pnl-reserve-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.council-room .pnl-reserve-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.council-room .pnl-reserve-note {
+  font-size: 12px;
+  color: var(--faint);
+  margin: 2px 0 8px;
+}
+
 /* -------------------------------- chart ------------------------------- */
 
 .council-room .chart-panel {
